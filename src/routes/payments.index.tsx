@@ -1,0 +1,257 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
+import { Pencil, Plus, Search, Trash2 } from "@/lib/icons";
+import { toast } from "sonner";
+import { useLedger } from "@/lib/ledger/store";
+import { formatDate, formatMoney, round2 } from "@/lib/ledger/calc";
+import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
+import { PaymentDialog } from "@/components/app/PaymentDialog";
+import { ConfirmDialog } from "@/components/app/ConfirmDialog";
+import { RequireView } from "@/components/app/RequireView";
+import { usePermissions } from "@/lib/ledger/permissions";
+import { SummaryCard } from "@/components/app/SummaryCard";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { Payment } from "@/lib/ledger/types";
+
+export const Route = createFileRoute("/payments/")({
+  head: () => ({
+    meta: [
+      { title: "Payments — LedgerFlow" },
+      {
+        name: "description",
+        content: "Record and review GBP payments by bank transfer, cash, payroll or other methods.",
+      },
+      { property: "og:title", content: "Payments — LedgerFlow" },
+      {
+        property: "og:description",
+        content: "Payment register that updates invoice outstanding balances instantly.",
+      },
+    ],
+  }),
+  component: PaymentsPage,
+});
+
+function PaymentsPage() {
+  return (
+    <RequireView module="payments">
+      <PaymentsPageContent />
+    </RequireView>
+  );
+}
+
+function PaymentsPageContent() {
+  const { data, invoiceViews, deletePayment } = useLedger();
+  const { can } = usePermissions();
+  const [query, setQuery] = useState("");
+  const [clientId, setClientId] = useState("all");
+  const [method, setMethod] = useState("all");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Payment | null>(null);
+  const [toDelete, setToDelete] = useState<Payment | null>(null);
+
+  const rows = useMemo(() => {
+    const byInvoice = new Map(invoiceViews.map((i) => [i.id, i]));
+    const byClient = new Map(data.clients.map((c) => [c.id, c]));
+    const q = query.trim().toLowerCase();
+    return [...data.payments]
+      .map((p) => ({
+        payment: p,
+        invoice: byInvoice.get(p.invoiceId),
+        client: byClient.get(p.clientId),
+      }))
+      .filter((r) => (clientId === "all" ? true : r.payment.clientId === clientId))
+      .filter((r) => (method === "all" ? true : r.payment.method === method))
+      .filter((r) =>
+        q
+          ? `${r.payment.reference} ${r.invoice?.number ?? ""} ${r.client?.company ?? ""} ${r.client?.name ?? ""}`
+              .toLowerCase()
+              .includes(q)
+          : true,
+      )
+      .sort((a, b) => b.payment.date.localeCompare(a.payment.date));
+  }, [data.payments, data.clients, invoiceViews, query, clientId, method]);
+
+  const total = round2(rows.reduce((s, r) => s + r.payment.amount, 0));
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <SummaryCard label="Payments shown" value={String(rows.length)} />
+        <SummaryCard label="Value received" value={formatMoney(total)} tone="success" />
+        <SummaryCard
+          label="Still outstanding"
+          value={formatMoney(round2(invoiceViews.reduce((s, i) => s + i.outstanding, 0)))}
+          tone="warning"
+        />
+      </div>
+
+      <Panel>
+        <PanelHeader
+          title="Payments"
+          description={`${rows.length} of ${data.payments.length} payments`}
+          actions={
+            can("payments", "create") ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditing(null);
+                  setFormOpen(true);
+                }}
+              >
+                <Plus className="size-4" /> Add Payment
+              </Button>
+            ) : undefined
+          }
+        />
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+          <div className="relative w-full sm:w-64">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search reference, invoice or client…"
+              className="h-8 pl-8 text-[13px]"
+            />
+          </div>
+          <Select value={clientId} onValueChange={setClientId}>
+            <SelectTrigger className="h-8 w-48 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All clients</SelectItem>
+              {data.clients.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.company}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={method} onValueChange={setMethod}>
+            <SelectTrigger className="h-8 w-40 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All methods</SelectItem>
+              {data.settings.paymentMethods.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {rows.length === 0 ? (
+          <EmptyState
+            title="No payments match this view"
+            description="Adjust the filters, or record a new payment."
+          />
+        ) : (
+          <TableWrap>
+            <Table className="min-w-[900px]">
+              <THead>
+                <TR>
+                  <TH>Payment Date</TH>
+                  <TH>Client</TH>
+                  <TH>Invoice</TH>
+                  <TH>Payment Method</TH>
+                  <TH align="right">Amount</TH>
+                  <TH>Reference</TH>
+                  <TH>Notes</TH>
+                  <TH align="right">Actions</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {rows.map(({ payment, invoice, client }) => (
+                  <TR key={payment.id}>
+                    <TD>{formatDate(payment.date)}</TD>
+                    <TD>
+                      <Link
+                        to="/clients/$clientId"
+                        params={{ clientId: payment.clientId }}
+                        className="hover:underline"
+                      >
+                        {client?.company ?? "Unknown"}
+                      </Link>
+                    </TD>
+                    <TD mono>{invoice?.number ?? "—"}</TD>
+                    <TD>{payment.method}</TD>
+                    <TD mono align="right" className="font-medium">
+                      {formatMoney(payment.amount)}
+                    </TD>
+                    <TD mono>{payment.reference || "—"}</TD>
+                    <TD className="max-w-[220px] truncate whitespace-nowrap text-muted-foreground">
+                      {payment.notes || "—"}
+                    </TD>
+                    <TD align="right">
+                      <div className="flex justify-end gap-1">
+                        {can("payments", "edit") ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Edit payment"
+                            onClick={() => {
+                              setEditing(payment);
+                              setFormOpen(true);
+                            }}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                        ) : null}
+                        {can("payments", "delete") ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Delete payment"
+                            onClick={() => setToDelete(payment)}
+                          >
+                            <Trash2 className="size-4 text-destructive" />
+                          </Button>
+                        ) : null}
+                      </div>
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </TableWrap>
+        )}
+      </Panel>
+
+      <PaymentDialog
+        open={formOpen}
+        onOpenChange={(v) => {
+          setFormOpen(v);
+          if (!v) setEditing(null);
+        }}
+        payment={editing}
+      />
+      <ConfirmDialog
+        open={toDelete !== null}
+        onOpenChange={(v) => {
+          if (!v) setToDelete(null);
+        }}
+        title="Delete payment?"
+        description="The invoice paid amount, outstanding balance and status will be recalculated."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          if (toDelete) {
+            deletePayment(toDelete.id);
+            toast.success("Payment removed and balances recalculated.");
+          }
+          setToDelete(null);
+        }}
+      />
+    </div>
+  );
+}

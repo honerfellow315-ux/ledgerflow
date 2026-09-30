@@ -1,0 +1,1125 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * LedgerFlow design system — professional desktop business software.
+ * Cool grey surfaces, deep teal primary, restrained mint and amber accents.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-emphasis: var(--primary-emphasis);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-login-panel: var(--login-panel);
+  --color-login-panel-foreground: var(--login-panel-foreground);
+  --color-login-panel-muted: var(--login-panel-muted);
+  --color-brand-mark: var(--brand-mark);
+  --color-brand-mark-foreground: var(--brand-mark-foreground);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  --shadow-panel: 0 1px 2px oklch(0.25 0.03 255 / 0.06), 0 1px 1px oklch(0.25 0.03 255 / 0.04);
+  --shadow-panel-hover:
+    0 10px 26px -12px oklch(0.3 0.07 195 / 0.2), 0 2px 6px -2px oklch(0.25 0.03 255 / 0.08);
+  --shadow-menu: 0 12px 30px -12px oklch(0.2 0.03 258 / 0.22), 0 2px 8px oklch(0.2 0.03 258 / 0.08);
+  --sidebar-gradient:
+    radial-gradient(120% 60% at 0% 0%, oklch(0.29 0.05 195 / 0.55) 0%, transparent 55%),
+    linear-gradient(165deg, oklch(0.235 0.035 200) 0%, oklch(0.16 0.028 210) 100%);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.975 0.006 190);
+  --foreground: oklch(0.205 0.025 205);
+  --surface: oklch(1 0 0);
+  --surface-muted: oklch(0.96 0.009 190);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.03 258);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.03 258);
+  --primary: oklch(0.385 0.095 192);
+  --primary-emphasis: oklch(0.31 0.09 194);
+  --primary-foreground: oklch(0.985 0.002 250);
+  --secondary: oklch(0.955 0.006 250);
+  --secondary-foreground: oklch(0.3 0.03 258);
+  --muted: oklch(0.962 0.005 250);
+  --muted-foreground: oklch(0.48 0.02 256);
+  --accent: oklch(0.935 0.032 185);
+  --accent-foreground: oklch(0.27 0.06 190);
+  --destructive: oklch(0.52 0.19 25);
+  --destructive-foreground: oklch(0.99 0.002 250);
+  --success: oklch(0.45 0.105 155);
+  --success-foreground: oklch(0.99 0.002 250);
+  --success-soft: oklch(0.95 0.04 155);
+  --warning: oklch(0.56 0.12 75);
+  --warning-foreground: oklch(0.99 0.002 250);
+  --warning-soft: oklch(0.955 0.055 82);
+  --danger-soft: oklch(0.955 0.035 25);
+  --info: oklch(0.48 0.1 220);
+  --info-soft: oklch(0.955 0.025 220);
+  --border: oklch(0.895 0.012 190);
+  --border-strong: oklch(0.82 0.018 190);
+  --input: oklch(0.865 0.018 190);
+  --ring: oklch(0.47 0.11 192);
+  --chart-1: oklch(0.43 0.09 190);
+  --chart-2: oklch(0.56 0.105 220);
+  --chart-3: oklch(0.52 0.11 158);
+  --chart-4: oklch(0.65 0.13 70);
+  --chart-5: oklch(0.55 0.13 25);
+  --sidebar: oklch(0.205 0.03 205);
+  --sidebar-foreground: oklch(0.88 0.015 185);
+  --sidebar-primary: oklch(0.47 0.1 183);
+  --sidebar-primary-foreground: oklch(0.99 0.002 250);
+  --sidebar-accent: oklch(0.29 0.036 198);
+  --sidebar-accent-foreground: oklch(0.97 0.004 250);
+  --sidebar-border: oklch(0.34 0.03 198);
+  --sidebar-ring: oklch(0.58 0.09 181);
+  --login-panel: oklch(0.205 0.03 205);
+  --login-panel-foreground: oklch(0.985 0.004 180);
+  --login-panel-muted: oklch(0.78 0.025 185);
+  --brand-mark: oklch(0.7 0.135 168);
+  --brand-mark-foreground: oklch(0.19 0.03 202);
+}
+
+.dark {
+  --background: oklch(0.19 0.02 258);
+  --foreground: oklch(0.95 0.004 250);
+  --surface: oklch(0.23 0.025 258);
+  --surface-muted: oklch(0.26 0.025 258);
+  --card: oklch(0.23 0.025 258);
+  --card-foreground: oklch(0.95 0.004 250);
+  --popover: oklch(0.23 0.025 258);
+  --popover-foreground: oklch(0.95 0.004 250);
+  --primary: oklch(0.65 0.11 254);
+  --primary-foreground: oklch(0.16 0.02 258);
+  --secondary: oklch(0.28 0.025 258);
+  --secondary-foreground: oklch(0.95 0.004 250);
+  --muted: oklch(0.28 0.025 258);
+  --muted-foreground: oklch(0.7 0.015 252);
+  --accent: oklch(0.3 0.03 258);
+  --accent-foreground: oklch(0.96 0.004 250);
+  --destructive: oklch(0.6 0.17 25);
+  --destructive-foreground: oklch(0.98 0.002 250);
+  --success: oklch(0.62 0.12 158);
+  --success-foreground: oklch(0.16 0.02 258);
+  --success-soft: oklch(0.32 0.05 158);
+  --warning: oklch(0.7 0.12 70);
+  --warning-foreground: oklch(0.16 0.02 258);
+  --warning-soft: oklch(0.33 0.05 70);
+  --danger-soft: oklch(0.32 0.05 25);
+  --info: oklch(0.65 0.12 250);
+  --info-soft: oklch(0.3 0.04 250);
+  --border: oklch(0.32 0.025 258);
+  --border-strong: oklch(0.4 0.03 258);
+  --input: oklch(0.36 0.03 258);
+  --ring: oklch(0.6 0.09 254);
+  --sidebar: oklch(0.17 0.02 258);
+  --sidebar-foreground: oklch(0.86 0.012 250);
+  --sidebar-primary: oklch(0.3 0.05 254);
+  --sidebar-primary-foreground: oklch(0.98 0.002 250);
+  --sidebar-accent: oklch(0.25 0.025 258);
+  --sidebar-accent-foreground: oklch(0.96 0.004 250);
+  --sidebar-border: oklch(0.28 0.025 258);
+  --sidebar-ring: oklch(0.6 0.09 254);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "tnum";
+    -webkit-font-smoothing: antialiased;
+    min-width: 320px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-primary) 18%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Slim, themed scrollbars — a small detail that reads as more considered
+     than the default OS scrollbar on every scrollable panel/table/sidebar. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-border-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-muted-foreground);
+    background-clip: padding-box;
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+
+@utility panel {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+@utility panel-interactive {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.panel-interactive:hover {
+  box-shadow: var(--shadow-panel-hover);
+  border-color: var(--color-border-strong);
+  transform: translateY(-1px);
+}
+
+@utility sidebar-shell {
+  background-color: var(--color-sidebar);
+  background-image: var(--sidebar-gradient);
+  box-shadow:
+    inset -1px 0 0 oklch(0.7 0.135 168 / 0.16),
+    1px 0 0 oklch(0 0 0 / 0.06),
+    6px 0 24px -12px oklch(0.1 0.03 210 / 0.4);
+}
+
+@utility sidebar-glow-text {
+  background: linear-gradient(90deg, var(--color-brand-mark) 0%, oklch(0.85 0.08 185) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+@page {
+  size: A4;
+  /* Always zero, and never overridden per-document. This is the whole
+     print workflow's foundation: with no browser page margin, the
+     printable area IS the full physical sheet, so a `position: fixed`
+     letterhead image anchored at top:0/left:0 lands exactly on the true
+     page edge on every page, full-bleed, with no offset math needed and
+     nothing for Chrome to clip. The content's own safe top/bottom gap is
+     handled separately, per document, by a thead/tfoot spacer table (see
+     .sd-page / .id-page below) — never by making this margin non-zero. */
+  margin: 0;
+}
+
+/* Print-only statement of account: hidden on screen, shown instead of the app UI when printing. */
+.statement-doc {
+  display: none;
+}
+
+/* Safety Patrol Ltd's dedicated print layout — see styles.css @media print
+   block and components/app/StatementDocumentSPL.tsx. Hidden on screen like
+   .statement-doc above; shown only when printing. */
+.statement-doc-spl {
+  display: none;
+}
+
+/* Print-only single invoice: hidden on screen, shown instead of the app UI when printing. */
+.invoice-doc {
+  display: none;
+}
+
+@media print {
+  aside,
+  header[role="banner"],
+  button,
+  [data-sonner-toaster] {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  .app-content {
+    padding-left: 0 !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  .panel {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+
+  .statement-screen {
+    display: none !important;
+  }
+
+  .statement-doc {
+    position: relative;
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0;
+    color: #111;
+    background: #fff;
+    font-family: var(--font-sans);
+    font-size: 10pt;
+    line-height: 1.45;
+  }
+
+  .statement-doc .sd-letterhead-bg {
+    /* `@page` margin is always 0 (see the rule above), so the printable
+       area is the full physical sheet and top:0/left:0 here lands exactly
+       on the true page corner — full-bleed, every page, no offset needed. */
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    width: 210mm;
+    height: 297mm;
+    object-fit: cover;
+  }
+
+  .statement-doc > *:not(.sd-letterhead-bg) {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* --- Print workflow: the thead/tfoot safe-margin table -----------------
+     `.sd-page` is the outer print table StatementDocument wraps all real
+     content in. Its `<thead>`/`<tfoot>` are blank spacer rows sized to the
+     letterhead's header/footer artwork height — browsers natively reprint
+     a table's thead/tfoot at the top/bottom of *every* page the table
+     spans, so this reserves the same clear gap on page 1, 2, 3, however
+     many pages the statement runs to, without touching `@page` margin.
+     Actual content lives in one `<tbody>` cell (.sd-page-body) and simply
+     overflows onto the next page like any other tall table cell — whatever
+     doesn't fit on one sheet flows on to the next automatically. */
+  .statement-doc table.sd-page {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    font-size: inherit;
+  }
+
+  .statement-doc table.sd-page > thead > tr > td,
+  .statement-doc table.sd-page > tfoot > tr > td {
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .statement-doc table.sd-page > tbody > tr {
+    break-inside: auto;
+  }
+
+  .statement-doc table.sd-page > tbody > tr > td.sd-page-body {
+    border: none;
+    vertical-align: top;
+  }
+
+  .statement-doc p,
+  .statement-doc h1,
+  .statement-doc h2,
+  .statement-doc dl,
+  .statement-doc dd {
+    margin: 0;
+  }
+
+  .statement-doc .sd-lines {
+    white-space: pre-line;
+  }
+
+  .statement-doc .sd-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #111;
+  }
+
+  .statement-doc .sd-business {
+    font-size: 16pt;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .statement-doc .sd-title-block {
+    text-align: right;
+  }
+
+  .statement-doc .sd-title {
+    font-size: 15pt;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .statement-doc .sd-client {
+    margin-top: 16px;
+  }
+
+  .statement-doc .sd-label {
+    font-size: 8pt;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #555;
+  }
+
+  .statement-doc .sd-client-name {
+    font-size: 12pt;
+    font-weight: 600;
+  }
+
+  .statement-doc .sd-empty {
+    margin-top: 20px;
+    color: #555;
+  }
+
+  .statement-doc .sd-section-title {
+    margin-top: 18px;
+    margin-bottom: 0;
+    font-size: 10pt;
+    font-weight: 700;
+  }
+
+  .statement-doc .sd-outstanding {
+    margin-top: 18px;
+  }
+
+  .statement-doc .sd-ob-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .statement-doc .sd-ob-box {
+    break-inside: avoid;
+    border-radius: 3px;
+    padding: 8px 10px;
+    color: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .statement-doc .sd-ob-total {
+    background: #1d3a8f;
+  }
+
+  .statement-doc .sd-ob-overdue {
+    background: #c0392b;
+  }
+
+  .statement-doc .sd-ob-due {
+    background: #b8860b;
+  }
+
+  .statement-doc .sd-ob-label {
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .statement-doc .sd-ob-value {
+    margin-top: 2px;
+    font-size: 12pt;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc table.sd-ob-table {
+    margin-top: 14px;
+  }
+
+  .statement-doc .sd-status-overdue,
+  .statement-doc .sd-status-due {
+    font-weight: 600;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .statement-doc .sd-status-overdue {
+    color: #c0392b;
+  }
+
+  .statement-doc .sd-status-due {
+    color: #b8860b;
+  }
+
+  .statement-doc table {
+    width: 100%;
+    margin-top: 18px;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+  }
+
+  .statement-doc thead {
+    display: table-header-group;
+  }
+
+  .statement-doc tr {
+    break-inside: avoid;
+  }
+
+  .statement-doc th {
+    padding: 6px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1.5px solid #111;
+  }
+
+  .statement-doc td {
+    padding: 5px 6px;
+    vertical-align: top;
+    border-bottom: 1px solid #d4d4d4;
+  }
+
+  .statement-doc .sd-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc .sd-nowrap {
+    white-space: nowrap;
+  }
+
+  .statement-doc .sd-summary {
+    margin-top: 18px;
+    margin-left: auto;
+    width: 250px;
+    break-inside: avoid;
+  }
+
+  .statement-doc .sd-summary div {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+  }
+
+  .statement-doc .sd-summary dd {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc .sd-summary .sd-total {
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 2px solid #111;
+    font-size: 11pt;
+    font-weight: 700;
+  }
+
+  .statement-doc .sd-footer {
+    margin-top: 24px;
+    font-size: 8.5pt;
+    color: #555;
+  }
+
+  /* ------------------------------------------------------------------
+     Dedicated print layout for the "Safety Patrol Ltd" letterhead only
+     (see components/app/StatementDocumentSPL.tsx for the full why). This
+     block is entirely self-contained under `.statement-doc-spl` / `sdspl-*`
+     class names so it can't affect `.statement-doc` / `sd-*` above, which
+     every other letterhead keeps using unchanged. Pagination here is done
+     in JS (explicit page chunks, each with its own top/bottom spacer), not
+     via a repeating thead/tfoot, so there is no `sdspl-page` wrapper table
+     — `.sdspl-page` is a plain block with `break-after: page` set inline
+     per chunk. */
+  .statement-doc-spl {
+    position: relative;
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0;
+    color: #111;
+    background: #fff;
+    font-family: var(--font-sans);
+    font-size: 10pt;
+    line-height: 1.45;
+  }
+
+  .statement-doc-spl > *:not(.sdspl-letterhead-bg) {
+    position: relative;
+    z-index: 1;
+  }
+
+  .statement-doc-spl .sdspl-page {
+    break-inside: avoid-page;
+  }
+
+  .statement-doc-spl p,
+  .statement-doc-spl h1,
+  .statement-doc-spl h2,
+  .statement-doc-spl h3,
+  .statement-doc-spl dl,
+  .statement-doc-spl dd {
+    margin: 0;
+  }
+
+  .statement-doc-spl .sdspl-lines {
+    white-space: pre-line;
+  }
+
+  .statement-doc-spl .sdspl-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #111;
+  }
+
+  .statement-doc-spl .sdspl-title-block {
+    text-align: right;
+    width: 100%;
+  }
+
+  .statement-doc-spl .sdspl-title {
+    font-size: 15pt;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .statement-doc-spl .sdspl-client {
+    margin-top: 16px;
+  }
+
+  .statement-doc-spl .sdspl-label {
+    font-size: 8pt;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #555;
+  }
+
+  .statement-doc-spl .sdspl-client-name {
+    font-size: 12pt;
+    font-weight: 600;
+  }
+
+  .statement-doc-spl .sdspl-empty {
+    margin-top: 20px;
+    color: #555;
+  }
+
+  .statement-doc-spl .sdspl-section-title {
+    margin-top: 18px;
+    margin-bottom: 0;
+    font-size: 10pt;
+    font-weight: 700;
+  }
+
+  .statement-doc-spl .sdspl-outstanding {
+    margin-top: 18px;
+  }
+
+  .statement-doc-spl .sdspl-ob-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .statement-doc-spl .sdspl-ob-box {
+    break-inside: avoid;
+    border-radius: 3px;
+    padding: 8px 10px;
+    color: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .statement-doc-spl .sdspl-ob-total {
+    background: #1d3a8f;
+  }
+
+  .statement-doc-spl .sdspl-ob-overdue {
+    background: #c0392b;
+  }
+
+  .statement-doc-spl .sdspl-ob-due {
+    background: #b8860b;
+  }
+
+  .statement-doc-spl .sdspl-ob-label {
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .statement-doc-spl .sdspl-ob-value {
+    margin-top: 2px;
+    font-size: 12pt;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc-spl table.sdspl-ob-table {
+    margin-top: 14px;
+  }
+
+  .statement-doc-spl .sdspl-status-overdue,
+  .statement-doc-spl .sdspl-status-due {
+    font-weight: 600;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .statement-doc-spl .sdspl-status-overdue {
+    color: #c0392b;
+  }
+
+  .statement-doc-spl .sdspl-status-due {
+    color: #b8860b;
+  }
+
+  .statement-doc-spl table {
+    width: 100%;
+    margin-top: 18px;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+  }
+
+  .statement-doc-spl thead {
+    display: table-header-group;
+  }
+
+  .statement-doc-spl tr {
+    break-inside: avoid;
+  }
+
+  .statement-doc-spl th {
+    padding: 6px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1.5px solid #111;
+  }
+
+  .statement-doc-spl td {
+    padding: 5px 6px;
+    vertical-align: top;
+    border-bottom: 1px solid #d4d4d4;
+  }
+
+  .statement-doc-spl .sdspl-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc-spl .sdspl-nowrap {
+    white-space: nowrap;
+  }
+
+  .statement-doc-spl .sdspl-summary {
+    margin-top: 18px;
+    margin-left: auto;
+    width: 250px;
+    break-inside: avoid;
+  }
+
+  .statement-doc-spl .sdspl-summary div {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+  }
+
+  .statement-doc-spl .sdspl-summary dd {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc-spl .sdspl-summary .sdspl-total {
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 2px solid #111;
+    font-size: 11pt;
+    font-weight: 700;
+  }
+
+  .statement-doc-spl .sdspl-footer {
+    margin-top: 24px;
+    font-size: 8.5pt;
+    color: #555;
+  }
+
+  .invoices-screen,
+  .subcontracting-screen {
+    display: none !important;
+  }
+
+  .invoice-doc {
+    --id-accent: #0f5c56;
+    --id-ink: #16211f;
+    --id-muted: #5c6b68;
+    --id-line: #d9e0de;
+    position: relative;
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0;
+    color: var(--id-ink);
+    background: #fff;
+    font-family: var(--font-sans);
+    font-size: 10pt;
+    line-height: 1.5;
+  }
+
+  .invoice-doc .id-letterhead-bg {
+    /* `@page` margin is always 0 (see the rule at the top of this file), so
+       the printable area is the full physical sheet and top:0/left:0 here
+       lands exactly on the true page corner — full-bleed, every page. */
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    width: 210mm;
+    height: 297mm;
+    object-fit: cover;
+  }
+
+  .invoice-doc > *:not(.id-letterhead-bg) {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Print workflow: see the fuller comment on .statement-doc table.sd-page
+     above — same thead/tfoot spacer-table mechanism, so the content stays
+     clear of the letterhead's header/footer artwork on every printed page
+     without relying on `@page` margin. */
+  .invoice-doc table.id-page {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    font-size: inherit;
+  }
+
+  .invoice-doc table.id-page > thead > tr > td,
+  .invoice-doc table.id-page > tfoot > tr > td {
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .invoice-doc table.id-page > tbody > tr {
+    break-inside: auto;
+  }
+
+  .invoice-doc table.id-page > tbody > tr > td.id-page-body {
+    border: none;
+    vertical-align: top;
+  }
+
+  .invoice-doc p,
+  .invoice-doc h1,
+  .invoice-doc h2,
+  .invoice-doc dl,
+  .invoice-doc dd {
+    margin: 0;
+  }
+
+  .invoice-doc .id-lines {
+    white-space: pre-line;
+    color: var(--id-muted);
+  }
+
+  .invoice-doc .id-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+    padding-bottom: 14px;
+    border-bottom: 2.5px solid var(--id-accent);
+  }
+
+  .invoice-doc .id-identity {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .invoice-doc .id-logo {
+    max-width: 84px;
+    max-height: 64px;
+    object-fit: contain;
+  }
+
+  .invoice-doc .id-business {
+    font-size: 17pt;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--id-ink);
+    margin-bottom: 5px;
+  }
+
+  .invoice-doc .id-contact {
+    margin-top: 3px;
+  }
+
+  .invoice-doc .id-contact .id-lines {
+    white-space: normal;
+  }
+
+  .invoice-doc .id-contact-label {
+    display: inline-block;
+    min-width: 34px;
+    font-weight: 600;
+    color: var(--id-ink);
+  }
+
+  .invoice-doc .id-title-block {
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .invoice-doc .id-title {
+    font-size: 20pt;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--id-accent);
+    margin-bottom: 6px;
+  }
+
+  .invoice-doc .id-title-block .id-lines {
+    color: var(--id-muted);
+  }
+
+  .invoice-doc .id-client {
+    margin-top: 20px;
+    padding: 10px 14px;
+    background: #f3f7f6;
+    border-left: 3px solid var(--id-accent);
+    border-radius: 2px;
+  }
+
+  .invoice-doc .id-label {
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--id-accent);
+  }
+
+  .invoice-doc .id-client-name {
+    font-size: 12pt;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+
+  .invoice-doc table {
+    width: 100%;
+    margin-top: 20px;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+
+  .invoice-doc thead {
+    display: table-header-group;
+  }
+
+  .invoice-doc tr {
+    break-inside: avoid;
+  }
+
+  .invoice-doc th {
+    padding: 7px 8px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 8pt;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #fff;
+    background: var(--id-accent);
+  }
+
+  .invoice-doc th.id-num {
+    text-align: right;
+  }
+
+  .invoice-doc th:first-child {
+    border-radius: 2px 0 0 2px;
+  }
+
+  .invoice-doc th:last-child {
+    border-radius: 0 2px 2px 0;
+  }
+
+  .invoice-doc td {
+    padding: 9px 8px;
+    vertical-align: top;
+    border-bottom: 1px solid var(--id-line);
+  }
+
+  .invoice-doc .id-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .invoice-doc .id-summary {
+    margin-top: 4px;
+    margin-left: auto;
+    width: 260px;
+    break-inside: avoid;
+  }
+
+  .invoice-doc .id-summary div {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 2px;
+    color: var(--id-muted);
+  }
+
+  .invoice-doc .id-summary dd {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .invoice-doc .id-summary .id-total {
+    margin-top: 6px;
+    padding: 9px 10px;
+    background: var(--id-accent);
+    border-radius: 2px;
+    font-size: 11.5pt;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .invoice-doc .id-terms,
+  .invoice-doc .id-bank {
+    margin-top: 20px;
+    font-size: 9pt;
+    color: var(--id-muted);
+  }
+
+  .invoice-doc .id-terms p:first-child,
+  .invoice-doc .id-bank .id-label {
+    color: var(--id-ink);
+  }
+
+  .invoice-doc .id-bank {
+    break-inside: avoid;
+    padding-top: 12px;
+    border-top: 1px solid var(--id-line);
+  }
+
+  .invoice-doc .id-footer {
+    margin-top: 28px;
+    padding-top: 12px;
+    border-top: 1px solid var(--id-line);
+    text-align: center;
+  }
+
+  .invoice-doc .id-footer-strip {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: var(--id-ink);
+    letter-spacing: 0.01em;
+  }
+
+  .invoice-doc .id-footer-thanks {
+    margin-top: 4px;
+    font-size: 8pt;
+    color: var(--id-muted);
+    font-style: italic;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

@@ -1,0 +1,553 @@
+/**
+ * Print styles for the *.safari.tsx document variants
+ * (InvoiceDocumentSafari, SubcontractDocumentSafari, StatementDocumentSafari).
+ *
+ * This file is purely additive — it does NOT touch `.invoice-doc` /
+ * `.statement-doc` or anything else in styles.css. The normal Chrome/Edge/
+ * Firefox print workflow is completely unaffected by this file.
+ *
+ * The only real difference from styles.css: instead of a `position: fixed`
+ * `<img>` for the letterhead (which WebKit only paints on the first printed
+ * page), the letterhead is a CSS background image on the thead/tfoot spacer
+ * cells, sized to the full A4 sheet and cropped to the top/bottom slice via
+ * background-position. thead/tfoot repeat on every printed page natively in
+ * every browser, Safari included, so this repeats correctly with no JS
+ * pagination needed. The image itself comes in as the `--id-letterhead-image`
+ * / `--sd-letterhead-image` custom property set inline by the component
+ * (see InvoiceDocument.safari.tsx / SubcontractDocument.safari.tsx /
+ * StatementDocumentSafari in routes/statements.index.tsx).
+ */
+
+.statement-doc-safari {
+  display: none;
+}
+
+.invoice-doc-safari {
+  display: none;
+}
+
+@media print {
+  .statement-screen {
+    display: none !important;
+  }
+
+  .statement-doc-safari {
+    position: relative;
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0;
+    color: #111;
+    background: #fff;
+    font-family: var(--font-sans);
+    font-size: 10pt;
+    line-height: 1.45;
+  }
+
+  .statement-doc-safari table.sd-page {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    font-size: inherit;
+  }
+
+  .statement-doc-safari table.sd-page > thead > tr > td,
+  .statement-doc-safari table.sd-page > tfoot > tr > td {
+    padding: 0;
+    border: none;
+    background-color: transparent;
+    background-repeat: no-repeat;
+  }
+
+  /* Letterhead slices: only painted when the doc actually has a letterhead
+     (the wrapper only carries `has-letterhead` + the custom property then).
+     `background-size` is fixed to the true A4 sheet so the crop lines up
+     exactly with the physical page edge — same full-bleed math the normal
+     `.id-letterhead-bg` / `.sd-letterhead-bg` fixed image uses, just applied
+     per-page instead of once. */
+  .statement-doc-safari.has-letterhead table.sd-page > thead > tr > td {
+    background-image: var(--sd-letterhead-image);
+    background-size: 210mm 297mm;
+    background-position: top left;
+  }
+
+  .statement-doc-safari.has-letterhead table.sd-page > tfoot > tr > td {
+    background-image: var(--sd-letterhead-image);
+    background-size: 210mm 297mm;
+    background-position: bottom left;
+  }
+
+  .statement-doc-safari table.sd-page > tbody > tr {
+    break-inside: auto;
+  }
+
+  .statement-doc-safari table.sd-page > tbody > tr > td.sd-page-body {
+    border: none;
+    vertical-align: top;
+  }
+
+  .statement-doc-safari p,
+  .statement-doc-safari h1,
+  .statement-doc-safari h2,
+  .statement-doc-safari dl,
+  .statement-doc-safari dd {
+    margin: 0;
+  }
+
+  .statement-doc-safari .sd-lines {
+    white-space: pre-line;
+  }
+
+  .statement-doc-safari .sd-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #111;
+  }
+
+  .statement-doc-safari .sd-business {
+    font-size: 16pt;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .statement-doc-safari .sd-title-block {
+    text-align: right;
+  }
+
+  .statement-doc-safari .sd-title {
+    font-size: 15pt;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .statement-doc-safari .sd-client {
+    margin-top: 16px;
+  }
+
+  .statement-doc-safari .sd-label {
+    font-size: 8pt;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #555;
+  }
+
+  .statement-doc-safari .sd-client-name {
+    font-size: 12pt;
+    font-weight: 600;
+  }
+
+  .statement-doc-safari .sd-empty {
+    margin-top: 20px;
+    color: #555;
+  }
+
+  .statement-doc-safari .sd-section-title {
+    margin-top: 18px;
+    margin-bottom: 0;
+    font-size: 10pt;
+    font-weight: 700;
+  }
+
+  .statement-doc-safari .sd-outstanding {
+    margin-top: 18px;
+  }
+
+  .statement-doc-safari .sd-ob-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .statement-doc-safari .sd-ob-box {
+    break-inside: avoid;
+    border-radius: 3px;
+    padding: 8px 10px;
+    color: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .statement-doc-safari .sd-ob-total {
+    background: #1d3a8f;
+  }
+
+  .statement-doc-safari .sd-ob-overdue {
+    background: #c0392b;
+  }
+
+  .statement-doc-safari .sd-ob-due {
+    background: #b8860b;
+  }
+
+  .statement-doc-safari .sd-ob-label {
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .statement-doc-safari .sd-ob-value {
+    margin-top: 2px;
+    font-size: 12pt;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc-safari table.sd-ob-table {
+    margin-top: 14px;
+  }
+
+  .statement-doc-safari .sd-status-overdue,
+  .statement-doc-safari .sd-status-due {
+    font-weight: 600;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .statement-doc-safari .sd-status-overdue {
+    color: #c0392b;
+  }
+
+  .statement-doc-safari .sd-status-due {
+    color: #b8860b;
+  }
+
+  .statement-doc-safari table {
+    width: 100%;
+    margin-top: 18px;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+  }
+
+  .statement-doc-safari thead {
+    display: table-header-group;
+  }
+
+  .statement-doc-safari tr {
+    break-inside: avoid;
+  }
+
+  .statement-doc-safari th {
+    padding: 6px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1.5px solid #111;
+  }
+
+  .statement-doc-safari td {
+    padding: 5px 6px;
+    vertical-align: top;
+    border-bottom: 1px solid #d4d4d4;
+  }
+
+  .statement-doc-safari .sd-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc-safari .sd-nowrap {
+    white-space: nowrap;
+  }
+
+  .statement-doc-safari .sd-summary {
+    margin-top: 18px;
+    margin-left: auto;
+    width: 250px;
+    break-inside: avoid;
+  }
+
+  .statement-doc-safari .sd-summary div {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+  }
+
+  .statement-doc-safari .sd-summary dd {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-doc-safari .sd-summary .sd-total {
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 2px solid #111;
+    font-size: 11pt;
+    font-weight: 700;
+  }
+
+  .statement-doc-safari .sd-footer {
+    margin-top: 24px;
+    font-size: 8.5pt;
+    color: #555;
+  }
+
+  .invoice-doc-safari {
+    --id-accent: #0f5c56;
+    --id-ink: #16211f;
+    --id-muted: #5c6b68;
+    --id-line: #d9e0de;
+    position: relative;
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0;
+    color: var(--id-ink);
+    background: #fff;
+    font-family: var(--font-sans);
+    font-size: 10pt;
+    line-height: 1.5;
+  }
+
+  .invoice-doc-safari table.id-page {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    font-size: inherit;
+  }
+
+  .invoice-doc-safari table.id-page > thead > tr > td,
+  .invoice-doc-safari table.id-page > tfoot > tr > td {
+    padding: 0;
+    border: none;
+    background-color: transparent;
+    background-repeat: no-repeat;
+  }
+
+  .invoice-doc-safari.has-letterhead table.id-page > thead > tr > td {
+    background-image: var(--id-letterhead-image);
+    background-size: 210mm 297mm;
+    background-position: top left;
+  }
+
+  .invoice-doc-safari.has-letterhead table.id-page > tfoot > tr > td {
+    background-image: var(--id-letterhead-image);
+    background-size: 210mm 297mm;
+    background-position: bottom left;
+  }
+
+  .invoice-doc-safari table.id-page > tbody > tr {
+    break-inside: auto;
+  }
+
+  .invoice-doc-safari table.id-page > tbody > tr > td.id-page-body {
+    border: none;
+    vertical-align: top;
+  }
+
+  .invoice-doc-safari p,
+  .invoice-doc-safari h1,
+  .invoice-doc-safari h2,
+  .invoice-doc-safari dl,
+  .invoice-doc-safari dd {
+    margin: 0;
+  }
+
+  .invoice-doc-safari .id-lines {
+    white-space: pre-line;
+    color: var(--id-muted);
+  }
+
+  .invoice-doc-safari .id-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+    padding-bottom: 14px;
+    border-bottom: 2.5px solid var(--id-accent);
+  }
+
+  .invoice-doc-safari .id-identity {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .invoice-doc-safari .id-logo {
+    max-width: 84px;
+    max-height: 64px;
+    object-fit: contain;
+  }
+
+  .invoice-doc-safari .id-business {
+    font-size: 17pt;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--id-ink);
+    margin-bottom: 5px;
+  }
+
+  .invoice-doc-safari .id-contact {
+    margin-top: 3px;
+  }
+
+  .invoice-doc-safari .id-contact .id-lines {
+    white-space: normal;
+  }
+
+  .invoice-doc-safari .id-contact-label {
+    display: inline-block;
+    min-width: 34px;
+    font-weight: 600;
+    color: var(--id-ink);
+  }
+
+  .invoice-doc-safari .id-title-block {
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .invoice-doc-safari .id-title {
+    font-size: 20pt;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--id-accent);
+    margin-bottom: 6px;
+  }
+
+  .invoice-doc-safari .id-title-block .id-lines {
+    color: var(--id-muted);
+  }
+
+  .invoice-doc-safari .id-client {
+    margin-top: 20px;
+    padding: 10px 14px;
+    background: #f3f7f6;
+    border-left: 3px solid var(--id-accent);
+    border-radius: 2px;
+  }
+
+  .invoice-doc-safari .id-label {
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--id-accent);
+  }
+
+  .invoice-doc-safari .id-client-name {
+    font-size: 12pt;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+
+  .invoice-doc-safari table {
+    width: 100%;
+    margin-top: 20px;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+
+  .invoice-doc-safari thead {
+    display: table-header-group;
+  }
+
+  .invoice-doc-safari tr {
+    break-inside: avoid;
+  }
+
+  .invoice-doc-safari th {
+    padding: 7px 8px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 8pt;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #fff;
+    background: var(--id-accent);
+  }
+
+  .invoice-doc-safari th.id-num {
+    text-align: right;
+  }
+
+  .invoice-doc-safari th:first-child {
+    border-radius: 2px 0 0 2px;
+  }
+
+  .invoice-doc-safari th:last-child {
+    border-radius: 0 2px 2px 0;
+  }
+
+  .invoice-doc-safari td {
+    padding: 9px 8px;
+    vertical-align: top;
+    border-bottom: 1px solid var(--id-line);
+  }
+
+  .invoice-doc-safari .id-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .invoice-doc-safari .id-summary {
+    margin-top: 4px;
+    margin-left: auto;
+    width: 260px;
+    break-inside: avoid;
+  }
+
+  .invoice-doc-safari .id-summary div {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 2px;
+    color: var(--id-muted);
+  }
+
+  .invoice-doc-safari .id-summary dd {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .invoice-doc-safari .id-summary .id-total {
+    margin-top: 6px;
+    padding: 9px 10px;
+    background: var(--id-accent);
+    border-radius: 2px;
+    font-size: 11.5pt;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .invoice-doc-safari .id-terms,
+  .invoice-doc-safari .id-bank {
+    margin-top: 20px;
+    font-size: 9pt;
+    color: var(--id-muted);
+  }
+
+  .invoice-doc-safari .id-terms p:first-child,
+  .invoice-doc-safari .id-bank .id-label {
+    color: var(--id-ink);
+  }
+
+  .invoice-doc-safari .id-bank {
+    break-inside: avoid;
+    padding-top: 12px;
+    border-top: 1px solid var(--id-line);
+  }
+
+  .invoice-doc-safari .id-footer {
+    margin-top: 28px;
+    padding-top: 12px;
+    border-top: 1px solid var(--id-line);
+    text-align: center;
+  }
+
+  .invoice-doc-safari .id-footer-strip {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: var(--id-ink);
+    letter-spacing: 0.01em;
+  }
+
+  .invoice-doc-safari .id-footer-thanks {
+    margin-top: 4px;
+    font-size: 8pt;
+    color: var(--id-muted);
+    font-style: italic;
+  }
+}
