@@ -69,6 +69,7 @@ import {
 } from "@/lib/actions/creditNotes";
 import { getSettings, updateSettings as updateSettingsFn } from "@/lib/actions/settings";
 import { defaultSettings } from "./defaults";
+import { unwrap, asArray } from "@/lib/unwrap";
 
 /**
  * Frontend data layer.
@@ -148,18 +149,18 @@ const LedgerContext = createContext<LedgerContextValue | null>(null);
 export function LedgerProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
 
-  const clientsQ = useQuery({ queryKey: KEYS.clients, queryFn: () => listClients() });
-  const companiesQ = useQuery({ queryKey: KEYS.companies, queryFn: () => listCompanies() });
-  const invoicesQ = useQuery({ queryKey: KEYS.invoices, queryFn: () => listInvoices() });
-  const paymentsQ = useQuery({ queryKey: KEYS.payments, queryFn: () => listPayments() });
-  const expensesQ = useQuery({ queryKey: KEYS.expenses, queryFn: () => listExpenses() });
-  const hoursQ = useQuery({ queryKey: KEYS.hours, queryFn: () => listHours() });
+  const clientsQ = useQuery({ queryKey: KEYS.clients, queryFn: () => unwrap(listClients()) });
+  const companiesQ = useQuery({ queryKey: KEYS.companies, queryFn: () => unwrap(listCompanies()) });
+  const invoicesQ = useQuery({ queryKey: KEYS.invoices, queryFn: () => unwrap(listInvoices()) });
+  const paymentsQ = useQuery({ queryKey: KEYS.payments, queryFn: () => unwrap(listPayments()) });
+  const expensesQ = useQuery({ queryKey: KEYS.expenses, queryFn: () => unwrap(listExpenses()) });
+  const hoursQ = useQuery({ queryKey: KEYS.hours, queryFn: () => unwrap(listHours()) });
   const subcontractsQ = useQuery({
     queryKey: KEYS.subcontracts,
-    queryFn: () => listSubcontracts(),
+    queryFn: () => unwrap(listSubcontracts()),
   });
-  const creditNotesQ = useQuery({ queryKey: KEYS.creditNotes, queryFn: () => listCreditNotes() });
-  const settingsQ = useQuery({ queryKey: KEYS.settings, queryFn: () => getSettings() });
+  const creditNotesQ = useQuery({ queryKey: KEYS.creditNotes, queryFn: () => unwrap(listCreditNotes()) });
+  const settingsQ = useQuery({ queryKey: KEYS.settings, queryFn: () => unwrap(getSettings()) });
 
   // Small helper: fire a mutation, then invalidate the list(s) it affects.
   function action<TInput>(fn: (input: TInput) => Promise<unknown>, keys: QueryKey[]) {
@@ -242,7 +243,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     )(patch);
   const deletePayment = action((id: string) => deletePaymentFn({ data: { id } }), [KEYS.payments]);
   const clearInvoicePayments = async (invoiceId: string) => {
-    const toRemove = (paymentsQ.data ?? []).filter((p) => p.invoiceId === invoiceId);
+    const toRemove = (asArray(paymentsQ.data)).filter((p) => p.invoiceId === invoiceId);
     try {
       await Promise.all(toRemove.map((p) => deletePaymentFn({ data: { id: p.id } })));
     } finally {
@@ -314,15 +315,15 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     settingsQ.isSuccess;
 
   const data: LedgerData = {
-    clients: clientsQ.data ?? [],
-    companies: companiesQ.data ?? [],
-    invoices: invoicesQ.data ?? [],
-    payments: paymentsQ.data ?? [],
-    expenses: expensesQ.data ?? [],
-    hours: hoursQ.data ?? [],
-    subcontracts: subcontractsQ.data ?? [],
-    creditNotes: creditNotesQ.data ?? [],
-    settings: settingsQ.data ?? defaultSettings,
+    clients: asArray(clientsQ.data),
+    companies: asArray(companiesQ.data),
+    invoices: asArray(invoicesQ.data),
+    payments: asArray(paymentsQ.data),
+    expenses: asArray(expensesQ.data),
+    hours: asArray(hoursQ.data),
+    subcontracts: asArray(subcontractsQ.data),
+    creditNotes: asArray(creditNotesQ.data),
+    settings: settingsQ.data && !(settingsQ.data instanceof Response) ? settingsQ.data : defaultSettings,
   };
 
   const invoiceViews = useMemo(

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { unwrap } from "@/lib/unwrap";
 import { getPeriodSheet, listPayrollCompanies, listPeriods, listStaff } from "@/lib/actions/salary";
 
 export const salaryKeys = {
@@ -11,20 +12,20 @@ export const salaryKeys = {
 };
 
 export const usePeriods = (enabled = true) =>
-  useQuery({ queryKey: salaryKeys.periods, queryFn: () => listPeriods(), enabled });
+  useQuery({ queryKey: salaryKeys.periods, queryFn: () => unwrap(listPeriods()), enabled });
 
 export const usePeriodSheet = (periodId: string | null) =>
   useQuery({
     queryKey: salaryKeys.sheet(periodId ?? ""),
-    queryFn: () => getPeriodSheet({ data: { periodId: periodId ?? "" } }),
+    queryFn: () => unwrap(getPeriodSheet({ data: { periodId: periodId ?? "" } })),
     enabled: !!periodId,
   });
 
 export const useAllPayrollCompanies = (enabled = true) =>
-  useQuery({ queryKey: salaryKeys.companies, queryFn: () => listPayrollCompanies(), enabled });
+  useQuery({ queryKey: salaryKeys.companies, queryFn: () => unwrap(listPayrollCompanies()), enabled });
 
 export const useStaffList = (enabled = true) =>
-  useQuery({ queryKey: salaryKeys.staff, queryFn: () => listStaff(), enabled });
+  useQuery({ queryKey: salaryKeys.staff, queryFn: () => unwrap(listStaff()), enabled });
 
 /** Re-fetches everything the salary screens show (period list, open sheet,
  * payroll companies and staff) after any mutation. */

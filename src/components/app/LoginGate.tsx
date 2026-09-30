@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { login, me } from "@/lib/actions/auth";
+import { unwrap } from "@/lib/unwrap";
 
 type LoginErrors = { username?: string | undefined; password?: string | undefined };
 
@@ -22,7 +23,7 @@ export function LoginGate({ children }: { children: ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    me()
+    unwrap(me())
       .then((user) => setIsAuthenticated(Boolean(user)))
       .catch(() => setIsAuthenticated(false))
       .finally(() => setIsReady(true));
@@ -44,7 +45,10 @@ export function LoginGate({ children }: { children: ReactNode }) {
 
     setSubmitting(true);
     try {
-      await login({ data: { username, password } });
+      await unwrap(login({ data: { username, password } }));
+      // Don't trust the login call alone: confirm the session cookie really works.
+      const user = await unwrap(me());
+      if (!user) throw new Error("No session after login");
       setIsAuthenticated(true);
     } catch {
       setFormError("Incorrect username or password.");
