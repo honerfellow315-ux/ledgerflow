@@ -89,6 +89,9 @@ export interface Invoice {
   dueDate: string;
   /** Purchase order or client reference. */
   poReference?: string;
+  /** Optional end client this invoice was really raised for (e.g. one of the
+   * clients behind a management account). Empty/unset = not assigned. */
+  endClient?: string;
   description: string;
   amountExVat: number;
   /** Set when this invoice was billed as Hours × Rate rather than a fixed amount. */

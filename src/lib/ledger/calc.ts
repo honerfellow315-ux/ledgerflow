@@ -115,14 +115,31 @@ export interface InvoiceView extends Invoice {
   /** True when the printed invoice should show only the VAT-bearing balance
    * (not the full original amount) — the full amount stays in history/ledger. */
   balanceOnly: boolean;
+  /** Total of the issued / applied credit notes linked to this invoice.
+   * Calculated on screen only — nothing is written to the invoice row. `total`
+   * stays the original invoice value; `outstanding` and `status` are after it. */
+  credited: number;
+  /** Every credit note linked to this invoice (any status), oldest first. */
+  linkedCreditNotes: CreditNote[];
 }
+
+/** Credit notes in these statuses reduce the invoice they are linked to. */
+export const DEDUCTING_CREDIT_STATUSES = ["issued", "applied"] as const;
 
 export function buildInvoiceViews(
   invoices: Invoice[],
   payments: Payment[],
   clients: Client[],
+  creditNotes: CreditNote[] = [],
 ): InvoiceView[] {
   const byId = new Map(clients.map((c) => [c.id, c]));
+  const notesByInvoice = new Map<string, CreditNote[]>();
+  for (const n of creditNotes) {
+    if (!n.invoiceId) continue;
+    const list = notesByInvoice.get(n.invoiceId) ?? [];
+    list.push(n);
+    notesByInvoice.set(n.invoiceId, list);
+  }
   return invoices.map((inv) => {
     // Paid amount is computed before VAT so "remaining" VAT mode can charge
     // VAT only on what's still outstanding ex-VAT (see vatAmount above).
@@ -133,8 +150,22 @@ export function buildInvoiceViews(
     const balanceOnly = inv.vatIncluded && inv.vatMode === "remaining" && paidBeforeVat > 0.004;
     const total = round2(inv.amountExVat + vat);
     const client = byId.get(inv.clientId);
-    const outstanding = round2(total - paid);
-    const status = statusFor(total, paid);
+    const linkedCreditNotes = [...(notesByInvoice.get(inv.id) ?? [])].sort(
+      (a, b) => a.date.localeCompare(b.date) || a.number.localeCompare(b.number),
+    );
+    // A credit note can never take an invoice below zero.
+    const credited = Math.min(
+      total,
+      round2(
+        linkedCreditNotes
+          .filter((n) => (DEDUCTING_CREDIT_STATUSES as readonly string[]).includes(n.status))
+          .reduce((sum, n) => sum + creditNoteTotal(n), 0),
+      ),
+    );
+    const netTotal = round2(total - credited);
+    const outstanding = round2(netTotal - paid);
+    const status: InvoiceStatus =
+      credited > 0.004 && netTotal <= 0.004 ? "paid" : statusFor(netTotal, paid);
     const invoicePayments = payments
       .filter((p) => p.invoiceId === inv.id)
       .sort((a, b) => a.date.localeCompare(b.date));
@@ -154,6 +185,8 @@ export function buildInvoiceViews(
       vatBase: base,
       paidBeforeVat: balanceOnly ? paidBeforeVat : 0,
       balanceOnly,
+      credited,
+      linkedCreditNotes,
     };
   });
 }
@@ -435,5 +468,146 @@ export function businessProfileFor(
     businessLetterhead: company.letterhead ?? "",
     letterheadMarginTop: company.letterheadMarginTop ?? settings.letterheadMarginTop ?? 0,
     letterheadMarginBottom: company.letterheadMarginBottom ?? settings.letterheadMarginBottom ?? 0,
+  };
+}
+
+/* ---------- Invoice numbering ---------- */
+
+/** Splits "FFM-0644" into { prefix: "FFM-", digits: "0644" }; null when the number doesn't end in digits. */
+function splitInvoiceNumber(number: string): { prefix: string; digits: string } | null {
+  const m = /^(.*?)(\d+)$/.exec(number.trim());
+  return m ? { prefix: m[1] ?? "", digits: m[2] ?? "" } : null;
+}
+
+/**
+ * The next invoice number in sequence for a client: the highest number already
+ * used in the same series, plus one (644 -> 645). A "series" is the invoices
+ * with the same prefix that belong to the same billing company (or, for
+ * clients with no billing company, the same default-business group), so
+ * different clients under one company share one running line.
+ *
+ * Nothing is stored — the suggestion is derived from the existing invoices
+ * every time, and the person can still overtype it.
+ */
+export function suggestNextInvoiceNumber(args: {
+  invoices: Invoice[];
+  clients: Client[];
+  clientId: string;
+  /** Prefix configured for this client's company (or the global one). */
+  prefix: string;
+  /** Last-resort counter from Settings, used only when no earlier invoice gives a series. */
+  fallbackNext: number;
+}): string {
+  const { invoices, clients, clientId, prefix, fallbackNext } = args;
+  const companyOf = new Map(clients.map((c) => [c.id, c.companyId ?? null]));
+  const scope = companyOf.get(clientId) ?? null;
+  const inScope = invoices.filter((i) => (companyOf.get(i.clientId) ?? null) === scope);
+
+  const highestIn = (pfx: string, pool: Invoice[]) => {
+    let best: { value: number; width: number } | null = null;
+    for (const inv of pool) {
+      const parts = splitInvoiceNumber(inv.number);
+      if (!parts || parts.prefix !== pfx) continue;
+      const value = Number.parseInt(parts.digits, 10);
+      if (!Number.isFinite(value)) continue;
+      if (!best || value > best.value) best = { value, width: parts.digits.length };
+    }
+    return best;
+  };
+
+  // 1) The configured prefix, within this company's invoices.
+  let pfx = prefix;
+  let best = highestIn(pfx, inScope);
+
+  // 2) No invoice uses that prefix yet: follow the series this client's most
+  //    recent invoice is already in (e.g. plain "643" with no prefix at all).
+  if (!best) {
+    const latest = inScope
+      .filter((i) => i.clientId === clientId)
+      .sort(
+        (a, b) => b.invoiceDate.localeCompare(a.invoiceDate) || b.number.localeCompare(a.number),
+      )
+      .find((i) => splitInvoiceNumber(i.number));
+    const parts = latest ? splitInvoiceNumber(latest.number) : null;
+    if (parts) {
+      pfx = parts.prefix;
+      best = highestIn(pfx, inScope);
+    }
+  }
+
+  if (best) return `${pfx}${String(best.value + 1).padStart(best.width, "0")}`;
+  return `${prefix}${String(fallbackNext).padStart(3, "0")}`;
+}
+
+/* ---------- End clients & ownership ---------- */
+
+/** Filter value meaning "invoices that have no End Client set". */
+export const UNASSIGNED_END_CLIENT = "__unassigned__";
+
+/** Trimmed End Client name; "" when not assigned. */
+export function endClientOf(invoice: Pick<Invoice, "endClient">): string {
+  return (invoice.endClient ?? "").trim();
+}
+
+const sameName = (a: string, b: string) =>
+  a.localeCompare(b, undefined, { sensitivity: "accent" }) === 0;
+
+/**
+ * Whether an invoice falls inside an End Client filter. "" = no filter (every
+ * invoice), UNASSIGNED_END_CLIENT = only invoices with no End Client, anything
+ * else = that End Client name (case-insensitive).
+ */
+export function matchesEndClient(invoice: Pick<Invoice, "endClient">, filter: string): boolean {
+  if (!filter) return true;
+  const name = endClientOf(invoice);
+  if (filter === UNASSIGNED_END_CLIENT) return name === "";
+  return sameName(name, filter);
+}
+
+/** Distinct End Client names used on a client's invoices (A–Z, one spelling per name) plus whether any invoice has none. */
+export function endClientOptions(
+  invoices: Pick<Invoice, "clientId" | "endClient">[],
+  clientId?: string,
+): { names: string[]; hasUnassigned: boolean } {
+  const seen = new Map<string, string>();
+  let hasUnassigned = false;
+  for (const inv of invoices) {
+    if (clientId && inv.clientId !== clientId) continue;
+    const name = endClientOf(inv);
+    if (!name) hasUnassigned = true;
+    else if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+  }
+  return { names: [...seen.values()].sort((a, b) => a.localeCompare(b)), hasUnassigned };
+}
+
+/**
+ * Who a payment belongs to is decided by the invoice it pays, not by the
+ * copy of clientId stored on the payment row: if an invoice is ever moved to
+ * another client, its payments follow it automatically and nothing in the
+ * database has to be rewritten. Falls back to the stored clientId only when
+ * the invoice can't be found.
+ */
+export function paymentOwnerClientId(
+  payment: Pick<Payment, "invoiceId" | "clientId">,
+  invoiceById: Map<string, Pick<Invoice, "clientId">>,
+): string {
+  return invoiceById.get(payment.invoiceId)?.clientId ?? payment.clientId;
+}
+
+/** Same rule for credit notes: a note linked to an invoice belongs to that invoice's client. */
+export function creditNoteOwnerClientId(
+  note: Pick<CreditNote, "invoiceId" | "clientId">,
+  invoiceById: Map<string, Pick<Invoice, "clientId">>,
+): string {
+  return (note.invoiceId ? invoiceById.get(note.invoiceId)?.clientId : undefined) ?? note.clientId;
+}
+
+/** Totals for an already-filtered set of invoice views (e.g. one End Client). */
+export function totalsForViews(views: InvoiceView[]): ClientTotals {
+  return {
+    invoiced: round2(views.reduce((s, r) => s + r.total, 0)),
+    paid: round2(views.reduce((s, r) => s + r.paid, 0)),
+    outstanding: round2(views.reduce((s, r) => s + r.outstanding, 0)),
+    invoiceCount: views.length,
   };
 }

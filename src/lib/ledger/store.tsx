@@ -327,8 +327,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   };
 
   const invoiceViews = useMemo(
-    () => buildInvoiceViews(data.invoices, data.payments, data.clients),
-    [data.invoices, data.payments, data.clients],
+    () => buildInvoiceViews(data.invoices, data.payments, data.clients, data.creditNotes),
+    [data.invoices, data.payments, data.clients, data.creditNotes],
   );
 
   // Credit is allocated per client (an overpayment on Client A's invoice

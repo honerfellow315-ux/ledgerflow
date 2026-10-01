@@ -5,13 +5,24 @@ import { useLedger } from "@/lib/ledger/store";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import {
+  CompanyClientPicker,
+  ALL_COMPANIES,
+  clientsInCompany,
+} from "@/components/app/CompanyClientPicker";
+import {
+  applyClientCredit,
   businessProfileFor,
+  creditNoteOwnerClientId,
   creditNoteTotal,
+  endClientOptions,
+  matchesEndClient,
+  paymentOwnerClientId,
+  totalsForViews,
+  UNASSIGNED_END_CLIENT,
   formatDate,
   formatMonth,
   formatMoney,
   round2,
-  totalsForClient,
   type InvoiceViewWithCredit,
 } from "@/lib/ledger/calc";
 import { downloadCsv } from "@/lib/ledger/csv";
@@ -29,7 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { Client, ClientStatus, Settings } from "@/lib/ledger/types";
+import type { Client, Settings } from "@/lib/ledger/types";
 
 export const Route = createFileRoute("/statements/")({
   head: () => ({
@@ -92,12 +103,6 @@ export const DUE_STATUS_LABEL: Record<DueStatus, string> = {
   overdue: "Overdue",
 };
 
-const STATUS_LABEL: Record<ClientStatus, string> = {
-  active: "Active",
-  "on-hold": "On hold",
-  closed: "Closed",
-};
-
 function todayIso(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -127,8 +132,14 @@ function StatementsPage() {
 }
 
 function StatementsPageContent() {
-  const { data, invoiceViews, invoiceViewsWithCredit, creditBalanceByClient } = useLedger();
+  const { data, invoiceViews } = useLedger();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Billing company filter for the client list. ALL_COMPANIES = everyone
+  // (the behaviour before this filter existed).
+  const [companyKey, setCompanyKey] = useState<string>(ALL_COMPANIES);
+  // "" = every invoice of the client; UNASSIGNED_END_CLIENT = only invoices with
+  // no End Client; otherwise one End Client's own statement.
+  const [endClientFilter, setEndClientFilter] = useState<string>("");
   // "" = whole account history (previous behaviour, unchanged default).
   const [selectedMonth, setSelectedMonth] = useState<string>("");
   // Filters the Outstanding Invoices table only; the three totals above it
@@ -144,33 +155,80 @@ function StatementsPageContent() {
     setSafariPrint(shouldUseSafariPrintLayout());
   }, []);
 
-  // Defaults to the first active client; falls back to the first client of any status.
+  // Defaults to the first active client of the chosen billing company; falls
+  // back to the first client of any status.
+  const companyClients = useMemo(
+    () => clientsInCompany(data.clients, companyKey),
+    [data.clients, companyKey],
+  );
   const client = useMemo<Client | undefined>(
     () =>
-      data.clients.find((c) => c.id === selectedId) ??
-      data.clients.find((c) => c.status === "active") ??
-      data.clients[0],
-    [data.clients, selectedId],
+      companyClients.find((c) => c.id === selectedId) ??
+      companyClients.find((c) => c.status === "active") ??
+      companyClients[0],
+    [companyClients, selectedId],
+  );
+
+  // End Clients used on this client's invoices. The selector only appears when
+  // at least one invoice has an End Client set.
+  const endClients = useMemo(
+    () => endClientOptions(data.invoices, client?.id),
+    [data.invoices, client?.id],
+  );
+  const hasEndClients = endClients.names.length > 0;
+  const effectiveEndClient = (() => {
+    if (!hasEndClients || !endClientFilter) return "";
+    if (endClientFilter === UNASSIGNED_END_CLIENT) {
+      return endClients.hasUnassigned ? UNASSIGNED_END_CLIENT : "";
+    }
+    return endClients.names.some((n) => matchesEndClient({ endClient: n }, endClientFilter))
+      ? endClientFilter
+      : "";
+  })();
+  const endClientLabel =
+    effectiveEndClient === UNASSIGNED_END_CLIENT
+      ? "Not assigned to an end client"
+      : effectiveEndClient;
+
+  // The client's invoices inside the chosen End Client scope. Payments and
+  // credit notes below are attached to these invoices, so ownership always
+  // follows the invoice (see calc.ts: paymentOwnerClientId).
+  const scopedViews = useMemo(
+    () =>
+      client
+        ? invoiceViews.filter(
+            (v) => v.clientId === client.id && matchesEndClient(v, effectiveEndClient),
+          )
+        : [],
+    [client, invoiceViews, effectiveEndClient],
+  );
+  const { views: scopedViewsWithCredit, remainingCredit: creditOnAccount } = useMemo(
+    () => applyClientCredit(scopedViews),
+    [scopedViews],
   );
 
   const { rows, draftCreditNotes } = useMemo(() => {
     if (!client) return { rows: [] as StatementRow[], draftCreditNotes: 0 };
     const invoiceById = new Map(invoiceViews.map((i) => [i.id, i]));
+    const scopedIds = new Set(scopedViews.map((v) => v.id));
+    const scoped = effectiveEndClient !== "";
 
-    const invoiceEntries: StatementEntry[] = invoiceViews
-      .filter((i) => i.clientId === client.id)
-      .map((i) => ({
-        key: `i-${i.id}`,
-        date: i.invoiceDate,
-        type: "Invoice",
-        reference: i.number,
-        description: i.description || "Invoice raised",
-        debit: i.total,
-        credit: 0,
-      }));
+    const invoiceEntries: StatementEntry[] = scopedViews.map((i) => ({
+      key: `i-${i.id}`,
+      date: i.invoiceDate,
+      type: "Invoice",
+      reference: i.number,
+      description: i.description || "Invoice raised",
+      debit: i.total,
+      credit: 0,
+    }));
 
     const paymentEntries: StatementEntry[] = data.payments
-      .filter((p) => p.clientId === client.id)
+      .filter(
+        (p) =>
+          paymentOwnerClientId(p, invoiceById) === client.id &&
+          (!scoped || scopedIds.has(p.invoiceId)),
+      )
       .map((p) => {
         const invoice = invoiceById.get(p.invoiceId);
         return {
@@ -186,9 +244,16 @@ function StatementsPageContent() {
         };
       });
 
-    // Ledger direction for credit notes: issued notes increase the balance (debit),
-    // applied notes reduce it (credit). Drafts are not a ledger event yet.
-    const clientNotes = data.creditNotes.filter((n) => n.clientId === client.id);
+    // Ledger direction for credit notes: issued and applied notes both reduce the
+    // balance (credit), the same way they reduce the invoice they are linked to.
+    // Drafts are not a ledger event yet.
+    // A credit note without a linked invoice has no End Client, so it only shows
+    // in the client's full statement.
+    const clientNotes = data.creditNotes.filter(
+      (n) =>
+        creditNoteOwnerClientId(n, invoiceById) === client.id &&
+        (!scoped || (n.invoiceId !== undefined && scopedIds.has(n.invoiceId))),
+    );
     const creditNoteEntries: StatementEntry[] = clientNotes
       .filter((n) => n.status !== "draft")
       .map((n) => {
@@ -199,8 +264,8 @@ function StatementsPageContent() {
           type: "Credit Note",
           reference: n.number,
           description: `${n.reason || "Credit note"} (${n.status})`,
-          debit: n.status === "issued" ? total : 0,
-          credit: n.status === "applied" ? total : 0,
+          debit: 0,
+          credit: total,
         };
       });
 
@@ -221,7 +286,7 @@ function StatementsPageContent() {
       rows: withBalance,
       draftCreditNotes: clientNotes.filter((n) => n.status === "draft").length,
     };
-  }, [client, invoiceViews, data.payments, data.creditNotes]);
+  }, [client, invoiceViews, scopedViews, effectiveEndClient, data.payments, data.creditNotes]);
 
   // Every unpaid/partial invoice for this client, tagged Due (not yet past
   // its due date) or Overdue (past it), oldest due date first. The three
@@ -236,8 +301,8 @@ function StatementsPageContent() {
     }
     // Uses the credit-adjusted figures: an earlier overpayment on one invoice is
     // automatically netted off the client's next unpaid invoice(s), oldest first.
-    const invoicesOwed: OutstandingRow[] = invoiceViewsWithCredit
-      .filter((v) => v.clientId === client.id && v.effectiveOutstanding > 0.004)
+    const invoicesOwed: OutstandingRow[] = scopedViewsWithCredit
+      .filter((v) => v.effectiveOutstanding > 0.004)
       .map((v) => ({ ...v, dueStatus: (v.ageing > 0 ? "overdue" : "due") as DueStatus }))
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.number.localeCompare(b.number));
     const total = round2(invoicesOwed.reduce((s, r) => s + r.effectiveOutstanding, 0));
@@ -250,9 +315,7 @@ function StatementsPageContent() {
       outstandingInvoices: invoicesOwed,
       outstandingTotals: { total, overdue, due: round2(total - overdue) },
     };
-  }, [client, invoiceViewsWithCredit]);
-
-  const creditOnAccount = client ? (creditBalanceByClient.get(client.id) ?? 0) : 0;
+  }, [client, scopedViewsWithCredit]);
 
   const filteredOutstandingInvoices = useMemo(
     () =>
@@ -288,7 +351,7 @@ function StatementsPageContent() {
     ? (rows.filter((r) => r.date.slice(0, 7) < selectedMonth).at(-1)?.balance ?? 0)
     : 0;
 
-  const totals = client ? totalsForClient(client.id, invoiceViews) : null;
+  const totals = client ? totalsForViews(scopedViews) : null;
   const closingBalance = visibleRows.at(-1)?.balance ?? openingBalance;
   // Reconciliation check always compares the *account's* true closing
   // balance (all history) to totalsForClient — not the month-scoped one,
@@ -306,7 +369,7 @@ function StatementsPageContent() {
       ? [["", "Opening Balance", "", "Balance brought forward", "", "", openingBalance]]
       : [];
     downloadCsv(
-      `statement-${fileSlug(client.company)}-${statementDate}${selectedMonth ? `-${selectedMonth}` : ""}.csv`,
+      `statement-${fileSlug(client.company)}${effectiveEndClient ? `-${fileSlug(endClientLabel)}` : ""}-${statementDate}${selectedMonth ? `-${selectedMonth}` : ""}.csv`,
       ["Date", "Type", "Reference", "Description", "Debit", "Credit", "Running Balance"],
       [
         ...openingRow,
@@ -347,19 +410,40 @@ function StatementsPageContent() {
             description="Running balance per client across invoices, payments and credit notes."
           />
           <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
-            <Select value={client.id} onValueChange={setSelectedId}>
-              <SelectTrigger className="h-8 w-full text-[13px] sm:w-72" aria-label="Select client">
-                <SelectValue placeholder="Select client" />
-              </SelectTrigger>
-              <SelectContent>
-                {data.clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.company}
-                    {c.status !== "active" ? ` (${STATUS_LABEL[c.status]})` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <CompanyClientPicker
+              clients={data.clients}
+              companies={data.companies}
+              companyKey={companyKey}
+              clientId={client.id}
+              onCompanyChange={setCompanyKey}
+              onClientChange={(id) => {
+                setSelectedId(id);
+                setEndClientFilter("");
+              }}
+            />
+            {hasEndClients ? (
+              <Select
+                value={effectiveEndClient || "all"}
+                onValueChange={(v) => setEndClientFilter(v === "all" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 w-full text-[13px] sm:w-56" aria-label="End client">
+                  <SelectValue placeholder="All end clients" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All end clients (whole account)</SelectItem>
+                  {endClients.names.map((n) => (
+                    <SelectItem key={n} value={n}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                  {endClients.hasUnassigned ? (
+                    <SelectItem value={UNASSIGNED_END_CLIENT}>
+                      Not assigned to an end client
+                    </SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
+            ) : null}
             <Select
               value={selectedMonth || "all"}
               onValueChange={(v) => setSelectedMonth(v === "all" ? "" : v)}
@@ -404,12 +488,15 @@ function StatementsPageContent() {
         <Panel>
           <PanelHeader
             title={client.company}
-            description={client.name}
+            description={
+              endClientLabel ? `${client.name} — End client: ${endClientLabel}` : client.name
+            }
             actions={<StatusBadge status={client.status} kind="client" />}
           />
           <dl className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
             <Detail label="Client Name" value={client.name} />
             <Detail label="Company" value={client.company} />
+            {endClientLabel ? <Detail label="End Client" value={endClientLabel} /> : null}
             <Detail label="VAT Number" value={client.vatNumber || "—"} mono />
             <Detail label="Account Reference" value={client.accountReference || "—"} mono />
             <Detail label="Email" value={client.email || "—"} />
@@ -475,7 +562,9 @@ function StatementsPageContent() {
           </div>
           {creditOnAccount > 0.004 ? (
             <div className="border-b border-border bg-success-soft px-4 py-2.5 text-[13px] text-success">
-              <span className="font-semibold">Credit on account: {formatMoney(creditOnAccount)}</span>{" "}
+              <span className="font-semibold">
+                Credit on account: {formatMoney(creditOnAccount)}
+              </span>{" "}
               — client has paid more than invoiced. It will be netted off their next invoice
               automatically.
             </div>
@@ -651,6 +740,7 @@ function StatementsPageContent() {
         <StatementDocumentSafari
           settings={settings}
           client={client}
+          endClientLabel={endClientLabel || undefined}
           rows={visibleRows}
           statementDate={statementDate}
           totals={totals}
@@ -665,6 +755,7 @@ function StatementsPageContent() {
         <StatementDocument
           settings={settings}
           client={client}
+          endClientLabel={endClientLabel || undefined}
           rows={visibleRows}
           statementDate={statementDate}
           totals={totals}
@@ -715,7 +806,10 @@ function StatementDocument({
   accountClosingBalance,
   outstandingInvoices,
   outstandingTotals,
+  endClientLabel,
 }: {
+  /** Set when the statement is limited to one End Client. */
+  endClientLabel?: string | undefined;
   settings: Settings;
   client: Client;
   rows: StatementRow[];
@@ -829,6 +923,7 @@ function StatementDocument({
                 <p className="sd-label">Statement for</p>
                 <p className="sd-client-name">{client.company}</p>
                 <p className="sd-lines">{client.name}</p>
+                {endClientLabel ? <p className="sd-lines">Client: {endClientLabel}</p> : null}
                 {client.address ? <p className="sd-lines">{client.address}</p> : null}
                 {client.vatNumber ? <p className="sd-lines">VAT No. {client.vatNumber}</p> : null}
               </section>
@@ -1006,7 +1101,10 @@ function StatementDocumentSafari({
   accountClosingBalance,
   outstandingInvoices,
   outstandingTotals,
+  endClientLabel,
 }: {
+  /** Set when the statement is limited to one End Client. */
+  endClientLabel?: string | undefined;
   settings: Settings;
   client: Client;
   rows: StatementRow[];
@@ -1086,6 +1184,7 @@ function StatementDocumentSafari({
                 <p className="sd-label">Statement for</p>
                 <p className="sd-client-name">{client.company}</p>
                 <p className="sd-lines">{client.name}</p>
+                {endClientLabel ? <p className="sd-lines">Client: {endClientLabel}</p> : null}
                 {client.address ? <p className="sd-lines">{client.address}</p> : null}
                 {client.vatNumber ? <p className="sd-lines">VAT No. {client.vatNumber}</p> : null}
               </section>

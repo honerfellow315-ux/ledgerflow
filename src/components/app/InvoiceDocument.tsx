@@ -110,6 +110,9 @@ export function InvoiceDocument({
                   {invoice.poReference ? (
                     <p className="id-lines">PO/Ref: {invoice.poReference}</p>
                   ) : null}
+                  {invoice.endClient?.trim() ? (
+                    <p className="id-lines">Client: {invoice.endClient.trim()}</p>
+                  ) : null}
                 </div>
               </header>
 

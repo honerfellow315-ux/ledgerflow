@@ -2,7 +2,13 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { ArrowLeft, FileText, Pencil, Plus, Wallet } from "@/lib/icons";
 import { useLedger } from "@/lib/ledger/store";
-import { formatDate, formatMoney, round2, totalsForClient } from "@/lib/ledger/calc";
+import {
+  formatDate,
+  formatMoney,
+  paymentOwnerClientId,
+  round2,
+  totalsForClient,
+} from "@/lib/ledger/calc";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { StatusBadge } from "@/components/app/StatusBadge";
@@ -69,13 +75,13 @@ function ClientDetailPageContent() {
     [invoiceViewsWithCredit, clientId],
   );
 
-  const payments = useMemo(
-    () =>
-      data.payments
-        .filter((p) => p.clientId === clientId)
-        .sort((a, b) => b.date.localeCompare(a.date)),
-    [data.payments, clientId],
-  );
+  // Ownership follows the invoice a payment pays (calc.ts: paymentOwnerClientId).
+  const payments = useMemo(() => {
+    const byInvoice = new Map(invoiceViewsWithCredit.map((i) => [i.id, i]));
+    return data.payments
+      .filter((p) => paymentOwnerClientId(p, byInvoice) === clientId)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [data.payments, invoiceViewsWithCredit, clientId]);
 
   const statement = useMemo(() => {
     const byInvoice = new Map(invoiceViews.map((i) => [i.id, i]));

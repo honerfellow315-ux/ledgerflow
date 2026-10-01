@@ -22,6 +22,11 @@ const invoiceInput = z.object({
   invoiceDate: z.string().min(1),
   dueDate: z.string().min(1),
   poReference: z.string().optional(),
+  // Optional end client; "" clears it (stored as NULL).
+  endClient: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v.trim() || null)),
   description: z.string().default(""),
   amountExVat: z.number(),
   hours: z.number().optional(),

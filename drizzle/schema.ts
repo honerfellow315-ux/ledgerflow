@@ -181,6 +181,11 @@ export const invoices = pgTable("invoices", {
   invoiceDate: text("invoice_date").notNull(), // yyyy-mm-dd
   dueDate: text("due_date").notNull(), // yyyy-mm-dd
   poReference: text("po_reference"),
+  // Optional "who this was really billed for" — used when one client record
+  // (e.g. a management/agency account) carries invoices for several end
+  // clients. Plain nullable text: existing rows stay NULL (= unassigned) and
+  // are never modified.
+  endClient: text("end_client"),
   description: text("description").notNull().default(""),
   amountExVat: money("amount_ex_vat").notNull(),
   // Only set when the invoice was billed as Hours × Rate instead of a fixed

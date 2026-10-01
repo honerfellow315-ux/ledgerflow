@@ -3,7 +3,15 @@ import { useMemo, useState } from "react";
 import { Pencil, Plus, Search, Trash2 } from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
-import { formatDate, formatMoney, round2 } from "@/lib/ledger/calc";
+import {
+  endClientOptions,
+  formatDate,
+  formatMoney,
+  matchesEndClient,
+  paymentOwnerClientId,
+  round2,
+  UNASSIGNED_END_CLIENT,
+} from "@/lib/ledger/calc";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { PaymentDialog } from "@/components/app/PaymentDialog";
@@ -53,6 +61,8 @@ function PaymentsPageContent() {
   const { can } = usePermissions();
   const [query, setQuery] = useState("");
   const [clientId, setClientId] = useState("all");
+  const [companyId, setCompanyId] = useState("all");
+  const [endClient, setEndClient] = useState("all");
   const [method, setMethod] = useState("all");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Payment | null>(null);
@@ -63,12 +73,26 @@ function PaymentsPageContent() {
     const byClient = new Map(data.clients.map((c) => [c.id, c]));
     const q = query.trim().toLowerCase();
     return [...data.payments]
-      .map((p) => ({
-        payment: p,
-        invoice: byInvoice.get(p.invoiceId),
-        client: byClient.get(p.clientId),
-      }))
-      .filter((r) => (clientId === "all" ? true : r.payment.clientId === clientId))
+      .map((p) => {
+        // A payment belongs to whoever owns the invoice it pays (see
+        // calc.ts: paymentOwnerClientId), so moving an invoice moves its payments.
+        const ownerId = paymentOwnerClientId(p, byInvoice);
+        return {
+          payment: p,
+          invoice: byInvoice.get(p.invoiceId),
+          ownerId,
+          client: byClient.get(ownerId),
+        };
+      })
+      .filter((r) => (clientId === "all" ? true : r.ownerId === clientId))
+      .filter((r) => (companyId === "all" ? true : (r.client?.companyId ?? null) === companyId))
+      .filter((r) =>
+        endClient === "all"
+          ? true
+          : r.invoice
+            ? matchesEndClient(r.invoice, endClient)
+            : endClient === UNASSIGNED_END_CLIENT,
+      )
       .filter((r) => (method === "all" ? true : r.payment.method === method))
       .filter((r) =>
         q
@@ -78,7 +102,22 @@ function PaymentsPageContent() {
           : true,
       )
       .sort((a, b) => b.payment.date.localeCompare(a.payment.date));
-  }, [data.payments, data.clients, invoiceViews, query, clientId, method]);
+  }, [data.payments, data.clients, invoiceViews, query, clientId, companyId, endClient, method]);
+
+  const clientChoices = useMemo(
+    () => data.clients.filter((c) => companyId === "all" || (c.companyId ?? null) === companyId),
+    [data.clients, companyId],
+  );
+  const endClientChoices = useMemo(() => {
+    const byClient = new Map(data.clients.map((c) => [c.id, c]));
+    return endClientOptions(
+      invoiceViews.filter(
+        (i) =>
+          (clientId === "all" || i.clientId === clientId) &&
+          (companyId === "all" || (byClient.get(i.clientId)?.companyId ?? null) === companyId),
+      ),
+    );
+  }, [invoiceViews, data.clients, clientId, companyId]);
 
   const total = round2(rows.reduce((s, r) => s + r.payment.amount, 0));
 
@@ -123,19 +162,66 @@ function PaymentsPageContent() {
               className="h-8 pl-8 text-[13px]"
             />
           </div>
-          <Select value={clientId} onValueChange={setClientId}>
-            <SelectTrigger className="h-8 w-48 text-[13px]">
+          <Select
+            value={companyId}
+            onValueChange={(v) => {
+              setCompanyId(v);
+              setEndClient("all");
+              const stillThere = data.clients.some(
+                (c) => c.id === clientId && (v === "all" || (c.companyId ?? null) === v),
+              );
+              if (!stillThere) setClientId("all");
+            }}
+          >
+            <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="Billing company">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All billing companies</SelectItem>
+              {data.companies.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={clientId}
+            onValueChange={(v) => {
+              setClientId(v);
+              setEndClient("all");
+            }}
+          >
+            <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="Client">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All clients</SelectItem>
-              {data.clients.map((c) => (
+              {clientChoices.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
                   {c.company}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {endClientChoices.names.length > 0 ? (
+            <Select value={endClient} onValueChange={setEndClient}>
+              <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="End client">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All end clients</SelectItem>
+                {endClientChoices.names.map((n) => (
+                  <SelectItem key={n} value={n}>
+                    {n}
+                  </SelectItem>
+                ))}
+                {endClientChoices.hasUnassigned ? (
+                  <SelectItem value={UNASSIGNED_END_CLIENT}>Not assigned</SelectItem>
+                ) : null}
+              </SelectContent>
+            </Select>
+          ) : null}
           <Select value={method} onValueChange={setMethod}>
             <SelectTrigger className="h-8 w-40 text-[13px]">
               <SelectValue />
@@ -172,17 +258,22 @@ function PaymentsPageContent() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map(({ payment, invoice, client }) => (
+                {rows.map(({ payment, invoice, client, ownerId }) => (
                   <TR key={payment.id}>
                     <TD>{formatDate(payment.date)}</TD>
                     <TD>
                       <Link
                         to="/clients/$clientId"
-                        params={{ clientId: payment.clientId }}
+                        params={{ clientId: ownerId }}
                         className="hover:underline"
                       >
                         {client?.company ?? "Unknown"}
                       </Link>
+                      {invoice?.endClient?.trim() ? (
+                        <div className="text-[11px] font-normal text-muted-foreground">
+                          End client: {invoice.endClient.trim()}
+                        </div>
+                      ) : null}
                     </TD>
                     <TD mono>{invoice?.number ?? "—"}</TD>
                     <TD>{payment.method}</TD>

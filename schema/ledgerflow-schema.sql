@@ -491,3 +491,6 @@ ALTER TABLE payroll_staff
   ADD COLUMN IF NOT EXISTS sia_number            text,
   ADD COLUMN IF NOT EXISTS role                  text,
   ADD COLUMN IF NOT EXISTS service_type          text;
+
+-- End Client on invoices (optional, nullable; existing rows untouched).
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS end_client text;

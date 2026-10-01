@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useLedger } from "@/lib/ledger/store";
 import { RequireView } from "@/components/app/RequireView";
-import { formatDate, formatMoney, round2 } from "@/lib/ledger/calc";
+import { formatDate, formatMoney, paymentOwnerClientId, round2 } from "@/lib/ledger/calc";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { StatusBadge } from "@/components/app/StatusBadge";
@@ -76,8 +76,10 @@ function ReportsPageContent() {
 
   const statement = useMemo(() => {
     const invoices = invoiceViews.filter((i) => i.clientId === statementClient);
-    const payments = data.payments.filter((p) => p.clientId === statementClient);
     const byInvoice = new Map(invoiceViews.map((i) => [i.id, i]));
+    const payments = data.payments.filter(
+      (p) => paymentOwnerClientId(p, byInvoice) === statementClient,
+    );
     const rows = [
       ...invoices.map((i) => ({
         key: `i-${i.id}`,

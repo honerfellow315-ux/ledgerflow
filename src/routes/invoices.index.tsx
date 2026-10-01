@@ -5,13 +5,17 @@ import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
 import {
   businessProfileFor,
+  creditNoteTotal,
+  endClientOptions,
   formatDate,
   formatHours,
   formatMoney,
   invoiceTracksHours,
+  matchesEndClient,
   processedHoursForInvoice,
   remainingInvoiceHours,
   round2,
+  UNASSIGNED_END_CLIENT,
 } from "@/lib/ledger/calc";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
@@ -86,6 +90,8 @@ function InvoicesPageContent() {
   const [approval, setApproval] = useState("all");
   const [clientId, setClientId] = useState(search.client ?? "all");
   const [companyId, setCompanyId] = useState("all");
+  // "all" = every invoice; UNASSIGNED_END_CLIENT = invoices with no End Client.
+  const [endClient, setEndClient] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -159,11 +165,12 @@ function InvoicesPageContent() {
       )
       .filter((i) => (clientId === "all" ? true : i.clientId === clientId))
       .filter((i) => (companyId === "all" ? true : clientCompanyId.get(i.clientId) === companyId))
+      .filter((i) => matchesEndClient(i, endClient === "all" ? "" : endClient))
       .filter((i) => (from ? i.invoiceDate >= from : true))
       .filter((i) => (to ? i.invoiceDate <= to : true))
       .filter((i) =>
         q
-          ? `${i.number} ${i.clientName} ${i.clientCompany} ${i.description}`
+          ? `${i.number} ${i.clientName} ${i.clientCompany} ${i.endClient ?? ""} ${i.description}`
               .toLowerCase()
               .includes(q)
           : true,
@@ -176,10 +183,43 @@ function InvoicesPageContent() {
     approval,
     clientId,
     companyId,
+    endClient,
     from,
     to,
     clientCompanyId,
   ]);
+
+  // Clients offered in the Client dropdown: only those under the chosen billing company.
+  const clientChoices = useMemo(
+    () => data.clients.filter((c) => companyId === "all" || (c.companyId ?? null) === companyId),
+    [data.clients, companyId],
+  );
+
+  // End Clients that exist for the current Company/Client selection. The
+  // dropdown is hidden until at least one invoice has an End Client.
+  const endClientChoices = useMemo(
+    () =>
+      endClientOptions(
+        data.invoices.filter(
+          (i) =>
+            (clientId === "all" || i.clientId === clientId) &&
+            (companyId === "all" || clientCompanyId.get(i.clientId) === companyId),
+        ),
+      ),
+    [data.invoices, clientId, companyId, clientCompanyId],
+  );
+
+  const changeCompany = (value: string) => {
+    setCompanyId(value);
+    setEndClient("all");
+    // Keep the chosen client only if it belongs to the new company.
+    if (value !== "all" && clientId !== "all") {
+      const stillThere = data.clients.some(
+        (c) => c.id === clientId && (c.companyId ?? null) === value,
+      );
+      if (!stillThere) setClientId("all");
+    }
+  };
 
   const totals = useMemo(
     () => ({
@@ -266,25 +306,12 @@ function InvoicesPageContent() {
                 <SelectItem value="unapproved">Unapproved</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={clientId} onValueChange={setClientId}>
-              <SelectTrigger className="h-8 w-48 text-[13px]">
+            <Select value={companyId} onValueChange={changeCompany}>
+              <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="Billing company">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All clients</SelectItem>
-                {data.clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.company}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={companyId} onValueChange={setCompanyId}>
-              <SelectTrigger className="h-8 w-44 text-[13px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All companies</SelectItem>
+                <SelectItem value="all">All billing companies</SelectItem>
                 {data.companies.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
                     {c.name}
@@ -292,6 +319,43 @@ function InvoicesPageContent() {
                 ))}
               </SelectContent>
             </Select>
+            <Select
+              value={clientId}
+              onValueChange={(v) => {
+                setClientId(v);
+                setEndClient("all");
+              }}
+            >
+              <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="Client">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All clients</SelectItem>
+                {clientChoices.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.company}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {endClientChoices.names.length > 0 ? (
+              <Select value={endClient} onValueChange={setEndClient}>
+                <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="End client">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All end clients</SelectItem>
+                  {endClientChoices.names.map((n) => (
+                    <SelectItem key={n} value={n}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                  {endClientChoices.hasUnassigned ? (
+                    <SelectItem value={UNASSIGNED_END_CLIENT}>Not assigned</SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
+            ) : null}
             <Input
               type="date"
               value={from}
@@ -311,6 +375,7 @@ function InvoicesPageContent() {
             approval !== "all" ||
             clientId !== "all" ||
             companyId !== "all" ||
+            endClient !== "all" ||
             from ||
             to ? (
               <Button
@@ -322,6 +387,7 @@ function InvoicesPageContent() {
                   setApproval("all");
                   setClientId("all");
                   setCompanyId("all");
+                  setEndClient("all");
                   setFrom("");
                   setTo("");
                 }}
@@ -372,6 +438,11 @@ function InvoicesPageContent() {
                         >
                           {inv.clientCompany}
                         </Link>
+                        {inv.endClient?.trim() ? (
+                          <div className="text-[11px] font-normal text-muted-foreground">
+                            End client: {inv.endClient.trim()}
+                          </div>
+                        ) : null}
                       </TD>
                       <TD>{formatDate(inv.invoiceDate)}</TD>
                       <TD>{formatDate(inv.dueDate)}</TD>
@@ -392,6 +463,30 @@ function InvoicesPageContent() {
                         {inv.creditApplied > 0.004 ? (
                           <div className="text-[10px] font-normal text-success">
                             −{formatMoney(inv.creditApplied)} from credit
+                          </div>
+                        ) : null}
+                        {inv.linkedCreditNotes.length > 0 ? (
+                          <div className="mt-0.5 space-y-0.5 text-[10px] font-normal">
+                            {inv.linkedCreditNotes.map((n) => {
+                              const deducts = n.status !== "draft";
+                              return (
+                                <div
+                                  key={n.id}
+                                  className={deducts ? "text-success" : "text-muted-foreground"}
+                                  title={
+                                    deducts
+                                      ? `Credit note ${n.number} (${n.status}) is deducted from this invoice.`
+                                      : `Credit note ${n.number} is still a draft, so it is not deducted yet.`
+                                  }
+                                >
+                                  <Link to="/credit-notes" className="hover:underline">
+                                    {deducts ? "−" : ""}
+                                    {formatMoney(creditNoteTotal(n))} {n.number}
+                                    {deducts ? "" : " (draft)"}
+                                  </Link>
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : null}
                       </TD>
