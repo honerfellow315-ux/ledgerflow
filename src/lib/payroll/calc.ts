@@ -165,6 +165,30 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
 export const normNi = (s: string | null | undefined): string =>
   (s ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 
+/**
+ * UK National Insurance number: 2 letters + 6 digits + a suffix letter A-D.
+ * The first letter can't be D, F, I, Q, U or V; the second can't be D, F, I,
+ * O, Q, U or V; and the prefixes BG, GB, KN, NK, NT, TN, ZZ are never issued.
+ * (Temporary "TN" numbers and a missing suffix are NOT accepted here.)
+ */
+const NI_PATTERN = /^(?!BG|GB|KN|NK|NT|TN|ZZ)[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\d{6}[A-D]$/;
+
+export function isValidNi(s: string | null | undefined): boolean {
+  return NI_PATTERN.test(normNi(s));
+}
+
+/**
+ * Canonical way to STORE and SHOW an NI number: "ry865871d" -> "RY 86 58 71 D"
+ * (the spaced style the Excel salary sheet already uses). Anything that isn't a
+ * valid NI is returned trimmed + upper-cased and otherwise untouched, so a
+ * typo is never silently "fixed" into a different number.
+ */
+export function formatNi(s: string | null | undefined): string {
+  const n = normNi(s);
+  if (!NI_PATTERN.test(n)) return (s ?? "").trim().toUpperCase();
+  return `${n.slice(0, 2)} ${n.slice(2, 4)} ${n.slice(4, 6)} ${n.slice(6, 8)} ${n.slice(8)}`;
+}
+
 /** Case/space/punctuation-insensitive name key. */
 export const normName = (s: string | null | undefined): string =>
   (s ?? "")

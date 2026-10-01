@@ -412,6 +412,27 @@ export const payrollStaff = pgTable("payroll_staff", {
   area: text("area").notNull().default(""),
   notes: text("notes"),
   active: boolean("active").notNull().default(true),
+  // --- "All Payroll Format" fields (all nullable; dates are yyyy-mm-dd text; age is never stored) ---
+  dob: text("dob"),
+  gender: text("gender"),
+  rtwShareCode: text("rtw_share_code"),
+  shareCodeExpiry: text("share_code_expiry"),
+  address: text("address"),
+  town: text("town"),
+  postCode: text("post_code"),
+  uniform: text("uniform"),
+  accountHolderName: text("account_holder_name"),
+  accountNumber: text("account_number"),
+  sortCode: text("sort_code"),
+  employmentStartDate: text("employment_start_date"),
+  employmentEndDate: text("employment_end_date"),
+  contractStatus: text("contract_status"), // Active | P45 | Need P45
+  email: text("email"),
+  immigrationStatus: text("immigration_status"),
+  hoursAllowed: text("hours_allowed"),
+  siaNumber: text("sia_number"),
+  role: text("role"),
+  serviceType: text("service_type"),
 });
 
 // The payroll columns of the sheet (ESS, Fortexo, Secure FM, SES, SPL,

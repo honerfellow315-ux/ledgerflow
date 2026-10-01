@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { and, asc, desc, eq, inArray, lt, gt, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../server/db";
 import {
@@ -18,9 +19,11 @@ import {
   buildRows,
   formatMonthLabel,
   normName,
+  formatNi,
   normNi,
   round2,
 } from "../payroll/calc";
+import { CONTRACT_STATUSES, STAFF_DETAIL_FIELDS } from "../payroll/types";
 import type {
   CheckStatus,
   PayrollCompany,
@@ -30,13 +33,22 @@ import type {
   SalaryPayment,
   SalaryPeriod,
   Staff,
+  StaffDetailField,
+  StaffDetails,
+  StaffDetailsImportResult,
+  StaffDetailsImportRow,
 } from "../payroll/types";
 
 /* ------------------------------------------------------------------ */
 /* Row -> shared type mappers (drop nulls, narrow `text` columns)       */
 /* ------------------------------------------------------------------ */
 
-const toStaff = (r: typeof payrollStaff.$inferSelect): Staff => ({
+/**
+ * The salary sheet's view of a person (ids, NI, tag, area, account detail). It is
+ * what getPeriodSheet sends to anyone with the "salary" permission, so it must NOT
+ * carry the personal / banking / contract fields below.
+ */
+const toSheetStaff = (r: typeof payrollStaff.$inferSelect): Staff => ({
   id: r.id,
   rssId: r.rssId,
   essId: r.essId,
@@ -47,6 +59,22 @@ const toStaff = (r: typeof payrollStaff.$inferSelect): Staff => ({
   area: r.area,
   ...(r.notes ? { notes: r.notes } : {}),
   active: r.active,
+});
+
+/** Empty / null detail columns are dropped, like `notes`. */
+const toStaffDetails = (r: typeof payrollStaff.$inferSelect): StaffDetails => {
+  const details: StaffDetails = {};
+  for (const k of STAFF_DETAIL_FIELDS) {
+    const v = r[k];
+    if (v) details[k] = v;
+  }
+  return details;
+};
+
+/** Full staff record, including the new detail fields. Only for the "staff" permission. */
+const toStaff = (r: typeof payrollStaff.$inferSelect): Staff => ({
+  ...toSheetStaff(r),
+  ...toStaffDetails(r),
 });
 
 const toCompany = (r: typeof payrollCompanies.$inferSelect): PayrollCompany => ({
@@ -261,6 +289,26 @@ async function recomputeFromShifts(periodId: string) {
 /* Staff                                                                */
 /* ------------------------------------------------------------------ */
 
+/** Optional text: blank / missing is stored as NULL. */
+const optText = z
+  .string()
+  .trim()
+  .nullish()
+  .transform((v) => v || null);
+/** Optional date, stored as yyyy-mm-dd text; blank / missing is stored as NULL. */
+const optDate = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, "Use the date format yyyy-mm-dd.")
+  .or(z.literal(""))
+  .nullish()
+  .transform((v) => v || null);
+const optContractStatus = z
+  .enum(CONTRACT_STATUSES)
+  .or(z.literal(""))
+  .nullish()
+  .transform((v) => v || null);
+
 const staffInput = z.object({
   rssId: z.string().trim().default(""),
   essId: z.string().trim().default(""),
@@ -271,7 +319,49 @@ const staffInput = z.object({
   area: z.string().trim().default(""),
   notes: z.string().optional(),
   active: z.boolean().default(true),
+  // "All Payroll Format" fields
+  dob: optDate,
+  gender: optText,
+  rtwShareCode: optText,
+  shareCodeExpiry: optDate,
+  address: optText,
+  town: optText,
+  postCode: optText,
+  uniform: optText,
+  accountHolderName: optText,
+  accountNumber: optText,
+  sortCode: optText,
+  employmentStartDate: optDate,
+  employmentEndDate: optDate,
+  contractStatus: optContractStatus,
+  email: optText,
+  immigrationStatus: optText,
+  hoursAllowed: optText,
+  siaNumber: optText,
+  role: optText,
+  serviceType: optText,
 });
+
+/**
+ * Staff fields that never appear in the activity log text (NI, bank details and
+ * the personal details of the report). Only the harmless fields are logged.
+ */
+const PRIVATE_STAFF_FIELDS = new Set<string>([
+  "ni",
+  "accountDetail",
+  "dob",
+  "rtwShareCode",
+  "shareCodeExpiry",
+  "address",
+  "town",
+  "postCode",
+  "accountHolderName",
+  "accountNumber",
+  "sortCode",
+  "email",
+  "immigrationStatus",
+  "siaNumber",
+]);
 
 /** Rejects a second person with the same RSS ID / ESS ID / NI number. */
 async function assertStaffUnique(
@@ -300,10 +390,13 @@ export const addStaff = createServerFn({ method: "POST" })
   .validator(staffInput)
   .handler(async ({ data }) => {
     const actor = await requirePermission("staff", "create");
-    await assertStaffUnique(data);
+    // NI is stored in one canonical, spaced form ("RY 86 58 71 D"); matching
+    // against imports always ignores spaces and case anyway.
+    const clean = { ...data, ni: formatNi(data.ni) };
+    await assertStaffUnique(clean);
     const [row] = await db
       .insert(payrollStaff)
-      .values({ id: uid("st"), ...data })
+      .values({ id: uid("st"), ...clean })
       .returning();
     if (row) {
       await recordActivity({
@@ -321,10 +414,12 @@ export const updateStaff = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string(), patch: staffInput.partial() }))
   .handler(async ({ data }) => {
     const actor = await requirePermission("staff", "edit");
-    await assertStaffUnique(data.patch, data.id);
+    const patch =
+      data.patch.ni === undefined ? data.patch : { ...data.patch, ni: formatNi(data.patch.ni) };
+    await assertStaffUnique(patch, data.id);
     const [row] = await db
       .update(payrollStaff)
-      .set(data.patch)
+      .set(patch)
       .where(eq(payrollStaff.id, data.id))
       .returning();
     if (row) {
@@ -336,13 +431,153 @@ export const updateStaff = createServerFn({ method: "POST" })
         label: `Staff — ${row.name}`,
         // NI / bank details are deliberately left out of the log text
         details: changedFieldsSummary(
-          Object.fromEntries(
-            Object.entries(data.patch).filter(([k]) => k !== "ni" && k !== "accountDetail"),
-          ),
+          Object.fromEntries(Object.entries(patch).filter(([k]) => !PRIVATE_STAFF_FIELDS.has(k))),
         ),
       });
     }
     return row ? toStaff(row) : undefined;
+  });
+
+/* ------------------------------------------------------------------ */
+/* Staff details import (All Payroll Format file -> empty staff fields)  */
+/* ------------------------------------------------------------------ */
+
+const detailText = z.string().max(300).optional();
+const detailsImportRow = z.object({
+  name: z.string().max(300),
+  ni: z.string().max(60),
+  dob: detailText,
+  gender: detailText,
+  rtwShareCode: detailText,
+  shareCodeExpiry: detailText,
+  address: detailText,
+  town: detailText,
+  postCode: detailText,
+  uniform: detailText,
+  accountHolderName: detailText,
+  accountNumber: detailText,
+  sortCode: detailText,
+  employmentStartDate: detailText,
+  employmentEndDate: detailText,
+  contractStatus: detailText,
+  email: detailText,
+  immigrationStatus: detailText,
+  hoursAllowed: detailText,
+  siaNumber: detailText,
+  role: detailText,
+  serviceType: detailText,
+});
+
+const ISO_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const DATE_DETAIL_FIELDS = new Set<StaffDetailField>([
+  "dob",
+  "shareCodeExpiry",
+  "employmentStartDate",
+  "employmentEndDate",
+]);
+
+/** The value a file cell may be written as, or "" when it is not usable. */
+function cleanDetail(field: StaffDetailField, raw: string | undefined): string {
+  const v = (raw ?? "").trim();
+  if (!v) return "";
+  if (DATE_DETAIL_FIELDS.has(field)) return ISO_DATE.test(v) ? v : "";
+  if (field === "contractStatus") return CONTRACT_STATUSES.find((c) => c === v) ?? "";
+  return v;
+}
+
+/**
+ * Fills the new staff fields from an "All Payroll Format" file. It ONLY fills
+ * fields that are currently empty, never overwrites, and never creates staff.
+ * Matching: NI first (ignoring spaces / case), then a UNIQUE name (a name match
+ * is refused when both sides have an NI and the two differ).
+ * `apply: false` is the preview — it reads and reports, writes nothing.
+ * Each person is one single UPDATE whose CASE keeps any value already there,
+ * so re-running it (or two imports at once) can't overwrite anything.
+ */
+export const importStaffDetails = createServerFn({ method: "POST" })
+  .validator(z.object({ rows: z.array(detailsImportRow).max(500), apply: z.boolean() }))
+  .handler(async ({ data }): Promise<StaffDetailsImportResult> => {
+    const actor = await requirePermission("staff", "edit");
+    const staffRows = await db.select().from(payrollStaff);
+    const byNi = new Map<string, (typeof staffRows)[number]>();
+    const byName = new Map<string, (typeof staffRows)[number][]>();
+    for (const st of staffRows) {
+      const ni = normNi(st.ni);
+      if (ni && !byNi.has(ni)) byNi.set(ni, st);
+      const nm = normName(st.name);
+      if (nm) byName.set(nm, [...(byName.get(nm) ?? []), st]);
+    }
+
+    const out: StaffDetailsImportRow[] = [];
+    const updates: { id: string; fills: Partial<Record<StaffDetailField, string>> }[] = [];
+    // fields already claimed by an earlier row of the same file (first row wins)
+    const claimed = new Map<string, Set<StaffDetailField>>();
+
+    for (const row of data.rows) {
+      const fileNi = normNi(row.ni);
+      let person: (typeof staffRows)[number] | undefined;
+      let status: StaffDetailsImportRow["status"] = "notFound";
+      if (fileNi && byNi.has(fileNi)) {
+        person = byNi.get(fileNi);
+        status = "matched";
+      } else {
+        const named = byName.get(normName(row.name)) ?? [];
+        if (named.length > 1) status = "ambiguous";
+        else if (named.length === 1) {
+          const cand = named[0]!;
+          if (fileNi && normNi(cand.ni) && normNi(cand.ni) !== fileNi) status = "niConflict";
+          else {
+            person = cand;
+            status = "matched";
+          }
+        }
+      }
+      if (!person || status !== "matched") {
+        out.push({ name: row.name, status, fills: [] });
+        continue;
+      }
+
+      const taken = claimed.get(person.id) ?? new Set<StaffDetailField>();
+      const fills: Partial<Record<StaffDetailField, string>> = {};
+      for (const f of STAFF_DETAIL_FIELDS) {
+        const value = cleanDetail(f, row[f]);
+        if (!value || person[f] || taken.has(f)) continue;
+        fills[f] = value;
+        taken.add(f);
+      }
+      claimed.set(person.id, taken);
+      const keys = Object.keys(fills) as StaffDetailField[];
+      out.push({ name: row.name, status: "matched", fills: keys });
+      if (keys.length > 0) updates.push({ id: person.id, fills });
+    }
+
+    if (data.apply && updates.length > 0) {
+      for (const part of chunk(updates, 10)) {
+        await Promise.all(
+          part.map((u) => {
+            const set: Record<string, unknown> = {};
+            for (const [f, v] of Object.entries(u.fills)) {
+              const column = payrollStaff[f as StaffDetailField];
+              set[f] =
+                sql`CASE WHEN ${column} IS NULL OR ${column} = '' THEN ${v}::text ELSE ${column} END`;
+            }
+            return db
+              .update(payrollStaff)
+              .set(set as PgUpdateSetSource<typeof payrollStaff>)
+              .where(eq(payrollStaff.id, u.id));
+          }),
+        );
+      }
+      await recordActivity({
+        actor,
+        action: "updated",
+        module: "staff",
+        label: "Staff details import",
+        // counts only — never the values
+        details: `${updates.length} staff, ${updates.reduce((n, u) => n + Object.keys(u.fills).length, 0)} empty fields filled`,
+      });
+    }
+    return { rows: out };
   });
 
 /* ------------------------------------------------------------------ */
@@ -600,11 +835,51 @@ export const getPeriodSheet = createServerFn({ method: "POST" })
       period: toPeriod(periodRow),
       entries,
       payments,
-      staff: staffRows.map(toStaff),
+      staff: staffRows.map(toSheetStaff),
       companies: companies.map(toCompany),
       unmatchedShifts,
       shiftCounts,
     };
+  });
+
+/**
+ * Where one person's earnings for the month came from: their imported shifts
+ * grouped by system (RSS / ESS) and client company. A person is ONE staff
+ * record (matched on NI), so work done for several companies all lands on the
+ * same salary line; this just shows the split. Read-only.
+ */
+export const getEntryBreakdown = createServerFn({ method: "POST" })
+  .validator(z.object({ entryId: z.string() }))
+  .handler(async ({ data }) => {
+    await requirePermission("salary", "view");
+    const [entry] = await db
+      .select({ periodId: salaryEntries.periodId, staffId: salaryEntries.staffId })
+      .from(salaryEntries)
+      .where(eq(salaryEntries.id, data.entryId))
+      .limit(1);
+    if (!entry) throw new Error("This salary line no longer exists.");
+    const res = await db.execute(sql`
+      SELECT source, client_name AS "clientName", count(*)::int AS shifts,
+             round(sum(hours), 2)::float8 AS hours, round(sum(amount), 2)::float8 AS amount
+      FROM salary_shifts
+      WHERE period_id = ${entry.periodId} AND staff_id = ${entry.staffId}
+      GROUP BY source, client_name
+      ORDER BY source, client_name`);
+    return (
+      res.rows as {
+        source: string;
+        clientName: string;
+        shifts: number;
+        hours: number;
+        amount: number;
+      }[]
+    ).map((r) => ({
+      source: r.source,
+      clientName: r.clientName,
+      shifts: Number(r.shifts),
+      hours: Number(r.hours),
+      amount: Number(r.amount),
+    }));
   });
 
 /* ------------------------------------------------------------------ */
@@ -859,7 +1134,7 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
     const byNi = new Map<string, string>();
     const nameCount = new Map<string, number>();
     const byName = new Map<string, string>();
-    const idOf = new Map<string, { rssId: string; essId: string }>();
+    const idOf = new Map<string, { rssId: string; essId: string; ni: string }>();
     const register = (s: {
       id: string;
       rssId: string;
@@ -873,12 +1148,13 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
       const n = normName(s.name);
       nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
       byName.set(n, s.id);
-      idOf.set(s.id, { rssId: s.rssId, essId: s.essId });
+      idOf.set(s.id, { rssId: s.rssId, essId: s.essId, ni: s.ni });
     };
     staffRows.forEach(register);
 
     const newStaff: (typeof payrollStaff.$inferInsert)[] = [];
     const idBackfill = new Map<string, string>(); // staffId -> system id to fill in
+    const niBackfill = new Map<string, string>(); // staffId -> NI to fill in (staff had none)
     let matched = 0;
     let created = 0;
     let unmatched = 0;
@@ -887,8 +1163,13 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
       let staffId: string | null = null;
       if (r.employeeId && byId.has(r.employeeId)) staffId = byId.get(r.employeeId) ?? null;
       else if (r.ni && byNi.has(normNi(r.ni))) staffId = byNi.get(normNi(r.ni)) ?? null;
-      else if (r.employeeName && nameCount.get(normName(r.employeeName)) === 1)
-        staffId = byName.get(normName(r.employeeName)) ?? null;
+      else if (r.employeeName && nameCount.get(normName(r.employeeName)) === 1) {
+        const cand = byName.get(normName(r.employeeName)) ?? null;
+        const candNi = cand ? normNi(idOf.get(cand)?.ni) : "";
+        const rowNi = normNi(r.ni);
+        // Same name but a DIFFERENT NI number is a different person — never merge them.
+        if (cand && !(candNi && rowNi && candNi !== rowNi)) staffId = cand;
+      }
 
       if (!staffId && data.createMissingStaff && (r.employeeId || r.employeeName)) {
         const id = uid("st");
@@ -896,7 +1177,7 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
           id,
           rssId: data.source === "RSS" ? r.employeeId : "",
           essId: data.source === "ESS" ? r.employeeId : "",
-          ni: r.ni,
+          ni: formatNi(r.ni),
           name: r.employeeName || `Employee ${r.employeeId}`,
           tag: r.tag,
           accountDetail: r.accountDetail,
@@ -912,6 +1193,14 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
           idBackfill.set(staffId, r.employeeId);
           byId.set(r.employeeId, staffId);
         }
+        // The file knows this person's NI and we don't yet: keep it, so every
+        // later import (either system) can match them by NI.
+        const rowNi = normNi(r.ni);
+        if (rowNi && have && !normNi(have.ni) && !byNi.has(rowNi)) {
+          niBackfill.set(staffId, formatNi(r.ni));
+          byNi.set(rowNi, staffId);
+          have.ni = formatNi(r.ni);
+        }
       } else {
         unmatched++;
       }
@@ -922,7 +1211,7 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
         staffId,
         employeeId: r.employeeId,
         employeeName: r.employeeName,
-        ni: r.ni,
+        ni: formatNi(r.ni),
         date: r.date,
         clientName: r.clientName,
         siteName: r.siteName,
@@ -946,6 +1235,15 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
           UPDATE payroll_staff s SET ${col} = v.sys_id
           FROM (VALUES ${list}) AS v(id, sys_id) WHERE s.id = v.id AND s.${col} = ''`);
       }
+    }
+    for (const part of chunk([...niBackfill], 500)) {
+      const list = sql.join(
+        part.map(([sid, v]) => sql`(${sid}::text, ${v}::text)`),
+        sql`, `,
+      );
+      await db.execute(sql`
+        UPDATE payroll_staff s SET ni = v.ni
+        FROM (VALUES ${list}) AS v(id, ni) WHERE s.id = v.id AND s.ni = ''`);
     }
     for (const part of chunk(shiftValues, 800)) await db.insert(salaryShifts).values(part);
 
@@ -1118,7 +1416,7 @@ export const importMasterSheet = createServerFn({ method: "POST" })
           id,
           rssId: r.rssId && r.rssId !== "0" ? r.rssId : "",
           essId: r.essId && r.essId !== "0" ? r.essId : "",
-          ni: r.ni,
+          ni: formatNi(r.ni),
           name: r.name.trim(),
           tag: r.tag,
           accountDetail: r.accountDetail,
@@ -1142,7 +1440,7 @@ export const importMasterSheet = createServerFn({ method: "POST" })
         part.map(
           ({ id, r }) =>
             sql`(${id}::text, ${r.rssId && r.rssId !== "0" ? r.rssId : ""}::text, ${r.essId && r.essId !== "0" ? r.essId : ""}::text,
-                 ${r.ni}::text, ${r.tag}::text, ${r.accountDetail}::text, ${r.area}::text)`,
+                 ${formatNi(r.ni)}::text, ${r.tag}::text, ${r.accountDetail}::text, ${r.area}::text)`,
         ),
         sql`, `,
       );

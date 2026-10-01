@@ -21,6 +21,7 @@ import {
 import { Field } from "@/components/app/Field";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { PayStatusBadge } from "@/components/app/salary/badges";
+import { EarningsBreakdown } from "@/components/app/salary/EarningsBreakdown";
 import { useLedger } from "@/lib/ledger/store";
 import { formatDate, formatMoney } from "@/lib/ledger/calc";
 import {
@@ -290,6 +291,8 @@ export function EntryDialog({
             />
           </Field>
         </div>
+
+        <EarningsBreakdown entryId={draft.id} />
 
         <div>
           <p className="mb-2 text-[12px] font-semibold text-foreground">Payroll</p>

@@ -38,7 +38,9 @@ export const addCreditNote = createServerFn({ method: "POST" })
     const actor = await requirePermission("creditNotes", "create");
     const [row] = await db
       .insert(creditNotes)
-      .values({ id: uid("cn"), ...data })
+      // "" (no linked invoice) must be stored as NULL, not '' — an empty string
+      // fails the foreign key to invoices.id.
+      .values({ id: uid("cn"), ...data, invoiceId: data.invoiceId || null })
       .returning();
     if (row) {
       await recordActivity({
@@ -58,7 +60,11 @@ export const updateCreditNote = createServerFn({ method: "POST" })
     const actor = await requirePermission("creditNotes", "edit");
     const [row] = await db
       .update(creditNotes)
-      .set(data.patch)
+      .set(
+        "invoiceId" in data.patch
+          ? { ...data.patch, invoiceId: data.patch.invoiceId || null }
+          : data.patch,
+      )
       .where(eq(creditNotes.id, data.id))
       .returning();
     if (row) {

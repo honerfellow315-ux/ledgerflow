@@ -5,8 +5,8 @@
  *
  * exceljs is loaded on demand so it never weighs down the normal app bundle.
  */
-import { round2 } from "./calc";
-import type { CheckStatus, MasterRowInput, ShiftRowInput } from "./types";
+import { formatNi, isValidNi, normNi, round2 } from "./calc";
+import type { CheckStatus, MasterRowInput, ShiftRowInput, ShiftSource } from "./types";
 
 export type Cell = string | number | null;
 export type Matrix = Cell[][];
@@ -107,9 +107,14 @@ function plain(v: unknown): Cell {
   if (typeof v === "number" || typeof v === "string") return v;
   if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
   if (v instanceof Date) {
-    // time-only cells come back as 1899-12-30; we never need them
-    if (v.getUTCFullYear() < 1950) return null;
-    return `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`;
+    const year = v.getUTCFullYear();
+    // time-only cells (clock in / out) come back as 1899-12-30; we never need them
+    if (year < 1900) return null;
+    // A plain NUMBER that the sheet formats as a date or time (e.g. the ESS tab's
+    // "guard Amount", formatted h:mm) is turned into a Date by exceljs and lands
+    // in 1900-1949. No real shift date is that old, so give the number back.
+    if (year < 1950) return Math.round((v.getTime() / 86400000 + 25569) * 1e6) / 1e6;
+    return `${year}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`;
   }
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
@@ -191,23 +196,38 @@ export interface ShiftParse {
   months: Record<string, number>;
   /** rows that had data but no employee */
   skipped: number;
+  /** "export" = the 34-column shift export, "tabs" = the RSS / ESS tab layout */
+  layout: "export" | "tabs" | null;
+  /** Name of the sheet / tab the rows were read from. */
+  sheetName: string;
 }
 
+// Header names (lower-cased by norm()) for both layouts:
+//  - the raw shift export:  EMPLOYEE ID / EMPLOYEE NAME / HOURS / GUARD RATE / AMOUNT ...
+//  - the RSS / ESS tabs:    ESS ID / Officer / Clock In/Clock Out hours / Guard rate / guard Amount ...
+//    (the ID column is headed "ESS ID" even on the RSS tab, so which system it is
+//    comes from the "Which system?" choice, never from the header)
 const SHIFT_COLS = {
-  employeeId: ["employee id"],
-  employeeName: ["employee name"],
-  ni: ["ni number", "ni", "national insurance"],
+  employeeId: ["employee id", "ess id", "rss id"],
+  employeeName: ["employee name", "officer"],
+  ni: ["ni number", "ni", "national insurance", "n i number", "n i"],
   date: ["date"],
-  clientName: ["client name"],
+  clientName: ["client name", "customer name"],
   siteName: ["site name"],
-  hours: ["hours"],
+  hours: ["hours", "clock in/clock out hours"],
   rate: ["guard rate"],
-  amount: ["amount"],
+  amount: ["amount", "guard amount"],
   expenses: ["payable expenses"],
   penalty: ["penalty"],
   accountDetail: ["payment details"],
-  tag: ["guard tags"],
+  tag: ["guard tags", "tags"],
 } as const;
+
+/** A header row must contain ALL names of one set to count as that layout. */
+const SHIFT_HEADER_SETS: { layout: "export" | "tabs"; needles: string[] }[] = [
+  { layout: "export", needles: ["employee id", "hours"] },
+  { layout: "tabs", needles: ["officer", "clock in/clock out hours"] },
+];
 
 function findHeaderRow(matrix: Matrix, needles: string[]): number {
   for (let i = 0; i < Math.min(matrix.length, 15); i++) {
@@ -224,12 +244,24 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
     totals: { hours: 0, amount: 0 },
     months: {},
     skipped: 0,
+    layout: null,
+    sheetName: "",
   };
-  const h = findHeaderRow(matrix, ["employee id", "hours"]);
-  if (h < 0) {
+  let h = -1;
+  let layout: "export" | "tabs" | null = null;
+  for (const set of SHIFT_HEADER_SETS) {
+    h = findHeaderRow(matrix, set.needles);
+    if (h >= 0) {
+      layout = set.layout;
+      break;
+    }
+  }
+  if (h < 0 || !layout) {
     return {
       ...empty,
-      warnings: ["This doesn't look like a shift export — no EMPLOYEE ID / HOURS columns found."],
+      warnings: [
+        "This doesn't look like a shift export — expected EMPLOYEE ID / HOURS columns, or the RSS / ESS tab columns (Officer / Clock In/Clock Out hours).",
+      ],
     };
   }
   const header = (matrix[h] ?? []).map((c) => norm(toText(c)));
@@ -262,6 +294,9 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
   let hours = 0;
   let amount = 0;
   let noDate = 0;
+  let noRate = 0;
+  let noNi = 0;
+  let badNi = 0;
 
   for (const r of matrix.slice(h + 1)) {
     if (isEmptyRow(r)) continue;
@@ -285,11 +320,16 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
       months[m] = (months[m] ?? 0) + 1;
     } else noDate++;
 
+    // sheet exports prefix some text cells with an apostrophe
+    const niText = toText(get(r, idx.ni)).replace(/^'/, "");
+    if (!normNi(niText)) noNi++;
+    else if (!isValidNi(niText)) badNi++;
+    if (h2 > 0 && rate === 0 && amt === 0) noRate++;
+
     const row: ShiftRowInput = {
       employeeId,
       employeeName,
-      // sheet exports prefix some text cells with an apostrophe
-      ni: toText(get(r, idx.ni)).replace(/^'/, ""),
+      ni: formatNi(niText),
       date,
       clientName: toText(get(r, idx.clientName)),
       siteName: toText(get(r, idx.siteName)),
@@ -315,6 +355,21 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
     );
   }
   if (noDate > 0) warnings.push(`${noDate} shifts have no readable date.`);
+  if (noRate > 0) {
+    warnings.push(
+      `${noRate} shift${noRate === 1 ? " has" : "s have"} hours but no guard rate, so ${noRate === 1 ? "its amount is" : "their amounts are"} £0. Fill the rate in the file, or fix it after import.`,
+    );
+  }
+  if (noNi > 0) {
+    warnings.push(
+      `${noNi} shift${noNi === 1 ? " has" : "s have"} no NI number — ${noNi === 1 ? "that person" : "those people"} can only be matched by ID or name.`,
+    );
+  }
+  if (badNi > 0) {
+    warnings.push(
+      `${badNi} shift${badNi === 1 ? " has" : "s have"} an NI number that doesn't look valid (UK format is 2 letters, 6 digits, then A-D). Check for typos.`,
+    );
+  }
 
   return {
     rows,
@@ -322,7 +377,44 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
     totals: { hours: round2(hours), amount: round2(amount) },
     months,
     skipped,
+    layout,
+    sheetName: "",
   };
+}
+
+/**
+ * Parses the right sheet of a workbook for the chosen system. A file with an
+ * "RSS" and an "ESS" tab reads the tab named after `source`; otherwise (a
+ * single-sheet export) every sheet is tried and the one with the most shifts
+ * wins, as before.
+ */
+export function parseShiftWorkbook(
+  sheets: readonly SheetMatrix[],
+  source: ShiftSource,
+): ShiftParse {
+  const pick = (list: readonly SheetMatrix[]): ShiftParse | null => {
+    let best: ShiftParse | null = null;
+    for (const s of list) {
+      const p = parseShiftExport(s.matrix);
+      p.sheetName = s.name;
+      if (p.rows.length > (best?.rows.length ?? -1)) best = p;
+    }
+    return best;
+  };
+  const named = sheets.filter((s) => s.name.trim().toLowerCase() === source.toLowerCase());
+  const fromNamed = named.length > 0 ? pick(named) : null;
+  if (fromNamed && fromNamed.rows.length > 0) return fromNamed;
+  return (
+    pick(sheets) ?? {
+      rows: [],
+      warnings: ["No sheets found in that file."],
+      totals: { hours: 0, amount: 0 },
+      months: {},
+      skipped: 0,
+      layout: null,
+      sheetName: "",
+    }
+  );
 }
 
 /* ------------------------------ 2) master sheet ------------------------------ */

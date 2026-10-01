@@ -8,7 +8,42 @@ export type CheckStatus = "" | "Reviewed" | "Verified";
 export type PeriodStatus = "draft" | "reviewed" | "verified" | "closed";
 export type PayStatus = "Current" | "OverPaid" | "Paid in Full";
 
-export interface Staff {
+/** Allowed values of a staff member's contract status (the report's "Status" column). */
+export const CONTRACT_STATUSES = ["Active", "P45", "Need P45"] as const;
+export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
+
+/**
+ * The personal / banking / contract / SIA fields of a staff member (the columns
+ * of the "All Payroll Format" report). All optional: an empty value is simply
+ * absent. Dates are yyyy-mm-dd text. Age is never stored — it is computed from dob.
+ * These are sensitive and only ever sent to users with the "staff" permission.
+ */
+export const STAFF_DETAIL_FIELDS = [
+  "dob",
+  "gender",
+  "rtwShareCode",
+  "shareCodeExpiry",
+  "address",
+  "town",
+  "postCode",
+  "uniform",
+  "accountHolderName",
+  "accountNumber",
+  "sortCode",
+  "employmentStartDate",
+  "employmentEndDate",
+  "contractStatus",
+  "email",
+  "immigrationStatus",
+  "hoursAllowed",
+  "siaNumber",
+  "role",
+  "serviceType",
+] as const;
+export type StaffDetailField = (typeof STAFF_DETAIL_FIELDS)[number];
+export type StaffDetails = { [K in StaffDetailField]?: string };
+
+export interface Staff extends StaffDetails {
   id: string;
   rssId: string;
   essId: string;
@@ -117,4 +152,17 @@ export interface PeriodSheet {
   /** Shifts in the raw import that couldn't be matched to anyone. */
   unmatchedShifts: number;
   shiftCounts: { RSS: number; ESS: number };
+}
+
+/** One person's line of the "Employee details" import preview / result. */
+export interface StaffDetailsImportRow {
+  /** Name as written in the file (never NI / bank values). */
+  name: string;
+  status: "matched" | "notFound" | "ambiguous" | "niConflict";
+  /** Detail fields that were empty on the staff record and get filled from the file. */
+  fills: StaffDetailField[];
+}
+
+export interface StaffDetailsImportResult {
+  rows: StaffDetailsImportRow[];
 }

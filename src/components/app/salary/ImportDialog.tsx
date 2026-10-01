@@ -24,24 +24,27 @@ import {
   importMasterSheet,
   importPayrollAmounts,
   importShiftsChunk,
+  importStaffDetails,
   recomputeSheetFromShifts,
 } from "@/lib/actions/salary";
+import { parseStaffDetails, type StaffDetailsParse } from "@/lib/payroll/detailsImport";
+import { STAFF_FIELD_LABEL } from "@/lib/payroll/staffFields";
 import {
   parseMasterSheet,
-  parseShiftExport,
+  parseShiftWorkbook,
   parseTable,
   readFileToSheets,
   toNumber,
   toText,
   type MasterParse,
-  type ShiftParse,
+  type SheetMatrix,
   type TableParse,
 } from "@/lib/payroll/excel";
 import { computeEntry, formatMonthLabel } from "@/lib/payroll/calc";
 import { errorMessage, useRefreshSalary } from "@/lib/payroll/queries";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { formatMoney } from "@/lib/ledger/calc";
-import type { PayrollCompany, ShiftSource } from "@/lib/payroll/types";
+import type { PayrollCompany, ShiftSource, StaffDetailsImportRow } from "@/lib/payroll/types";
 
 interface Props {
   open: boolean;
@@ -63,10 +66,11 @@ export function ImportDialog({ open, onOpenChange, periodId, month, companies }:
           </DialogDescription>
         </DialogHeader>
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="shifts">Shift export</TabsTrigger>
             <TabsTrigger value="payroll">Payroll file</TabsTrigger>
             <TabsTrigger value="master">Excel salary sheet</TabsTrigger>
+            <TabsTrigger value="details">Employee details</TabsTrigger>
           </TabsList>
           <TabsContent value="shifts" className="pt-3">
             <ShiftImport periodId={periodId} month={month} />
@@ -76,6 +80,9 @@ export function ImportDialog({ open, onOpenChange, periodId, month, companies }:
           </TabsContent>
           <TabsContent value="master" className="pt-3">
             <MasterImport periodId={periodId} />
+          </TabsContent>
+          <TabsContent value="details" className="pt-3">
+            <DetailsImport />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -103,7 +110,13 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
   const canCreateStaff = can("staff", "create");
   const [source, setSource] = useState<ShiftSource>("RSS");
   const [fileName, setFileName] = useState("");
-  const [parse, setParse] = useState<ShiftParse | null>(null);
+  // The file is read once; what it contains for RSS vs ESS is worked out from
+  // the chosen system, so switching "Which system?" re-reads the right tab.
+  const [sheets, setSheets] = useState<SheetMatrix[] | null>(null);
+  const parse = useMemo(
+    () => (sheets ? parseShiftWorkbook(sheets, source) : null),
+    [sheets, source],
+  );
   const [createMissing, setCreateMissing] = useState(canCreateStaff);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
@@ -111,18 +124,13 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
 
   async function onFile(file: File | undefined) {
     setResult(null);
-    setParse(null);
+    setSheets(null);
     if (!file) return;
     setFileName(file.name);
     setBusy(true);
     try {
-      const { sheets } = await readFileToSheets(file);
-      let best: ShiftParse | null = null;
-      for (const s of sheets) {
-        const p = parseShiftExport(s.matrix);
-        if (p.rows.length > (best?.rows.length ?? -1)) best = p;
-      }
-      setParse(best);
+      const read = await readFileToSheets(file);
+      setSheets(read.sheets);
     } catch (err) {
       toast.error(errorMessage(err, "Could not read that file."));
     } finally {
@@ -185,7 +193,13 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
         <Field label="Which system?">
-          <Select value={source} onValueChange={(v) => setSource(v as ShiftSource)}>
+          <Select
+            value={source}
+            onValueChange={(v) => {
+              setSource(v as ShiftSource);
+              setResult(null);
+            }}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -202,6 +216,14 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
 
       {parse ? (
         <div className="space-y-2">
+          {parse.rows.length > 0 && parse.layout === "tabs" ? (
+            <Notice tone="info">
+              Read from the <strong className="text-foreground">{parse.sheetName}</strong> tab (RSS
+              / ESS sheet layout). Its ID column is treated as the{" "}
+              <strong className="text-foreground">{source} ID</strong>, and hours are the Clock
+              In/Clock Out hours.
+            </Notice>
+          ) : null}
           {parse.warnings.map((w) => (
             <Notice key={w} tone="warn">
               {w}
@@ -244,8 +266,9 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
         </Label>
       </div>
       <p className="text-[11px] text-muted-foreground">
-        People are matched on their {source} ID, then NI number, then a unique name. Importing{" "}
-        {source} again for the same month <strong>replaces</strong> the earlier {source} shifts.
+        People are matched on their {source} ID, then NI number, then a unique name (a name match is
+        ignored if the two NI numbers differ). Importing {source} again for the same month{" "}
+        <strong>replaces</strong> the earlier {source} shifts.
       </p>
 
       {result ? <Notice tone="ok">{result}</Notice> : null}
@@ -643,6 +666,228 @@ function MasterImport({ periodId }: { periodId: string }) {
       <div className="flex justify-end">
         <Button onClick={run} disabled={busy || !parse || parse.rows.length === 0}>
           {busy ? "Importing…" : "Import salary sheet"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------- 4) employee details ------------------------- */
+
+const DETAILS_CHUNK = 200;
+
+/**
+ * Reads a file in the All Payroll Format layout and FILLS empty staff fields.
+ * It never overwrites a value, never creates staff, and shows a preview
+ * (matched / not matched / fields that would be filled) before anything is saved.
+ */
+function DetailsImport() {
+  const refresh = useRefreshSalary();
+  const { can } = usePermissions();
+  const canEditStaff = can("staff", "edit");
+  const [fileName, setFileName] = useState("");
+  const [parse, setParse] = useState<StaffDetailsParse | null>(null);
+  const [preview, setPreview] = useState<StaffDetailsImportRow[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+
+  /** Sends the rows in chunks; apply=false only reads (the preview). */
+  async function send(rows: StaffDetailsParse["rows"], apply: boolean) {
+    const all: StaffDetailsImportRow[] = [];
+    for (let i = 0; i < rows.length; i += DETAILS_CHUNK) {
+      setProgress(
+        `${apply ? "Saving" : "Checking"} ${Math.min(i + DETAILS_CHUNK, rows.length)} / ${rows.length}…`,
+      );
+      const r = await importStaffDetails({
+        data: { rows: rows.slice(i, i + DETAILS_CHUNK), apply },
+      });
+      all.push(...r.rows);
+    }
+    return all;
+  }
+
+  async function onFile(file: File | undefined) {
+    setResult(null);
+    setParse(null);
+    setPreview(null);
+    if (!file) return;
+    setFileName(file.name);
+    setBusy(true);
+    try {
+      const { sheets } = await readFileToSheets(file);
+      const parsed =
+        sheets
+          .map((sh) => parseStaffDetails(sh.matrix))
+          .find((p) => p.found && p.rows.length > 0) ??
+        sheets.map((sh) => parseStaffDetails(sh.matrix)).find((p) => p.found) ??
+        null;
+      if (!parsed) {
+        toast.error("Couldn't find the All Payroll Format header (Employee Name, NI Number…).");
+        return;
+      }
+      setParse(parsed);
+      if (parsed.rows.length > 0) setPreview(await send(parsed.rows, false));
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not read that file."));
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
+  }
+
+  async function save() {
+    if (!parse || parse.rows.length === 0) return;
+    setBusy(true);
+    try {
+      const done = await send(parse.rows, true);
+      const staff = done.filter((r) => r.fills.length > 0).length;
+      const fields = done.reduce((n, r) => n + r.fills.length, 0);
+      await refresh();
+      setPreview(null);
+      setParse(null);
+      setResult(`Filled ${fields} empty fields on ${staff} staff. Nothing was overwritten.`);
+      toast.success("Employee details saved.");
+    } catch (err) {
+      toast.error(errorMessage(err, "Import failed."));
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
+  }
+
+  const matched = preview?.filter((r) => r.status === "matched") ?? [];
+  const willFill = matched.filter((r) => r.fills.length > 0);
+  const nothingNew = matched.length - willFill.length;
+  const notFound = preview?.filter((r) => r.status === "notFound") ?? [];
+  const ambiguous = preview?.filter((r) => r.status === "ambiguous") ?? [];
+  const conflict = preview?.filter((r) => r.status === "niConflict") ?? [];
+  const totalFields = willFill.reduce((n, r) => n + r.fills.length, 0);
+  const invalid = parse ? Object.entries(parse.invalid) : [];
+
+  return (
+    <div className="space-y-3">
+      {!canEditStaff ? (
+        <Notice tone="warn">This import needs the Staff › Edit permission.</Notice>
+      ) : null}
+      <Field label="Payroll report file (All Payroll Format, .xlsx / .csv)">
+        <Input
+          type="file"
+          accept={FILE_ACCEPT}
+          disabled={!canEditStaff || busy}
+          onChange={(e) => onFile(e.target.files?.[0])}
+        />
+      </Field>
+      <p className="text-[11px] text-muted-foreground">
+        People are matched on their NI number, then a unique name (a name match is ignored if the
+        two NI numbers differ). Only fields that are <strong>empty</strong> on the staff record are
+        filled — nothing is overwritten and no new staff are created. Template placeholder rows are
+        skipped.
+      </p>
+
+      {parse ? (
+        <div className="space-y-2">
+          <Notice tone="info">
+            <strong className="text-foreground">{fileName}</strong>: {parse.rows.length} people read
+            {parse.skippedRows > 0 ? `, ${parse.skippedRows} placeholder / empty rows skipped` : ""}
+            .
+          </Notice>
+          {invalid.length > 0 ? (
+            <Notice tone="warn">
+              Some values couldn't be read and will be ignored:{" "}
+              {invalid
+                .map(
+                  ([k, n]) =>
+                    `${STAFF_FIELD_LABEL[k as keyof typeof STAFF_FIELD_LABEL] ?? k} (${n})`,
+                )
+                .join(", ")}
+              .
+            </Notice>
+          ) : null}
+        </div>
+      ) : null}
+
+      {preview ? (
+        <div className="space-y-2">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Notice tone={willFill.length ? "ok" : "info"}>
+              <strong className="text-foreground">{willFill.length}</strong> staff will get{" "}
+              <strong className="text-foreground">{totalFields}</strong> fields filled
+            </Notice>
+            <Notice tone="info">
+              <strong className="text-foreground">{nothingNew}</strong> matched, nothing new to fill
+            </Notice>
+            <Notice tone={notFound.length + ambiguous.length + conflict.length ? "warn" : "info"}>
+              <strong className="text-foreground">
+                {notFound.length + ambiguous.length + conflict.length}
+              </strong>{" "}
+              not matched
+            </Notice>
+          </div>
+
+          {willFill.length > 0 ? (
+            <div className="max-h-56 overflow-y-auto rounded-md border border-border">
+              <table className="w-full text-[12px]">
+                <thead className="sticky top-0 bg-surface-muted text-left text-muted-foreground">
+                  <tr>
+                    <th className="px-2 py-1.5 font-semibold">Person</th>
+                    <th className="px-2 py-1.5 font-semibold">Fields that will be filled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {willFill.map((r, i) => (
+                    <tr key={`${r.name}-${i}`} className="border-t border-border align-top">
+                      <td className="px-2 py-1.5 font-medium">{r.name}</td>
+                      <td className="px-2 py-1.5 text-muted-foreground">
+                        {r.fills.map((f) => STAFF_FIELD_LABEL[f]).join(", ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {notFound.length > 0 ? (
+            <Notice tone="warn">
+              No staff record found for:{" "}
+              {notFound
+                .slice(0, 15)
+                .map((r) => r.name)
+                .join(", ")}
+              {notFound.length > 15 ? ` and ${notFound.length - 15} more` : ""}. (Add them on the
+              Staff page first — this import never creates staff.)
+            </Notice>
+          ) : null}
+          {ambiguous.length > 0 ? (
+            <Notice tone="warn">
+              Name matches more than one staff record, so skipped:{" "}
+              {ambiguous
+                .slice(0, 15)
+                .map((r) => r.name)
+                .join(", ")}
+              {ambiguous.length > 15 ? ` and ${ambiguous.length - 15} more` : ""}. Put their NI
+              number in the file to match them.
+            </Notice>
+          ) : null}
+          {conflict.length > 0 ? (
+            <Notice tone="warn">
+              Same name but a different NI number than on the staff record, so skipped:{" "}
+              {conflict
+                .slice(0, 15)
+                .map((r) => r.name)
+                .join(", ")}
+              {conflict.length > 15 ? ` and ${conflict.length - 15} more` : ""}.
+            </Notice>
+          ) : null}
+        </div>
+      ) : null}
+
+      {result ? <Notice tone="ok">{result}</Notice> : null}
+      <div className="flex items-center justify-end gap-3">
+        {progress ? <span className="text-[12px] text-muted-foreground">{progress}</span> : null}
+        <Button onClick={save} disabled={busy || !canEditStaff || !preview || totalFields === 0}>
+          {busy ? "Working…" : "Fill empty fields"}
         </Button>
       </div>
     </div>

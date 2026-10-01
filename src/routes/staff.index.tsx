@@ -16,8 +16,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { normNi } from "@/lib/payroll/calc";
+import { normName, normNi } from "@/lib/payroll/calc";
 import { useStaffList } from "@/lib/payroll/queries";
+import {
+  SHARE_CODE_WARN_DAYS,
+  daysToShareCodeExpiry,
+  displayDate,
+  isWorking,
+  shareCodeState,
+} from "@/lib/payroll/staffFields";
 import type { Staff } from "@/lib/payroll/types";
 
 export const Route = createFileRoute("/staff/")({
@@ -42,6 +49,26 @@ function StaffPage() {
 }
 
 const ALL = "__all__";
+
+/** Share-code expiry date, coloured when it has passed or is close. */
+function ShareCodeCell({ staff }: { staff: Staff }) {
+  const state = shareCodeState(staff);
+  const days = daysToShareCodeExpiry(staff);
+  const tone =
+    state === "expired"
+      ? "text-destructive"
+      : state === "soon"
+        ? "text-warning"
+        : "text-foreground";
+  const note =
+    state === "expired" ? " (expired)" : state === "soon" && days !== null ? ` (${days}d)` : "";
+  return (
+    <span className={tone}>
+      {displayDate(staff.shareCodeExpiry)}
+      {note}
+    </span>
+  );
+}
 
 function StaffPageContent() {
   const { can } = usePermissions();
@@ -86,6 +113,25 @@ function StaffPageContent() {
   const missingIds = staff.filter((s) => s.active && !s.rssId && !s.essId).length;
   const missingBank = staff.filter((s) => s.active && !s.accountDetail.trim()).length;
   const missingNi = staff.filter((s) => s.active && !s.ni.trim()).length;
+  // Cheap warnings from the new detail fields (staff who are still working only).
+  const working = staff.filter(isWorking);
+  const shareCodeIssues = working.filter((s) => {
+    const st = shareCodeState(s);
+    return st === "expired" || st === "soon";
+  }).length;
+  const missingBankNumbers = working.filter((s) => !s.sortCode || !s.accountNumber).length;
+  // One person must be ONE record (their NI is what ties together everything they
+  // earn across companies). Two active records with the same name usually mean the
+  // same person was created twice — e.g. once from RSS and once from ESS without an NI.
+  const duplicateNames = useMemo(() => {
+    const byName = new Map<string, number>();
+    for (const s of staff) {
+      if (!s.active) continue;
+      const k = normName(s.name);
+      if (k) byName.set(k, (byName.get(k) ?? 0) + 1);
+    }
+    return [...byName.values()].filter((n) => n > 1).length;
+  }, [staff]);
 
   return (
     <div className="space-y-5">
@@ -103,7 +149,7 @@ function StaffPageContent() {
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
         <SummaryCard
           label="Active staff"
           value={String(staff.filter((s) => s.active).length)}
@@ -121,9 +167,28 @@ function StaffPageContent() {
           tone={missingBank ? "warning" : "success"}
         />
         <SummaryCard
+          label="Share code expiring"
+          value={String(shareCodeIssues)}
+          sublabel={`Expired or within ${SHARE_CODE_WARN_DAYS} days`}
+          tone={shareCodeIssues ? "warning" : "success"}
+        />
+        <SummaryCard
+          label="No sort code / account no."
+          value={String(missingBankNumbers)}
+          sublabel="Needed for the payroll report"
+          tone={missingBankNumbers ? "warning" : "success"}
+        />
+        <SummaryCard
           label="No NI number"
           value={String(missingNi)}
+          sublabel="NI joins one person's work across companies"
           tone={missingNi ? "warning" : "success"}
+        />
+        <SummaryCard
+          label="Possible duplicates"
+          value={String(duplicateNames)}
+          sublabel="Same name on 2+ active records — search the name"
+          tone={duplicateNames ? "warning" : "success"}
         />
       </div>
 
@@ -195,6 +260,8 @@ function StaffPageContent() {
                   <TH>NI</TH>
                   <TH>Tag</TH>
                   <TH>Area</TH>
+                  <TH>Share code expiry</TH>
+                  <TH>Bank</TH>
                   <TH>Account detail</TH>
                   <TH align="center">Status</TH>
                   <TH align="right">{""}</TH>
@@ -209,6 +276,20 @@ function StaffPageContent() {
                     <TD mono>{s.ni || "—"}</TD>
                     <TD>{s.tag || "—"}</TD>
                     <TD>{s.area || "—"}</TD>
+                    <TD>
+                      {s.shareCodeExpiry ? (
+                        <ShareCodeCell staff={s} />
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TD>
+                    <TD>
+                      {s.sortCode && s.accountNumber ? (
+                        <span className="text-success">Complete</span>
+                      ) : (
+                        <span className="text-warning">Missing</span>
+                      )}
+                    </TD>
                     <TD className="max-w-[260px] truncate">{s.accountDetail || "—"}</TD>
                     <TD align="center">
                       <span className={s.active ? "text-success" : "text-muted-foreground"}>

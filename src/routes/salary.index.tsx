@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Banknote,
   Download,
+  FileSpreadsheet,
   Lock,
   Plus,
   RefreshCw,
@@ -23,6 +24,7 @@ import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { Field } from "@/components/app/Field";
 import { EntryDialog } from "@/components/app/salary/EntryDialog";
 import { ImportDialog } from "@/components/app/salary/ImportDialog";
+import { ExportReportDialog } from "@/components/app/salary/ExportReportDialog";
 import { AddLineDialog } from "@/components/app/salary/AddLineDialog";
 import { CompaniesDialog } from "@/components/app/salary/CompaniesDialog";
 import { UnmatchedDialog } from "@/components/app/salary/UnmatchedDialog";
@@ -125,12 +127,15 @@ function SalaryPageContent() {
   const [showAddLine, setShowAddLine] = useState(false);
   const [showUnmatched, setShowUnmatched] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [confirm, setConfirm] = useState<null | "close" | "delete" | "reopen">(null);
   const [busy, setBusy] = useState(false);
 
   const locked = sheet?.period.status === "closed";
   const canEdit = can("salary", "edit") && !locked;
   const canApprove = can("salary", "approve");
+  // The payroll report carries NI + bank details, so it needs BOTH view permissions.
+  const canExportReport = can("salary", "view") && can("staff", "view");
 
   const rows: SheetRow[] = useMemo(
     () => (sheet ? buildRows(sheet.entries, sheet.staff, sheet.payments, sheet.companies) : []),
@@ -309,6 +314,11 @@ function SalaryPageContent() {
               >
                 <Download className="size-4" /> Export Excel{filtersOn ? " (filtered)" : ""}
               </Button>
+              {canExportReport ? (
+                <Button variant="outline" size="sm" onClick={() => setShowReport(true)}>
+                  <FileSpreadsheet className="size-4" /> Export payroll report
+                </Button>
+              ) : null}
               {next && canAdvance ? (
                 <Button
                   size="sm"
@@ -635,6 +645,15 @@ function SalaryPageContent() {
             staff={sheet.staff}
             haveStaffIds={new Set(sheet.entries.map((e) => e.staffId))}
           />
+          {canExportReport ? (
+            <ExportReportDialog
+              open={showReport}
+              onOpenChange={setShowReport}
+              month={sheet.period.month}
+              companies={companies}
+              entries={sheet.entries}
+            />
+          ) : null}
           <CompaniesDialog open={showCompanies} onOpenChange={setShowCompanies} />
           <UnmatchedDialog
             open={showUnmatched}
