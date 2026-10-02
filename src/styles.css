@@ -973,6 +973,10 @@
     color: var(--id-muted);
   }
 
+  .invoice-doc .id-desc-block {
+    margin-top: 14px;
+  }
+
   .invoice-doc .id-client {
     margin-top: 20px;
     padding: 10px 14px;

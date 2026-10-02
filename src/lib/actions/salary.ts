@@ -19,19 +19,13 @@ import {
   buildRows,
   formatMonthLabel,
   normName,
-  amountForHours,
   formatNi,
-  inferPayMode,
-  isValidNi,
   normNi,
   round2,
 } from "../payroll/calc";
 import { CONTRACT_STATUSES, STAFF_DETAIL_FIELDS } from "../payroll/types";
 import type {
   CheckStatus,
-  ImportCheckIssue,
-  ImportChecks,
-  PayMode,
   PayrollCompany,
   PeriodSheet,
   PeriodStatus,
@@ -43,8 +37,6 @@ import type {
   StaffDetails,
   StaffDetailsImportResult,
   StaffDetailsImportRow,
-  StaffMonth,
-  StaffShiftLine,
 } from "../payroll/types";
 
 /* ------------------------------------------------------------------ */
@@ -67,8 +59,6 @@ const toSheetStaff = (r: typeof payrollStaff.$inferSelect): Staff => ({
   area: r.area,
   ...(r.notes ? { notes: r.notes } : {}),
   active: r.active,
-  payMode: (r.payMode === "payroll" || r.payMode === "cash" ? r.payMode : "") as PayMode,
-  ...(r.defaultPayrollCompanyId ? { defaultPayrollCompanyId: r.defaultPayrollCompanyId } : {}),
 });
 
 /** Empty / null detail columns are dropped, like `notes`. */
@@ -120,9 +110,6 @@ const toEntry = (r: typeof salaryEntries.$inferSelect): SalaryEntry => ({
     : "") as CheckStatus,
   flag: r.flag,
   payroll: r.payroll ?? {},
-  ...(r.payrollHours !== null && r.payrollHours !== undefined
-    ? { payrollHours: r.payrollHours }
-    : {}),
 });
 
 const toPayment = (r: typeof salaryPayments.$inferSelect): SalaryPayment => ({
@@ -332,13 +319,6 @@ const staffInput = z.object({
   area: z.string().trim().default(""),
   notes: z.string().optional(),
   active: z.boolean().default(true),
-  // How this person is normally paid, and by which payroll company.
-  payMode: z.enum(["", "payroll", "cash"]).default(""),
-  defaultPayrollCompanyId: z
-    .string()
-    .trim()
-    .nullish()
-    .transform((v) => v || null),
   // "All Payroll Format" fields
   dob: optDate,
   gender: optText,
@@ -919,8 +899,6 @@ const entryPatch = z
     checkStatus: z.enum(["", "Reviewed", "Verified"]),
     flag: z.string(),
     payroll: z.record(z.string(), z.number()),
-    // Hours sent to payroll (rest = cash). null clears the decision.
-    payrollHours: z.number().min(0).max(1000).nullable(),
   })
   .partial();
 
@@ -1672,352 +1650,3 @@ export const importPayrollAmounts = createServerFn({ method: "POST" })
     });
     return { matched: perStaff.size, notFound, notFoundCount: notFound.length };
   });
-
-/* ------------------------------------------------------------------ */
-/* Pay mode, payroll hours, month check report, staff work history      */
-/* ------------------------------------------------------------------ */
-
-/**
- * Sets "Pay mode" for every ACTIVE person who has none yet, by reading their tag
- * (CP -> cash, "SES PAY ROLL" -> payroll + SES ...). Only fills blanks: anyone
- * already set by hand is never changed, and tags that can't be read are left
- * blank for a person to decide.
- */
-export const applyPayModeFromTags = createServerFn({ method: "POST" }).handler(async () => {
-  const actor = await requirePermission("staff", "edit");
-  const [staffRows, companies] = await Promise.all([
-    db
-      .select()
-      .from(payrollStaff)
-      .where(and(eq(payrollStaff.active, true), eq(payrollStaff.payMode, ""))),
-    db.select().from(payrollCompanies).where(eq(payrollCompanies.active, true)),
-  ]);
-  let payroll = 0;
-  let cash = 0;
-  let unclear = 0;
-  for (const part of chunk(staffRows, 50)) {
-    await Promise.all(
-      part.map(async (s) => {
-        const guess = inferPayMode(s.tag, companies);
-        if (!guess) {
-          unclear++;
-          return;
-        }
-        if (guess.mode === "payroll") payroll++;
-        else cash++;
-        await db
-          .update(payrollStaff)
-          .set({
-            payMode: guess.mode,
-            ...(guess.companyId && !s.defaultPayrollCompanyId
-              ? { defaultPayrollCompanyId: guess.companyId }
-              : {}),
-          })
-          .where(eq(payrollStaff.id, s.id));
-      }),
-    );
-  }
-  if (payroll + cash > 0) {
-    await recordActivity({
-      actor,
-      action: "updated",
-      module: "staff",
-      entityId: "pay-mode",
-      label: `Pay mode set from tags — ${payroll} payroll, ${cash} cash`,
-    });
-  }
-  return { payroll, cash, unclear };
-});
-
-/**
- * Applies each person's Pay mode to this month's lines that have no payroll
- * decision yet: payroll staff -> all hours to payroll (and, when they have a
- * default company and no payroll amount yet, that company gets the matching
- * amount); cash staff -> 0 payroll hours. People with a mode of "" and lines
- * that already have a decision are left exactly as they are.
- */
-export const applyStaffPayModes = createServerFn({ method: "POST" })
-  .validator(z.object({ periodId: z.string() }))
-  .handler(async ({ data }) => {
-    const actor = await requirePermission("salary", "edit");
-    const period = await assertOpen(data.periodId);
-    const rows = await db
-      .select({ e: salaryEntries, s: payrollStaff })
-      .from(salaryEntries)
-      .innerJoin(payrollStaff, eq(salaryEntries.staffId, payrollStaff.id))
-      .where(eq(salaryEntries.periodId, data.periodId));
-    let payroll = 0;
-    let cash = 0;
-    let noMode = 0;
-    const todo = rows.filter((r) => r.e.payrollHours === null);
-    for (const part of chunk(todo, 50)) {
-      await Promise.all(
-        part.map(async ({ e, s }) => {
-          if (s.payMode === "cash") {
-            cash++;
-            await db
-              .update(salaryEntries)
-              .set({ payrollHours: 0 })
-              .where(eq(salaryEntries.id, e.id));
-          } else if (s.payMode === "payroll") {
-            payroll++;
-            const hours = round2(e.rssHours + e.essHours);
-            const hasPayrollAmount = Object.values(e.payroll ?? {}).some((v) => v !== 0);
-            const company = s.defaultPayrollCompanyId;
-            const fill =
-              company && !hasPayrollAmount
-                ? { payroll: { ...(e.payroll ?? {}), [company]: amountForHours(e, hours) } }
-                : {};
-            await db
-              .update(salaryEntries)
-              .set({ payrollHours: hours, ...fill })
-              .where(eq(salaryEntries.id, e.id));
-          } else noMode++;
-        }),
-      );
-    }
-    if (payroll + cash > 0) {
-      await recordActivity({
-        actor,
-        action: "updated",
-        module: "salary",
-        entityId: data.periodId,
-        label: `Payroll hours from pay mode (${formatMonthLabel(period.month)}) — ${payroll} payroll, ${cash} cash`,
-      });
-    }
-    return { payroll, cash, noMode, alreadyDecided: rows.length - todo.length };
-  });
-
-const sample = (names: string[], n = 5) => [...new Set(names.filter(Boolean))].slice(0, n);
-
-/**
- * The "check the data first" report for one month: what the imported shifts
- * look like and what needs a person's eyes before the month is trusted.
- * Read-only. Shows names and counts only — never NI or bank numbers.
- */
-export const getImportChecks = createServerFn({ method: "POST" })
-  .validator(z.object({ periodId: z.string() }))
-  .handler(async ({ data }): Promise<ImportChecks> => {
-    await requirePermission("salary", "view");
-    await getPeriodOrThrow(data.periodId);
-    const [summaryRes, shiftRows, entryRows] = await Promise.all([
-      db.execute(sql`
-        SELECT source, count(*)::int AS shifts,
-               count(DISTINCT coalesce(staff_id, employee_id || employee_name))::int AS people,
-               coalesce(sum(hours),0)::float AS hours, coalesce(sum(amount),0)::float AS amount
-        FROM salary_shifts WHERE period_id = ${data.periodId} GROUP BY source ORDER BY source`),
-      db
-        .select({
-          source: salaryShifts.source,
-          staffId: salaryShifts.staffId,
-          employeeName: salaryShifts.employeeName,
-          employeeId: salaryShifts.employeeId,
-          date: salaryShifts.date,
-          clientName: salaryShifts.clientName,
-          siteName: salaryShifts.siteName,
-          hours: salaryShifts.hours,
-          amount: salaryShifts.amount,
-        })
-        .from(salaryShifts)
-        .where(eq(salaryShifts.periodId, data.periodId)),
-      db
-        .select({ e: salaryEntries, s: payrollStaff })
-        .from(salaryEntries)
-        .innerJoin(payrollStaff, eq(salaryEntries.staffId, payrollStaff.id))
-        .where(eq(salaryEntries.periodId, data.periodId)),
-    ]);
-
-    const issues: ImportCheckIssue[] = [];
-    const add = (i: Omit<ImportCheckIssue, "count"> & { count: number }) => {
-      if (i.count > 0) issues.push(i);
-    };
-
-    const unmatched = shiftRows.filter((r) => r.staffId === null);
-    add({
-      code: "unmatched",
-      level: "error",
-      title: "Shifts not matched to any staff member",
-      hint: "Their hours are missing from the totals. Use “Unmatched” to link them or add the person.",
-      count: unmatched.length,
-      examples: sample(unmatched.map((r) => r.employeeName || r.employeeId)),
-    });
-
-    const noPay = shiftRows.filter((r) => r.hours > 0 && r.amount === 0);
-    add({
-      code: "zero-amount",
-      level: "warn",
-      title: "Shifts with hours but £0 amount",
-      hint: "Rate is missing or zero in the export. Fine for cash-only staff paid another way, otherwise check the rate.",
-      count: noPay.length,
-      examples: sample(noPay.map((r) => r.employeeName)),
-    });
-
-    const seen = new Map<string, number>();
-    const dupNames: string[] = [];
-    for (const r of shiftRows) {
-      const key = [
-        r.source,
-        r.staffId ?? r.employeeId + r.employeeName,
-        r.date,
-        r.clientName,
-        r.siteName,
-        r.hours,
-        r.amount,
-      ].join("|");
-      const n = (seen.get(key) ?? 0) + 1;
-      seen.set(key, n);
-      if (n === 2) dupNames.push(r.employeeName);
-    }
-    add({
-      code: "duplicate",
-      level: "warn",
-      title: "Possible duplicate shifts",
-      hint: "Same person, date, site and hours appear more than once. Check the file wasn't uploaded twice.",
-      count: dupNames.length,
-      examples: sample(dupNames),
-    });
-
-    add({
-      code: "long-hours",
-      level: "warn",
-      title: "Very high monthly hours (over 300)",
-      hint: "More than 300 hours in the month is unusual. Check for a double upload or a wrong match.",
-      count: entryRows.filter(({ e }) => e.rssHours + e.essHours > 300).length,
-      examples: sample(
-        entryRows.filter(({ e }) => e.rssHours + e.essHours > 300).map(({ s }) => s.name),
-      ),
-    });
-
-    const worked = entryRows.filter(({ e }) => e.rssHours + e.essHours > 0);
-    const badNi = worked.filter(({ s }) => !isValidNi(s.ni));
-    add({
-      code: "ni",
-      level: "warn",
-      title: "Missing or invalid NI number",
-      hint: "Payroll needs a valid NI number. Fix it in the staff profile.",
-      count: badNi.length,
-      examples: sample(badNi.map(({ s }) => s.name)),
-    });
-
-    const noMode = worked.filter(({ s }) => s.payMode === "" && s.active);
-    add({
-      code: "no-pay-mode",
-      level: "warn",
-      title: "Pay mode not set (payroll or cash?)",
-      hint: "Use “Set pay mode from tags” on the Staff page, or choose it in the staff profile.",
-      count: noMode.length,
-      examples: sample(noMode.map(({ s }) => s.name)),
-    });
-
-    const payrollNoBank = worked.filter(
-      ({ s }) => s.payMode === "payroll" && (!s.sortCode || !s.accountNumber),
-    );
-    add({
-      code: "payroll-no-bank",
-      level: "warn",
-      title: "Payroll staff without bank details",
-      hint: "Add sort code and account number in the staff profile before exporting the payroll report.",
-      count: payrollNoBank.length,
-      examples: sample(payrollNoBank.map(({ s }) => s.name)),
-    });
-
-    const payrollNoCompany = worked.filter(
-      ({ s }) => s.payMode === "payroll" && !s.defaultPayrollCompanyId,
-    );
-    add({
-      code: "payroll-no-company",
-      level: "warn",
-      title: "Payroll staff without a payroll company",
-      hint: "Choose their payroll company in the staff profile so the amount lands in the right column.",
-      count: payrollNoCompany.length,
-      examples: sample(payrollNoCompany.map(({ s }) => s.name)),
-    });
-
-    const undecided = worked.filter(({ e }) => e.payrollHours === null);
-    add({
-      code: "undecided",
-      level: "warn",
-      title: "Lines with no payroll / cash decision yet",
-      hint: "Use “Apply pay modes” on the sheet, or open the line and set the payroll hours.",
-      count: undecided.length,
-      examples: sample(undecided.map(({ s }) => s.name)),
-    });
-
-    return {
-      summary: (
-        summaryRes.rows as {
-          source: string;
-          shifts: number;
-          people: number;
-          hours: number;
-          amount: number;
-        }[]
-      ).map((r) => ({
-        source: (r.source === "ESS" ? "ESS" : "RSS") as "RSS" | "ESS",
-        shifts: Number(r.shifts),
-        people: Number(r.people),
-        hours: round2(Number(r.hours)),
-        amount: round2(Number(r.amount)),
-      })),
-      issues,
-    };
-  });
-
-/**
- * One person's work history for the staff profile: every month's RSS / ESS
- * hours with the payroll hours decided so far, plus the individual shifts of one
- * chosen month (the latest one that has shifts by default). Read-only.
- */
-export const getStaffWork = createServerFn({ method: "POST" })
-  .validator(z.object({ staffId: z.string(), month: z.string().optional() }))
-  .handler(
-    async ({
-      data,
-    }): Promise<{ months: StaffMonth[]; shiftMonth: string | null; shifts: StaffShiftLine[] }> => {
-      await requirePermission("staff", "view");
-      await requirePermission("salary", "view");
-      const rows = await db
-        .select({ e: salaryEntries, p: salaryPeriods })
-        .from(salaryEntries)
-        .innerJoin(salaryPeriods, eq(salaryEntries.periodId, salaryPeriods.id))
-        .where(eq(salaryEntries.staffId, data.staffId))
-        .orderBy(desc(salaryPeriods.month))
-        .limit(24);
-      const months: StaffMonth[] = rows.map(({ e, p }) => ({
-        month: p.month,
-        status: toPeriod(p).status,
-        rssHours: e.rssHours,
-        essHours: e.essHours,
-        ...(e.payrollHours !== null ? { payrollHours: e.payrollHours } : {}),
-      }));
-      const chosen =
-        data.month && rows.some((r) => r.p.month === data.month)
-          ? data.month
-          : (rows.find((r) => r.e.rssHours + r.e.essHours > 0)?.p.month ??
-            rows[0]?.p.month ??
-            null);
-      const period = rows.find((r) => r.p.month === chosen)?.p;
-      const shiftRows = period
-        ? await db
-            .select()
-            .from(salaryShifts)
-            .where(
-              and(eq(salaryShifts.periodId, period.id), eq(salaryShifts.staffId, data.staffId)),
-            )
-            .orderBy(asc(salaryShifts.date))
-            .limit(500)
-        : [];
-      return {
-        months,
-        shiftMonth: chosen,
-        shifts: shiftRows.map((r) => ({
-          source: (r.source === "ESS" ? "ESS" : "RSS") as "RSS" | "ESS",
-          date: r.date,
-          clientName: r.clientName,
-          siteName: r.siteName,
-          hours: r.hours,
-          amount: r.amount,
-        })),
-      };
-    },
-  );

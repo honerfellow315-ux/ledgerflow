@@ -611,3 +611,14 @@ export function totalsForViews(views: InvoiceView[]): ClientTotals {
     invoiceCount: views.length,
   };
 }
+
+/** PO / reference of the invoice a credit note is linked to ("" when unlinked
+ * or the invoice has none). Credit notes always show this live value, so the
+ * PO can never drift from the invoice and a wrong link is easy to spot. */
+export function creditNotePoReference(
+  note: Pick<CreditNote, "invoiceId">,
+  invoices: Pick<Invoice, "id" | "poReference">[],
+): string {
+  if (!note.invoiceId) return "";
+  return (invoices.find((i) => i.id === note.invoiceId)?.poReference ?? "").trim();
+}

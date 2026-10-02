@@ -11,14 +11,7 @@
  * Everything is rounded to 2 decimals BEFORE the status compare — Excel
  * compared AD=0 exactly, so 0.0000001 of float noise showed the wrong status.
  */
-import type {
-  PayMode,
-  PayStatus,
-  PayrollCompany,
-  SalaryEntry,
-  SalaryPayment,
-  Staff,
-} from "./types";
+import type { PayStatus, PayrollCompany, SalaryEntry, SalaryPayment, Staff } from "./types";
 
 /**
  * Whether a shift's payable expenses are added to, and its penalty taken off,
@@ -70,106 +63,6 @@ export function computeEntry(
   };
 }
 
-/* ------------------------- payroll / cash hours ------------------------- */
-
-export interface HoursSplit {
-  totalHours: number;
-  /** Hours sent to payroll (0 when none, or not decided yet). */
-  payrollHours: number;
-  /** Everything not sent to payroll. */
-  cashHours: number;
-  /** False until someone has chosen the split for this line. */
-  decided: boolean;
-}
-
-/**
- * Splits a line's total hours between payroll and cash. Payroll hours can never
- * be negative or more than the hours actually worked, so a typo can't make the
- * cash hours negative. An undecided line is shown as all-cash-pending (0 / total).
- */
-export function splitHours(
-  entry: Pick<SalaryEntry, "rssHours" | "essHours" | "payrollHours">,
-): HoursSplit {
-  const totalHours = round2(num(entry.rssHours) + num(entry.essHours));
-  const decided = entry.payrollHours !== undefined && entry.payrollHours !== null;
-  const wanted = decided ? num(entry.payrollHours) : 0;
-  const payrollHours = round2(Math.min(Math.max(wanted, 0), Math.max(totalHours, 0)));
-  return { totalHours, payrollHours, cashHours: round2(totalHours - payrollHours), decided };
-}
-
-/** Amount for `hours` of this line's shift earnings (RSS + ESS, without carry-forward). */
-export function amountForHours(
-  entry: Pick<SalaryEntry, "rssHours" | "essHours" | "rssAmount" | "essAmount">,
-  hours: number,
-): number {
-  const totalHours = num(entry.rssHours) + num(entry.essHours);
-  if (totalHours <= 0) return 0;
-  const earned = num(entry.rssAmount) + num(entry.essAmount);
-  return round2((earned * Math.min(Math.max(hours, 0), totalHours)) / totalHours);
-}
-
-/** Payroll hours that belong to one payroll company, in proportion to its share of the line's payroll amounts. */
-export function companyHours(entry: SalaryEntry, companyId: string): number {
-  const { payrollHours } = splitHours(entry);
-  const amounts = Object.values(entry.payroll ?? {}).reduce((s, v) => s + Math.max(num(v), 0), 0);
-  const mine = Math.max(num(entry.payroll?.[companyId]), 0);
-  if (payrollHours <= 0 || amounts <= 0 || mine <= 0) return 0;
-  return round2((payrollHours * mine) / amounts);
-}
-
-/* ------------------------------ pay mode ------------------------------ */
-
-/** Short tag spellings -> the payroll company name (compared without spaces/case). */
-const TAG_ALIASES: Record<string, string> = { sfm: "securefm" };
-
-const tagKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
-
-export interface PayModeSuggestion {
-  mode: Exclude<PayMode, "">;
-  /** Payroll company the tag points at, when one matches. */
-  companyId?: string;
-}
-
-/**
- * Reads a staff tag the way the sheets are written ("CP", "SES PAY ROLL, ESS",
- * "SFM payroll", "HS Guarding") and suggests how that person is paid:
- *  - CP / Cash / Cash pay            -> cash
- *  - "... payroll" or a payroll company's name -> payroll (+ that company)
- *  - both, or nothing recognisable   -> no suggestion (null): a person decides.
- */
-export function inferPayMode(
-  tag: string,
-  companies: readonly Pick<PayrollCompany, "id" | "name">[],
-): PayModeSuggestion | null {
-  const tokens = tag
-    .split(/[,;/]+/)
-    .map((t) => t.trim())
-    .filter(Boolean);
-  if (tokens.length === 0) return null;
-
-  const isCash = tokens.some((t) => ["cp", "cash", "cashpay"].includes(tagKey(t)));
-  const payrollTokens = tokens.filter((t) => /pay\s*roll/i.test(t));
-
-  // A token names a company when, after dropping the word "payroll", it equals
-  // the company's name ("SES PAY ROLL" -> SES, "HS Guarding" -> HS Guarding).
-  const companyOf = (token: string): string | undefined => {
-    const raw = tagKey(token.replace(/pay\s*roll/gi, ""));
-    if (!raw) return undefined;
-    // short forms used in the sheets' tags
-    const k = TAG_ALIASES[raw] ?? raw;
-    return companies.find((c) => tagKey(c.name) === k)?.id;
-  };
-  const fromPayrollTokens = payrollTokens.map(companyOf).find(Boolean);
-  const fromAnyToken = tokens.map(companyOf).find(Boolean);
-  const isPayroll = payrollTokens.length > 0 || fromAnyToken !== undefined;
-
-  if (isCash && isPayroll) return null;
-  if (isCash) return { mode: "cash" };
-  if (!isPayroll) return null;
-  const companyId = fromPayrollTokens ?? fromAnyToken;
-  return companyId ? { mode: "payroll", companyId } : { mode: "payroll" };
-}
-
 export interface SheetRow {
   staff: Staff;
   entry: SalaryEntry;
@@ -214,9 +107,6 @@ export interface SheetTotals {
   essHours: number;
   carryForward: number;
   totalHours: number;
-  /** Hours sent to payroll / not sent to payroll (undecided lines count as cash). */
-  payrollHours: number;
-  cashHours: number;
   totalAmount: number;
   payrollTotal: number;
   taxDeduction: number;
@@ -235,8 +125,6 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     essHours: 0,
     carryForward: 0,
     totalHours: 0,
-    payrollHours: 0,
-    cashHours: 0,
     totalAmount: 0,
     payrollTotal: 0,
     taxDeduction: 0,
@@ -255,9 +143,6 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     t.taxDeduction += num(e.taxDeduction);
     t.deduction += num(e.deduction);
     t.totalHours += r.computed.totalHours;
-    const split = splitHours(e);
-    t.payrollHours += split.payrollHours;
-    t.cashHours += split.cashHours;
     t.totalAmount += r.computed.totalAmount;
     t.payrollTotal += r.computed.payrollTotal;
     t.cashPaid += r.computed.cashPaid;

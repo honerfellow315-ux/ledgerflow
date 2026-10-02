@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Pencil, Plus, Search, Trash2 } from "@/lib/icons";
+import { Download, Pencil, Plus, Search, Trash2 } from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
 import {
@@ -19,6 +19,7 @@ import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { RequireView } from "@/components/app/RequireView";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { SummaryCard } from "@/components/app/SummaryCard";
+import { downloadXlsx } from "@/lib/ledger/excel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -104,6 +105,39 @@ function PaymentsPageContent() {
       .sort((a, b) => b.payment.date.localeCompare(a.payment.date));
   }, [data.payments, data.clients, invoiceViews, query, clientId, companyId, endClient, method]);
 
+  const exportExcel = () => {
+    const company = (id: string | null | undefined) =>
+      id ? (data.companies.find((x) => x.id === id)?.name ?? "") : "";
+    downloadXlsx(
+      `payments-${new Date().toISOString().slice(0, 10)}`,
+      "Payments",
+      [
+        { header: "Payment Date", width: 14 },
+        { header: "Client", width: 28 },
+        { header: "Company", width: 24 },
+        { header: "End Client", width: 22 },
+        { header: "Invoice", width: 16 },
+        { header: "PO No.", width: 16 },
+        { header: "Payment Method", width: 18 },
+        { header: "Amount", width: 14, money: true },
+        { header: "Reference", width: 20 },
+        { header: "Notes", width: 30 },
+      ],
+      rows.map(({ payment, invoice, client }) => [
+        payment.date,
+        client?.company ?? "Unknown",
+        company(client?.companyId),
+        invoice?.endClient?.trim() ?? "",
+        invoice?.number ?? "",
+        invoice?.poReference?.trim() ?? "",
+        payment.method,
+        payment.amount,
+        payment.reference,
+        payment.notes ?? "",
+      ]),
+    ).catch(() => toast.error("Export failed."));
+  };
+
   const clientChoices = useMemo(
     () => data.clients.filter((c) => companyId === "all" || (c.companyId ?? null) === companyId),
     [data.clients, companyId],
@@ -138,17 +172,22 @@ function PaymentsPageContent() {
           title="Payments"
           description={`${rows.length} of ${data.payments.length} payments`}
           actions={
-            can("payments", "create") ? (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditing(null);
-                  setFormOpen(true);
-                }}
-              >
-                <Plus className="size-4" /> Add Payment
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={exportExcel} disabled={rows.length === 0}>
+                <Download className="size-4" /> Export to Excel
               </Button>
-            ) : undefined
+              {can("payments", "create") ? (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditing(null);
+                    setFormOpen(true);
+                  }}
+                >
+                  <Plus className="size-4" /> Add Payment
+                </Button>
+              ) : null}
+            </div>
           }
         />
 

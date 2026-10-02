@@ -495,7 +495,5 @@ ALTER TABLE payroll_staff
 -- End Client on invoices (optional, nullable; existing rows untouched).
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS end_client text;
 
--- Pay mode + payroll hours (see schema/pay-mode-migration.sql)
-ALTER TABLE payroll_staff ADD COLUMN IF NOT EXISTS pay_mode text NOT NULL DEFAULT '';
-ALTER TABLE payroll_staff ADD COLUMN IF NOT EXISTS default_payroll_company_id text;
-ALTER TABLE salary_entries ADD COLUMN IF NOT EXISTS payroll_hours numeric(10,2);
+/* ---------- Invoice second description ---------- */
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description_2 text;

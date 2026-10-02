@@ -93,6 +93,8 @@ export interface Invoice {
    * clients behind a management account). Empty/unset = not assigned. */
   endClient?: string;
   description: string;
+  /** Optional second description, printed under the main description. */
+  description2?: string;
   amountExVat: number;
   /** Set when this invoice was billed as Hours × Rate rather than a fixed amount. */
   hours?: number;

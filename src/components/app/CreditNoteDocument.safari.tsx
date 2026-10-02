@@ -10,11 +10,13 @@ export function CreditNoteDocumentSafari({
   client,
   note,
   invoiceNumber,
+  poReference,
 }: {
   settings: Settings;
   client: Client | undefined;
   note: CreditNote;
   invoiceNumber?: string | undefined;
+  poReference?: string | undefined;
 }) {
   const contactLines: { label: string; value: string }[] = [
     { label: "Email", value: settings.businessEmail.trim() },
@@ -100,6 +102,7 @@ export function CreditNoteDocumentSafari({
                   {invoiceNumber ? (
                     <p className="id-lines">Against invoice: {invoiceNumber}</p>
                   ) : null}
+                  {poReference ? <p className="id-lines">PO/Ref: {poReference}</p> : null}
                 </div>
               </header>
 

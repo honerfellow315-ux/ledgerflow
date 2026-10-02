@@ -1,12 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { FileMinus, Pencil, Plus, Printer, Search, Trash2 } from "@/lib/icons";
+import { Download, FileMinus, Pencil, Plus, Printer, Search, Trash2 } from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import {
   businessProfileFor,
+  creditNotePoReference,
   creditNoteTotal,
   creditNoteVat,
   formatDate,
@@ -22,6 +23,7 @@ import { CreditNoteDocumentSafari } from "@/components/app/CreditNoteDocument.sa
 import { shouldUseSafariPrintLayout } from "@/lib/print-browser";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { SummaryCard } from "@/components/app/SummaryCard";
+import { downloadXlsx } from "@/lib/ledger/excel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -106,11 +108,12 @@ function CreditNotesPageContent() {
         ...n,
         clientCompany: clientById.get(n.clientId)?.company ?? "—",
         invoiceNumber: n.invoiceId ? (invoiceById.get(n.invoiceId)?.number ?? "—") : "—",
+        poReference: creditNotePoReference(n, data.invoices),
         vat: creditNoteVat(n),
         total: creditNoteTotal(n),
       }))
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [data.creditNotes, clientById, invoiceById, query, clientId, status]);
+  }, [data.creditNotes, data.invoices, clientById, invoiceById, query, clientId, status]);
 
   const totals = useMemo(
     () => ({
@@ -123,10 +126,42 @@ function CreditNotesPageContent() {
 
   const filtered = query || clientId !== "all" || status !== "all";
 
+  const exportExcel = () => {
+    downloadXlsx(
+      `credit-notes-${new Date().toISOString().slice(0, 10)}`,
+      "Credit Notes",
+      [
+        { header: "Number", width: 18 },
+        { header: "Client", width: 28 },
+        { header: "Linked Invoice", width: 16 },
+        { header: "PO No.", width: 16 },
+        { header: "Date", width: 12 },
+        { header: "Reason", width: 36 },
+        { header: "Amount (ex VAT)", width: 16, money: true },
+        { header: "VAT", width: 12, money: true },
+        { header: "Total", width: 14, money: true },
+        { header: "Status", width: 10 },
+      ],
+      rows.map((r) => [
+        r.number,
+        r.clientCompany,
+        r.invoiceNumber === "—" ? "" : r.invoiceNumber,
+        r.poReference,
+        r.date,
+        r.reason,
+        r.amountExVat,
+        r.vat,
+        r.total,
+        r.status,
+      ]),
+    ).catch(() => toast.error("Export failed."));
+  };
+
   const printClient = printNote ? data.clients.find((c) => c.id === printNote.clientId) : undefined;
   const printInvoiceNumber = printNote?.invoiceId
     ? invoiceById.get(printNote.invoiceId)?.number
     : undefined;
+  const printPoReference = printNote ? creditNotePoReference(printNote, data.invoices) : "";
 
   return (
     <>
@@ -146,17 +181,22 @@ function CreditNotesPageContent() {
             title="Credit Notes"
             description={`${rows.length} of ${data.creditNotes.length} credit notes`}
             actions={
-              can("creditNotes", "create") ? (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setEditing(null);
-                    setFormOpen(true);
-                  }}
-                >
-                  <Plus className="size-4" /> Add Credit Note
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={exportExcel} disabled={rows.length === 0}>
+                  <Download className="size-4" /> Export to Excel
                 </Button>
-              ) : undefined
+                {can("creditNotes", "create") ? (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditing(null);
+                      setFormOpen(true);
+                    }}
+                  >
+                    <Plus className="size-4" /> Add Credit Note
+                  </Button>
+                ) : null}
+              </div>
             }
           />
 
@@ -220,12 +260,13 @@ function CreditNotesPageContent() {
             />
           ) : (
             <TableWrap>
-              <Table className="min-w-[1080px]">
+              <Table className="min-w-[1180px]">
                 <THead>
                   <TR>
                     <TH>Number</TH>
                     <TH>Client</TH>
                     <TH>Linked Invoice</TH>
+                    <TH>PO No.</TH>
                     <TH>Date</TH>
                     <TH>Reason</TH>
                     <TH align="right">Amount (ex VAT)</TH>
@@ -251,6 +292,7 @@ function CreditNotesPageContent() {
                         </Link>
                       </TD>
                       <TD mono>{n.invoiceNumber}</TD>
+                      <TD mono>{n.poReference || "—"}</TD>
                       <TD>{formatDate(n.date)}</TD>
                       <TD className="max-w-64 truncate whitespace-normal">{n.reason}</TD>
                       <TD mono align="right">
@@ -335,6 +377,7 @@ function CreditNotesPageContent() {
             client={printClient}
             note={printNote}
             invoiceNumber={printInvoiceNumber}
+            poReference={printPoReference}
           />
         ) : (
           <CreditNoteDocument
@@ -342,6 +385,7 @@ function CreditNotesPageContent() {
             client={printClient}
             note={printNote}
             invoiceNumber={printInvoiceNumber}
+            poReference={printPoReference}
           />
         )
       ) : null}

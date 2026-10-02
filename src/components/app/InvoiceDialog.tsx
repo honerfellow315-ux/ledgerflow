@@ -76,6 +76,7 @@ const blank = {
   poReference: "",
   endClient: "",
   description: "",
+  description2: "",
   billingType: "amount" as BillingType,
   amountExVat: "",
   hours: "",
@@ -144,6 +145,7 @@ export function InvoiceDialog({
         poReference: invoice.poReference ?? "",
         endClient: invoice.endClient ?? "",
         description: invoice.description,
+        description2: invoice.description2 ?? "",
         billingType:
           invoice.lineItems && invoice.lineItems.length > 0
             ? "items"
@@ -190,6 +192,7 @@ export function InvoiceDialog({
         poReference: duplicateFrom.poReference ?? "",
         endClient: duplicateFrom.endClient ?? "",
         description: duplicateFrom.description,
+        description2: duplicateFrom.description2 ?? "",
         billingType:
           duplicateFrom.lineItems && duplicateFrom.lineItems.length > 0
             ? "items"
@@ -390,6 +393,7 @@ export function InvoiceDialog({
       poReference: form.poReference.trim(),
       endClient: form.endClient.trim(),
       description: form.description.trim(),
+      description2: form.description2.trim(),
       amountExVat: amount,
       hours,
       rate,
@@ -442,6 +446,11 @@ export function InvoiceDialog({
   };
 
   const selectedClient = data.clients.find((c) => c.id === form.clientId);
+  /** Billing company (Companies page) this client is saved under, if any. */
+  const billingCompanyOf = (clientId: string): string => {
+    const co = data.clients.find((c) => c.id === clientId)?.companyId;
+    return co ? (data.companies.find((x) => x.id === co)?.name ?? "") : "";
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -481,6 +490,11 @@ export function InvoiceDialog({
                 <p className="font-medium">
                   {selectedClient?.company || selectedClient?.name || "—"}
                 </p>
+                {selectedClient && billingCompanyOf(selectedClient.id) ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Company: {billingCompanyOf(selectedClient.id)}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -540,6 +554,7 @@ export function InvoiceDialog({
                     Description
                   </p>
                   <p>{form.description}</p>
+                  {form.description2.trim() ? <p>{form.description2}</p> : null}
                 </div>
               ) : null}
               {form.billingType === "items" && form.lineItems.length > 0 ? (
@@ -609,7 +624,14 @@ export function InvoiceDialog({
                   onChange={(e) => set("number", e.target.value)}
                 />
               </Field>
-              <Field label="Client">
+              <Field
+                label="Client"
+                hint={
+                  selectedClient
+                    ? `Billing company: ${billingCompanyOf(selectedClient.id) || "— not set"}`
+                    : undefined
+                }
+              >
                 <Select
                   value={form.clientId}
                   onValueChange={(v) => {
@@ -642,6 +664,7 @@ export function InvoiceDialog({
                     {data.clients.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.company}
+                        {c.name ? ` — ${c.name}` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -699,6 +722,20 @@ export function InvoiceDialog({
                   value={form.description}
                   onChange={(e) => set("description", e.target.value)}
                   placeholder="Services supplied"
+                />
+              </Field>
+              <Field
+                label="Second Description (optional)"
+                htmlFor="inv-desc2"
+                hint="Printed under the main description. Works with Fixed Amount, Hours × Rate and Line Items."
+                className="sm:col-span-2"
+              >
+                <Textarea
+                  id="inv-desc2"
+                  rows={2}
+                  value={form.description2}
+                  onChange={(e) => set("description2", e.target.value)}
+                  placeholder="Extra detail, e.g. site, period or job reference"
                 />
               </Field>
               <Field label="Billing Type" className="sm:col-span-2">

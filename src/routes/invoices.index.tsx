@@ -1,6 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Copy, FilePlus, Pencil, Plus, Printer, Search, Trash2, Wallet } from "@/lib/icons";
+import {
+  Copy,
+  Download,
+  FilePlus,
+  Pencil,
+  Plus,
+  Printer,
+  Search,
+  Trash2,
+  Wallet,
+} from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
 import {
@@ -27,6 +37,7 @@ import { shouldUseSafariPrintLayout } from "@/lib/print-browser";
 import { PaymentDialog } from "@/components/app/PaymentDialog";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { SummaryCard } from "@/components/app/SummaryCard";
+import { downloadXlsx } from "@/lib/ledger/excel";
 import { RequireView } from "@/components/app/RequireView";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { Button } from "@/components/ui/button";
@@ -209,6 +220,53 @@ function InvoicesPageContent() {
     [data.invoices, clientId, companyId, clientCompanyId],
   );
 
+  const exportExcel = () => {
+    const companyName = (clientId: string) => {
+      const co = data.clients.find((x) => x.id === clientId)?.companyId;
+      return co ? (data.companies.find((x) => x.id === co)?.name ?? "") : "";
+    };
+    downloadXlsx(
+      `invoices-${new Date().toISOString().slice(0, 10)}`,
+      "Invoices",
+      [
+        { header: "Invoice No.", width: 16 },
+        { header: "Client", width: 28 },
+        { header: "Company", width: 24 },
+        { header: "End Client", width: 22 },
+        { header: "PO No.", width: 16 },
+        { header: "Invoice Date", width: 13 },
+        { header: "Due Date", width: 13 },
+        { header: "Description", width: 36 },
+        { header: "Second Description", width: 36 },
+        { header: "Ex VAT", width: 14, money: true },
+        { header: "VAT", width: 12, money: true },
+        { header: "Inc VAT", width: 14, money: true },
+        { header: "Paid", width: 14, money: true },
+        { header: "Outstanding", width: 14, money: true },
+        { header: "Status", width: 10 },
+        { header: "Approval", width: 12 },
+      ],
+      rows.map((inv) => [
+        inv.number,
+        inv.clientCompany,
+        companyName(inv.clientId),
+        inv.endClient?.trim() ?? "",
+        inv.poReference?.trim() ?? "",
+        inv.invoiceDate,
+        inv.dueDate,
+        inv.description,
+        inv.description2 ?? "",
+        inv.amountExVat,
+        inv.vat,
+        inv.total,
+        inv.paid,
+        inv.effectiveOutstanding,
+        inv.effectiveStatus,
+        inv.approved ? "Approved" : "Unapproved",
+      ]),
+    ).catch(() => toast.error("Export failed."));
+  };
+
   const changeCompany = (value: string) => {
     setCompanyId(value);
     setEndClient("all");
@@ -259,19 +317,24 @@ function InvoicesPageContent() {
             title="Invoices"
             description={`${rows.length} of ${invoiceViewsWithCredit.length} invoices`}
             actions={
-              can("invoices", "create") ? (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setEditing(null);
-                    setDuplicating(null);
-                    setAdditionalFor(null);
-                    setFormOpen(true);
-                  }}
-                >
-                  <Plus className="size-4" /> Add Invoice
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={exportExcel} disabled={rows.length === 0}>
+                  <Download className="size-4" /> Export to Excel
                 </Button>
-              ) : undefined
+                {can("invoices", "create") ? (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditing(null);
+                      setDuplicating(null);
+                      setAdditionalFor(null);
+                      setFormOpen(true);
+                    }}
+                  >
+                    <Plus className="size-4" /> Add Invoice
+                  </Button>
+                ) : null}
+              </div>
             }
           />
 

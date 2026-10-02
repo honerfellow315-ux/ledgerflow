@@ -100,6 +100,11 @@ export function CreditNoteDialog({
     [data.invoices, form.clientId],
   );
 
+  const linkedPo = useMemo(
+    () => (data.invoices.find((i) => i.id === form.invoiceId)?.poReference ?? "").trim(),
+    [data.invoices, form.invoiceId],
+  );
+
   const preview = useMemo(() => {
     const draft = {
       amountExVat: Number(form.amountExVat) || 0,
@@ -219,7 +224,14 @@ export function CreditNoteDialog({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Linked Invoice" hint="Optional — leave unlinked for a general credit.">
+          <Field
+            label="Linked Invoice"
+            hint={
+              form.invoiceId === NO_INVOICE
+                ? "Optional — leave unlinked for a general credit."
+                : `PO No. (from invoice): ${linkedPo || "— none on that invoice"}`
+            }
+          >
             <Select value={form.invoiceId} onValueChange={(v) => set("invoiceId", v)}>
               <SelectTrigger>
                 <SelectValue placeholder="No linked invoice" />

@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { IdCard, Pencil, Plus, Search } from "@/lib/icons";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
@@ -18,8 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { normName, normNi } from "@/lib/payroll/calc";
-import { applyPayModeFromTags } from "@/lib/actions/salary";
-import { errorMessage, useRefreshSalary, useStaffList } from "@/lib/payroll/queries";
+import { useStaffList } from "@/lib/payroll/queries";
 import {
   SHARE_CODE_WARN_DAYS,
   daysToShareCodeExpiry,
@@ -77,25 +75,6 @@ function StaffPageContent() {
   const canCreate = can("staff", "create");
   const canEdit = can("staff", "edit");
   const { data: staff = [], isLoading, error } = useStaffList();
-  const refreshAll = useRefreshSalary();
-  const [applying, setApplying] = useState(false);
-  const noPayMode = staff.filter((s) => s.active && s.payMode === "").length;
-
-  async function setFromTags() {
-    setApplying(true);
-    try {
-      const r = await applyPayModeFromTags();
-      await refreshAll();
-      toast.success(
-        `Pay mode set from tags: ${r.payroll} payroll, ${r.cash} cash.` +
-          (r.unclear ? ` ${r.unclear} tags couldn't be read — set those by hand.` : ""),
-      );
-    } catch (e) {
-      toast.error(errorMessage(e, "Could not set pay modes."));
-    } finally {
-      setApplying(false);
-    }
-  }
 
   const [q, setQ] = useState("");
   const [area, setArea] = useState(ALL);
@@ -163,18 +142,11 @@ function StaffPageContent() {
             Master records reused by every salary month. Contains NI numbers and bank details.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canEdit ? (
-            <Button variant="outline" onClick={setFromTags} disabled={applying || noPayMode === 0}>
-              {applying ? "Working…" : `Set pay mode from tags (${noPayMode})`}
-            </Button>
-          ) : null}
-          {canCreate ? (
-            <Button onClick={() => setDialog({ open: true, staff: null })}>
-              <Plus className="size-4" /> Add staff
-            </Button>
-          ) : null}
-        </div>
+        {canCreate ? (
+          <Button onClick={() => setDialog({ open: true, staff: null })}>
+            <Plus className="size-4" /> Add staff
+          </Button>
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
@@ -287,7 +259,6 @@ function StaffPageContent() {
                   <TH>ESS ID</TH>
                   <TH>NI</TH>
                   <TH>Tag</TH>
-                  <TH>Pay mode</TH>
                   <TH>Area</TH>
                   <TH>Share code expiry</TH>
                   <TH>Bank</TH>
@@ -304,19 +275,6 @@ function StaffPageContent() {
                     <TD mono>{s.essId || "—"}</TD>
                     <TD mono>{s.ni || "—"}</TD>
                     <TD>{s.tag || "—"}</TD>
-                    <TD>
-                      {s.payMode === "payroll" ? (
-                        <span className="rounded-full border border-info/30 bg-info-soft px-2 py-0.5 text-[11px] font-medium text-info">
-                          Payroll
-                        </span>
-                      ) : s.payMode === "cash" ? (
-                        <span className="rounded-full border border-border bg-surface-muted px-2 py-0.5 text-[11px] font-medium">
-                          Cash
-                        </span>
-                      ) : (
-                        <span className="text-warning">Not set</span>
-                      )}
-                    </TD>
                     <TD>{s.area || "—"}</TD>
                     <TD>
                       {s.shareCodeExpiry ? (

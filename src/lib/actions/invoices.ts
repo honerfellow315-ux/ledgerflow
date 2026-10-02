@@ -28,6 +28,11 @@ const invoiceInput = z.object({
     .optional()
     .transform((v) => (v === undefined ? undefined : v.trim() || null)),
   description: z.string().default(""),
+  // Optional second description; "" clears it (stored as NULL).
+  description2: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v.trim() || null)),
   amountExVat: z.number(),
   hours: z.number().optional(),
   rate: z.number().optional(),
