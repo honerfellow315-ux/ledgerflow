@@ -218,9 +218,9 @@ const SHIFT_COLS = {
   date: ["date"],
   clientName: ["client name", "customer name"],
   siteName: ["site name"],
-  hours: ["hours", "clock in/clock out hours", "clock in clock out hours"],
-  rate: ["guard rate"],
-  amount: ["amount", "guard amount"],
+  hours: ["hours", "clock in/clock out hours", "clock in clock out hours", "payable hours"],
+  rate: ["guard rate", "guard"],
+  amount: ["amount", "guard amount", "guard payable amount"],
   expenses: ["payable expenses"],
   penalty: ["penalty"],
   accountDetail: ["payment details"],
@@ -231,6 +231,11 @@ const SHIFT_COLS = {
 const SHIFT_HEADER_SETS: { layout: "export" | "tabs"; needles: string[] }[] = [
   { layout: "export", needles: ["employee id", "hours"] },
   { layout: "tabs", needles: ["officer", "clock in/clock out hours"] },
+  // RSS sheet as exported by the software: Payable hours / Guard (rate) / Guard Payable Amount
+  { layout: "tabs", needles: ["officer", "payable hours"] },
+  // Sheets with an ID column but no Officer (name) column: matched by ID / NI instead.
+  { layout: "tabs", needles: ["rss id", "clock in/clock out hours"] },
+  { layout: "tabs", needles: ["ess id", "clock in/clock out hours"] },
 ];
 
 function findHeaderRow(matrix: Matrix, needles: string[]): number {
@@ -270,7 +275,7 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
     return {
       ...empty,
       warnings: [
-        "This doesn't look like a shift export — expected EMPLOYEE ID / HOURS columns, or the RSS / ESS tab columns (Officer / Clock In/Clock Out hours).",
+        "This doesn't look like a shift export — expected EMPLOYEE ID / HOURS columns, or the RSS / ESS tab columns (RSS ID or ESS ID, Officer, Clock In/Clock Out hours, Guard rate, Guard Amount, N.I. Number).",
       ],
     };
   }
