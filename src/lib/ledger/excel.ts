@@ -233,6 +233,9 @@ const SHIFT_HEADER_SETS: { layout: "export" | "tabs"; needles: string[] }[] = [
   { layout: "tabs", needles: ["officer", "clock in/clock out hours"] },
   // RSS sheet as exported by the software: Payable hours / Guard (rate) / Guard Payable Amount
   { layout: "tabs", needles: ["officer", "payable hours"] },
+  // Sheets with an ID column but no Officer (name) column: matched by ID / NI instead.
+  { layout: "tabs", needles: ["rss id", "clock in/clock out hours"] },
+  { layout: "tabs", needles: ["ess id", "clock in/clock out hours"] },
 ];
 
 function findHeaderRow(matrix: Matrix, needles: string[]): number {
@@ -272,7 +275,7 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
     return {
       ...empty,
       warnings: [
-        "This doesn't look like a shift export — expected EMPLOYEE ID / HOURS columns, or the RSS / ESS tab columns (Officer / Clock In/Clock Out hours).",
+        "This doesn't look like a shift export — expected EMPLOYEE ID / HOURS columns, or the RSS / ESS tab columns (RSS ID or ESS ID, Officer, Clock In/Clock Out hours, Guard rate, Guard Amount, N.I. Number).",
       ],
     };
   }
