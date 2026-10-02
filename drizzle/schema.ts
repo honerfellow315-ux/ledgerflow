@@ -417,6 +417,11 @@ export const payrollStaff = pgTable("payroll_staff", {
   area: text("area").notNull().default(""),
   notes: text("notes"),
   active: boolean("active").notNull().default(true),
+  // How this person is normally paid: "payroll" | "cash" | "" (not set yet).
+  // Suggested from the tag ("CP" = cash pay, "SES PAY ROLL" = payroll ...) but always editable.
+  payMode: text("pay_mode").notNull().default(""),
+  // Payroll company that normally pays this person (payroll_companies.id), if any.
+  defaultPayrollCompanyId: text("default_payroll_company_id"),
   // --- "All Payroll Format" fields (all nullable; dates are yyyy-mm-dd text; age is never stored) ---
   dob: text("dob"),
   gender: text("gender"),
@@ -483,6 +488,9 @@ export const salaryEntries = pgTable(
     deductionNote: text("deduction_note"),
     checkStatus: text("check_status").notNull().default(""), // "" | Reviewed | Verified
     flag: text("flag").notNull().default(""), // the sheet's "Client" column (e.g. "pay back")
+    // Hours of this month's work sent to payroll (the rest are cash). NULL = not
+    // decided yet; 0 = decided, all cash. Never touches the amounts by itself.
+    payrollHours: numeric("payroll_hours", { precision: 10, scale: 2, mode: "number" }),
     // { [payrollCompanyId]: amount } — sparse, so adding a company needs no migration.
     payroll: jsonb("payroll").$type<Record<string, number>>().notNull().default({}),
   },

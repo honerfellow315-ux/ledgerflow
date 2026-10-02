@@ -7,6 +7,9 @@ export type ShiftSource = "RSS" | "ESS";
 export type CheckStatus = "" | "Reviewed" | "Verified";
 export type PeriodStatus = "draft" | "reviewed" | "verified" | "closed";
 export type PayStatus = "Current" | "OverPaid" | "Paid in Full";
+/** How a person is normally paid. "" = not set yet. */
+export type PayMode = "" | "payroll" | "cash";
+export const PAY_MODES = ["payroll", "cash"] as const;
 
 /** Allowed values of a staff member's contract status (the report's "Status" column). */
 export const CONTRACT_STATUSES = ["Active", "P45", "Need P45"] as const;
@@ -54,6 +57,10 @@ export interface Staff extends StaffDetails {
   area: string;
   notes?: string;
   active: boolean;
+  /** Normal way this person is paid ("" = not set yet). */
+  payMode: PayMode;
+  /** Payroll company that normally pays this person. */
+  defaultPayrollCompanyId?: string;
 }
 
 export interface PayrollCompany {
@@ -89,6 +96,8 @@ export interface SalaryEntry {
   flag: string;
   /** { payrollCompanyId: amount } */
   payroll: Record<string, number>;
+  /** Hours of the month sent to payroll; the rest are cash. Unset = not decided yet. */
+  payrollHours?: number;
 }
 
 export interface SalaryPayment {
@@ -165,4 +174,45 @@ export interface StaffDetailsImportRow {
 
 export interface StaffDetailsImportResult {
   rows: StaffDetailsImportRow[];
+}
+
+/** One row of the check report shown before a month's data is trusted. */
+export interface ImportCheckIssue {
+  code: string;
+  level: "error" | "warn";
+  title: string;
+  hint: string;
+  count: number;
+  /** A few names / values to point at (never NI or bank numbers). */
+  examples: string[];
+}
+
+export interface ImportChecks {
+  summary: {
+    source: ShiftSource;
+    shifts: number;
+    people: number;
+    hours: number;
+    amount: number;
+  }[];
+  issues: ImportCheckIssue[];
+}
+
+/** One month of a person's work, for the staff profile. */
+export interface StaffMonth {
+  month: string;
+  status: PeriodStatus;
+  rssHours: number;
+  essHours: number;
+  /** Unset = not decided yet. */
+  payrollHours?: number;
+}
+
+export interface StaffShiftLine {
+  source: ShiftSource;
+  date: string;
+  clientName: string;
+  siteName: string;
+  hours: number;
+  amount: number;
 }

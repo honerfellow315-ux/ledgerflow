@@ -5,8 +5,9 @@
  * report template.
  *
  * Amount = the company's amount from the salary sheet (a plain value).
- * Units, Bank Holiday Hours, Holiday Entitlement and Rate are left EMPTY on
- * purpose (how company-wise hours are derived is not decided yet); Total Hours
+ * Units (Hours) is this company's share of the payroll hours set on the Salary
+ * Sheet (empty when none were set). Bank Holiday Hours, Holiday Entitlement and
+ * Rate are left EMPTY on purpose; Total Hours
  * stays a formula (Units + Bank Holiday) so it works when hours are typed in Excel.
  */
 import { formatNi, formatMonthLabel, round2 } from "./calc";
@@ -22,6 +23,8 @@ export interface ReportRow {
   staff: Staff;
   /** This company's amount for the month (salary_entries.payroll[companyId]). */
   amount: number;
+  /** Payroll hours that belong to this company (blank in the file when 0 / unknown). */
+  hours?: number;
 }
 
 const HEADERS = [
@@ -286,7 +289,9 @@ export async function exportPayrollReport(
     };
 
     set(C.name, s.name);
-    // Units / Bank Holiday / Holiday Entitlement / Rate: intentionally empty
+    // Units = this company's share of the payroll hours decided on the Salary Sheet
+    // (left empty when none were decided). Bank Holiday / Holiday Entitlement / Rate stay empty.
+    if (r.hours && r.hours > 0) set(C.units, r.hours);
     set(C.total, { formula: `C${n}+B${n}`, result: 0 });
     set(C.amount, r.amount);
 

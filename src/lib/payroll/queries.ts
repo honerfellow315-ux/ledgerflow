@@ -1,7 +1,14 @@
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { unwrap } from "@/lib/unwrap";
-import { getPeriodSheet, listPayrollCompanies, listPeriods, listStaff } from "@/lib/actions/salary";
+import {
+  getImportChecks,
+  getPeriodSheet,
+  getStaffWork,
+  listPayrollCompanies,
+  listPeriods,
+  listStaff,
+} from "@/lib/actions/salary";
 
 export const salaryKeys = {
   all: ["salary"] as const,
@@ -21,8 +28,27 @@ export const usePeriodSheet = (periodId: string | null) =>
     enabled: !!periodId,
   });
 
+export const useImportChecks = (periodId: string | null, enabled: boolean) =>
+  useQuery({
+    queryKey: ["salary", "checks", periodId ?? ""] as const,
+    queryFn: () => unwrap(getImportChecks({ data: { periodId: periodId ?? "" } })),
+    enabled: enabled && !!periodId,
+  });
+
+export const useStaffWork = (staffId: string | null, month: string | undefined, enabled: boolean) =>
+  useQuery({
+    queryKey: ["salary", "staff-work", staffId ?? "", month ?? ""] as const,
+    queryFn: () =>
+      unwrap(getStaffWork({ data: { staffId: staffId ?? "", ...(month ? { month } : {}) } })),
+    enabled: enabled && !!staffId,
+  });
+
 export const useAllPayrollCompanies = (enabled = true) =>
-  useQuery({ queryKey: salaryKeys.companies, queryFn: () => unwrap(listPayrollCompanies()), enabled });
+  useQuery({
+    queryKey: salaryKeys.companies,
+    queryFn: () => unwrap(listPayrollCompanies()),
+    enabled,
+  });
 
 export const useStaffList = (enabled = true) =>
   useQuery({ queryKey: salaryKeys.staff, queryFn: () => unwrap(listStaff()), enabled });

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   Banknote,
+  CheckCircle2,
   Download,
   FileSpreadsheet,
   Lock,
@@ -28,6 +29,7 @@ import { ExportReportDialog } from "@/components/app/salary/ExportReportDialog";
 import { AddLineDialog } from "@/components/app/salary/AddLineDialog";
 import { CompaniesDialog } from "@/components/app/salary/CompaniesDialog";
 import { UnmatchedDialog } from "@/components/app/salary/UnmatchedDialog";
+import { CheckReportDialog } from "@/components/app/salary/CheckReportDialog";
 import { CheckBadge, PayStatusBadge, PeriodStatusBadge } from "@/components/app/salary/badges";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +50,7 @@ import {
 } from "@/components/ui/select";
 import { formatMoney } from "@/lib/ledger/calc";
 import {
+  applyStaffPayModes,
   createPeriod,
   deletePeriod,
   refreshCarryForward,
@@ -58,6 +61,7 @@ import {
   currentMonth,
   formatMonthLabel,
   normNi,
+  splitHours,
   sumRows,
   type SheetRow,
 } from "@/lib/payroll/calc";
@@ -120,6 +124,9 @@ function SalaryPageContent() {
   const [checkFilter, setCheckFilter] = useState<string>(ALL);
   const [tagFilter, setTagFilter] = useState<string>(ALL);
   const [areaFilter, setAreaFilter] = useState<string>(ALL);
+  // "payroll" = lines with hours sent to payroll (blue), "cash" = decided, none to payroll, "undecided".
+  const [routeFilter, setRouteFilter] = useState<string>(ALL);
+  const [showChecks, setShowChecks] = useState(false);
 
   const [openEntryId, setOpenEntryId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
@@ -170,6 +177,11 @@ function SalaryPageContent() {
         if (tagFilter !== ALL && !r.staff.tag.split(",").some((t) => t.trim() === tagFilter))
           return false;
         if (areaFilter !== ALL && r.staff.area.trim() !== areaFilter) return false;
+        if (routeFilter !== ALL) {
+          const sp = splitHours(r.entry);
+          const route = !sp.decided ? "undecided" : sp.payrollHours > 0 ? "payroll" : "cash";
+          if (route !== routeFilter) return false;
+        }
         if (!needle) return true;
         return (
           r.staff.name.toLowerCase().includes(needle) ||
@@ -179,7 +191,7 @@ function SalaryPageContent() {
         );
       })
       .sort((a, b) => a.staff.name.localeCompare(b.staff.name));
-  }, [rows, q, payFilter, checkFilter, tagFilter, areaFilter]);
+  }, [rows, q, payFilter, checkFilter, tagFilter, areaFilter, routeFilter]);
 
   const totals = useMemo(() => sumRows(filtered), [filtered]);
   const allTotals = useMemo(() => sumRows(rows), [rows]);
@@ -191,6 +203,7 @@ function SalaryPageContent() {
     checkFilter !== ALL ||
     tagFilter !== ALL ||
     areaFilter !== ALL ||
+    routeFilter !== ALL ||
     q.trim() !== "";
 
   async function run(fn: () => Promise<unknown>, ok: string) {
@@ -272,10 +285,36 @@ function SalaryPageContent() {
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowChecks(true)}>
+                <CheckCircle2 className="size-4" /> Check data
+              </Button>
               {canEdit ? (
                 <>
                   <Button variant="outline" size="sm" onClick={() => setShowImport(true)}>
                     <Upload className="size-4" /> Import
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() =>
+                      run(
+                        () =>
+                          applyStaffPayModes({ data: { periodId: sheet.period.id } }).then((r) => {
+                            toast.message(
+                              `${r.payroll} sent to payroll, ${r.cash} set to cash` +
+                                (r.noMode ? `, ${r.noMode} have no pay mode yet` : "") +
+                                (r.alreadyDecided
+                                  ? `, ${r.alreadyDecided} already decided (unchanged)`
+                                  : "") +
+                                ".",
+                            );
+                          }),
+                        "Pay modes applied.",
+                      )
+                    }
+                  >
+                    <Banknote className="size-4" /> Apply pay modes
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => setShowAddLine(true)}>
                     <UserPlus className="size-4" /> Add line
@@ -385,7 +424,7 @@ function SalaryPageContent() {
             <SummaryCard
               label="Paid via payroll"
               value={money(allTotals.payrollTotal)}
-              sublabel={`after ${money(allTotals.taxDeduction)} tax`}
+              sublabel={`${hrs(allTotals.payrollHours)} h payroll · ${hrs(allTotals.cashHours)} h cash · after ${money(allTotals.taxDeduction)} tax`}
               tone="success"
             />
             <SummaryCard label="Cash paid" value={money(allTotals.cashPaid)} tone="success" />
@@ -432,6 +471,17 @@ function SalaryPageContent() {
                     extra={[["none", "Not checked"]]}
                   />
                   <FilterSelect
+                    value={routeFilter}
+                    onChange={setRouteFilter}
+                    all="All routes"
+                    options={[]}
+                    extra={[
+                      ["payroll", "Payroll (blue)"],
+                      ["cash", "Cash only"],
+                      ["undecided", "Not decided"],
+                    ]}
+                  />
+                  <FilterSelect
                     value={tagFilter}
                     onChange={setTagFilter}
                     all="All tags"
@@ -469,6 +519,8 @@ function SalaryPageContent() {
                       <TH align="right">ESS h</TH>
                       <TH align="right">B/F</TH>
                       <TH align="right">Hours</TH>
+                      <TH align="right">Payroll h</TH>
+                      <TH align="right">Cash h</TH>
                       <TH align="right">Total £</TH>
                       <TH align="center">Check</TH>
                       {companies.map((c) => (
@@ -492,9 +544,17 @@ function SalaryPageContent() {
                   <TBody>
                     {filtered.map((r) => {
                       const e = r.entry;
+                      const split = splitHours(e);
+                      const blue = split.decided && split.payrollHours > 0;
                       return (
-                        <TR key={e.id} onClick={() => setOpenEntryId(e.id)} className="h-9">
-                          <TD className="sticky left-0 z-10 bg-surface font-medium">
+                        <TR
+                          key={e.id}
+                          onClick={() => setOpenEntryId(e.id)}
+                          className={`h-9 ${blue ? "bg-info-soft" : ""}`}
+                        >
+                          <TD
+                            className={`sticky left-0 z-10 font-medium ${blue ? "bg-info-soft" : "bg-surface"}`}
+                          >
                             {r.staff.name}
                             {e.flag ? (
                               <span className="ml-2 text-[10px] text-warning">{e.flag}</span>
@@ -521,6 +581,12 @@ function SalaryPageContent() {
                           </TD>
                           <TD align="right" mono>
                             {hrs(r.computed.totalHours)}
+                          </TD>
+                          <TD align="right" mono className={blue ? "font-semibold text-info" : ""}>
+                            {split.decided ? hrs(split.payrollHours) : "—"}
+                          </TD>
+                          <TD align="right" mono>
+                            {split.decided ? hrs(split.cashHours) : "—"}
                           </TD>
                           <TD align="right" mono className="font-medium">
                             {money(r.computed.totalAmount)}
@@ -584,6 +650,12 @@ function SalaryPageContent() {
                       </TD>
                       <TD align="right" mono>
                         {hrs(totals.totalHours)}
+                      </TD>
+                      <TD align="right" mono>
+                        {hrs(totals.payrollHours)}
+                      </TD>
+                      <TD align="right" mono>
+                        {hrs(totals.cashHours)}
                       </TD>
                       <TD align="right" mono>
                         {money(totals.totalAmount)}
@@ -655,6 +727,12 @@ function SalaryPageContent() {
             />
           ) : null}
           <CompaniesDialog open={showCompanies} onOpenChange={setShowCompanies} />
+          <CheckReportDialog
+            open={showChecks}
+            onOpenChange={setShowChecks}
+            periodId={sheet.period.id}
+            month={sheet.period.month}
+          />
           <UnmatchedDialog
             open={showUnmatched}
             onOpenChange={setShowUnmatched}

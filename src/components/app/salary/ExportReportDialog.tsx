@@ -19,7 +19,7 @@ import {
 import { Field } from "@/components/app/Field";
 import { Download } from "@/lib/icons";
 import { formatMoney } from "@/lib/ledger/calc";
-import { formatMonthLabel, round2 } from "@/lib/payroll/calc";
+import { companyHours, formatMonthLabel, round2 } from "@/lib/payroll/calc";
 import { errorMessage, useStaffList } from "@/lib/payroll/queries";
 import { exportPayrollReport, reportFileName, type ReportRow } from "@/lib/payroll/reportExport";
 import type { PayrollCompany, SalaryEntry } from "@/lib/payroll/types";
@@ -63,7 +63,8 @@ export function ExportReportDialog({
     for (const e of entries) {
       const amount = e.payroll[company.id] ?? 0;
       const staff = byId.get(e.staffId);
-      if (amount !== 0 && staff) out.push({ staff, amount });
+      const hours = companyHours(e, company.id);
+      if (amount !== 0 && staff) out.push({ staff, amount, ...(hours > 0 ? { hours } : {}) });
     }
     return out;
   }, [company, staffQ.data, entries]);
@@ -93,7 +94,8 @@ export function ExportReportDialog({
           <DialogTitle>Export payroll report — {formatMonthLabel(month)}</DialogTitle>
           <DialogDescription>
             One payroll company, in the All Payroll Format layout. Includes everyone with an amount
-            for that company this month. Hours and rate are left empty for you to fill in Excel.
+            for that company this month. Units (Hours) come from the payroll hours set on each
+            salary line; rate is left empty for you to fill in Excel.
           </DialogDescription>
         </DialogHeader>
 

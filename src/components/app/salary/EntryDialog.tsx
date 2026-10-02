@@ -30,7 +30,13 @@ import {
   deleteSalaryPayment,
   updateEntry,
 } from "@/lib/actions/salary";
-import { computeEntry, type SheetRow } from "@/lib/payroll/calc";
+import {
+  amountForHours,
+  computeEntry,
+  round2,
+  splitHours,
+  type SheetRow,
+} from "@/lib/payroll/calc";
 import { amountToInput, errorMessage, parseAmount, useRefreshSalary } from "@/lib/payroll/queries";
 import type { CheckStatus, PayrollCompany, SalaryEntry } from "@/lib/payroll/types";
 
@@ -48,6 +54,8 @@ interface FormState {
   checkStatus: CheckStatus;
   flag: string;
   payroll: Record<string, string>;
+  /** Hours sent to payroll. Empty = not decided yet; "0" = all cash. */
+  payrollHours: string;
 }
 
 const fromEntry = (e: SalaryEntry): FormState => ({
@@ -62,6 +70,7 @@ const fromEntry = (e: SalaryEntry): FormState => ({
   checkStatus: e.checkStatus,
   flag: e.flag,
   payroll: Object.fromEntries(Object.entries(e.payroll).map(([k, v]) => [k, amountToInput(v)])),
+  payrollHours: e.payrollHours === undefined ? "" : String(e.payrollHours),
 });
 
 export function EntryDialog({
@@ -109,7 +118,7 @@ export function EntryDialog({
 
   const draft: SalaryEntry | null = useMemo(() => {
     if (!row || !form) return null;
-    return {
+    const d: SalaryEntry = {
       ...row.entry,
       rssAmount: parseAmount(form.rssAmount),
       rssHours: parseAmount(form.rssHours),
@@ -122,11 +131,22 @@ export function EntryDialog({
         Object.entries(form.payroll).map(([k, v]) => [k, parseAmount(v)]),
       ),
     };
+    // blank box = "not decided yet" (the field is left off, not set to 0)
+    if (form.payrollHours.trim() === "") delete d.payrollHours;
+    else d.payrollHours = parseAmount(form.payrollHours);
+    return d;
   }, [row, form]);
 
   if (!row || !form || !draft) return null;
 
   const live = computeEntry(draft, row.payments);
+  const split = splitHours(draft);
+  // Where "fill amount" puts the money: the person's own payroll company, else the
+  // one company that already has an amount on this line.
+  const withAmount = companies.filter((c) => (draft.payroll[c.id] ?? 0) !== 0);
+  const targetCompany =
+    companies.find((c) => c.id === row.staff.defaultPayrollCompanyId) ??
+    (withAmount.length === 1 ? withAmount[0] : undefined);
   const setF = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => (f ? { ...f, [k]: v } : f));
   const num = (k: keyof FormState) => (e: { target: { value: string } }) =>
@@ -134,6 +154,10 @@ export function EntryDialog({
 
   async function save() {
     if (!draft || !form) return;
+    if (split.payrollHours !== (draft.payrollHours ?? split.payrollHours)) {
+      toast.error(`Payroll hours can't be more than the ${split.totalHours} hours worked.`);
+      return;
+    }
     setSaving(true);
     try {
       await updateEntry({
@@ -151,6 +175,7 @@ export function EntryDialog({
             checkStatus: form.checkStatus,
             flag: form.flag,
             payroll: draft.payroll,
+            payrollHours: draft.payrollHours ?? null,
           },
         },
       });
@@ -293,6 +318,89 @@ export function EntryDialog({
         </div>
 
         <EarningsBreakdown entryId={draft.id} />
+
+        <div
+          className={`rounded-md border p-3 ${split.decided && split.payrollHours > 0 ? "border-info/40 bg-info-soft" : "border-border bg-surface-muted/40"}`}
+        >
+          <p className="mb-2 text-[12px] font-semibold text-foreground">
+            Payroll or cash?{" "}
+            <span className="font-normal text-muted-foreground">
+              {row.staff.payMode
+                ? `Usually paid by ${row.staff.payMode === "payroll" ? "payroll" : "cash"}`
+                : "Pay mode not set for this person"}
+            </span>
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-36">
+              <Field label="Hours to payroll" hint={`of ${split.totalHours} worked`}>
+                <Input
+                  inputMode="decimal"
+                  value={form.payrollHours}
+                  onChange={num("payrollHours")}
+                  disabled={dis}
+                  placeholder="not decided"
+                />
+              </Field>
+            </div>
+            <div className="num pb-2 text-[12px]">
+              <span className="text-muted-foreground">Cash hours: </span>
+              <strong>{split.decided ? split.cashHours : "—"}</strong>
+            </div>
+            {!dis ? (
+              <div className="flex flex-wrap gap-2 pb-0.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setF("payrollHours", String(split.totalHours))}
+                >
+                  All to payroll
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setF("payrollHours", "0")}
+                >
+                  All cash
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!targetCompany || !split.decided || split.payrollHours <= 0}
+                  title={
+                    targetCompany
+                      ? `Put ${formatMoney(amountForHours(draft, split.payrollHours))} under ${targetCompany.name}`
+                      : "Choose this person's payroll company in the Staff profile first"
+                  }
+                  onClick={() =>
+                    targetCompany &&
+                    setForm((f) =>
+                      f
+                        ? {
+                            ...f,
+                            payroll: {
+                              ...f.payroll,
+                              [targetCompany.id]: amountToInput(
+                                round2(amountForHours(draft, split.payrollHours)),
+                              ),
+                            },
+                          }
+                        : f,
+                    )
+                  }
+                >
+                  Fill payroll amount{targetCompany ? ` (${targetCompany.name})` : ""}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            The amount is worked out as payroll hours × this month's average rate. Nothing changes
+            until you press Save.
+          </p>
+        </div>
 
         <div>
           <p className="mb-2 text-[12px] font-semibold text-foreground">Payroll</p>
