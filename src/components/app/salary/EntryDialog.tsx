@@ -223,7 +223,13 @@ export function EntryDialog({
         <DialogHeader>
           <DialogTitle>{s.name}</DialogTitle>
           <DialogDescription>
-            {[s.rssId && `RSS ${s.rssId}`, s.essId && `ESS ${s.essId}`, s.ni, s.tag]
+            {[
+              s.rssId && `RSS ${s.rssId}`,
+              s.essId && `ESS ${s.essId}`,
+              ...Object.entries(s.extIds ?? {}).map(([code, id]) => id && `${code} ${id}`),
+              s.ni,
+              s.tag,
+            ]
               .filter(Boolean)
               .join(" · ") || "Salary line"}
             {locked ? " — this month is closed, so the line is read-only." : ""}
@@ -291,6 +297,26 @@ export function EntryDialog({
             />
           </Field>
         </div>
+
+        {Object.entries(draft.extra ?? {}).some(([, v]) => v.amount || v.hours) ? (
+          <div className="rounded-md border border-border px-3 py-2">
+            <p className="text-[12px] font-semibold text-foreground">Other shift companies</p>
+            <p className="text-[11px] text-muted-foreground">
+              Worked out from the imported shifts, so they are not typed here. Re-import that
+              company's file to change them. Already included in Total hours / Total amount above.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-[12px]">
+              {Object.entries(draft.extra)
+                .filter(([, v]) => v.amount || v.hours)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([code, v]) => (
+                  <span key={code} className="num">
+                    <strong>{code}</strong> {formatMoney(v.amount)} · {v.hours} h
+                  </span>
+                ))}
+            </div>
+          </div>
+        ) : null}
 
         <EarningsBreakdown entryId={draft.id} />
 

@@ -4,8 +4,10 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   Banknote,
+  Building2,
   Download,
   FileSpreadsheet,
+  ListChecks,
   Lock,
   Plus,
   RefreshCw,
@@ -24,6 +26,8 @@ import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { Field } from "@/components/app/Field";
 import { EntryDialog } from "@/components/app/salary/EntryDialog";
 import { ImportDialog } from "@/components/app/salary/ImportDialog";
+import { CheckReportDialog } from "@/components/app/salary/CheckReportDialog";
+import { ShiftCompaniesDialog } from "@/components/app/salary/ShiftCompaniesDialog";
 import { ExportReportDialog } from "@/components/app/salary/ExportReportDialog";
 import { AddLineDialog } from "@/components/app/salary/AddLineDialog";
 import { CompaniesDialog } from "@/components/app/salary/CompaniesDialog";
@@ -124,6 +128,8 @@ function SalaryPageContent() {
   const [openEntryId, setOpenEntryId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showCompanies, setShowCompanies] = useState(false);
+  const [showChecks, setShowChecks] = useState(false);
+  const [showShiftCompanies, setShowShiftCompanies] = useState(false);
   const [showAddLine, setShowAddLine] = useState(false);
   const [showUnmatched, setShowUnmatched] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -181,6 +187,18 @@ function SalaryPageContent() {
       .sort((a, b) => a.staff.name.localeCompare(b.staff.name));
   }, [rows, q, payFilter, checkFilter, tagFilter, areaFilter]);
 
+  // One pair of columns per shift company other than RSS / ESS that has money or
+  // hours anywhere in this month (computed from ALL rows so the columns don't
+  // jump around when a filter is applied).
+  const extraCodes = useMemo(() => {
+    const codes = new Set<string>();
+    for (const r of rows) {
+      for (const [code, v] of Object.entries(r.entry.extra ?? {})) {
+        if (v.amount || v.hours) codes.add(code);
+      }
+    }
+    return [...codes].sort();
+  }, [rows]);
   const totals = useMemo(() => sumRows(filtered), [filtered]);
   const allTotals = useMemo(() => sumRows(rows), [rows]);
   const companies = sheet?.companies ?? [];
@@ -280,6 +298,9 @@ function SalaryPageContent() {
                   <Button variant="outline" size="sm" onClick={() => setShowAddLine(true)}>
                     <UserPlus className="size-4" /> Add line
                   </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowShiftCompanies(true)}>
+                    <Building2 className="size-4" /> Shift companies
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setShowCompanies(true)}>
                     <Banknote className="size-4" /> Payroll companies
                   </Button>
@@ -302,6 +323,9 @@ function SalaryPageContent() {
                   </Button>
                 </>
               ) : null}
+              <Button variant="outline" size="sm" onClick={() => setShowChecks(true)}>
+                <ListChecks className="size-4" /> Check data
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -467,6 +491,14 @@ function SalaryPageContent() {
                       <TH align="right">RSS h</TH>
                       <TH align="right">ESS £</TH>
                       <TH align="right">ESS h</TH>
+                      {extraCodes.flatMap((code) => [
+                        <TH key={`${code}-a`} align="right">
+                          {code} £
+                        </TH>,
+                        <TH key={`${code}-h`} align="right">
+                          {code} h
+                        </TH>,
+                      ])}
                       <TH align="right">B/F</TH>
                       <TH align="right">Hours</TH>
                       <TH align="right">Total £</TH>
@@ -516,6 +548,14 @@ function SalaryPageContent() {
                           <TD align="right" mono>
                             {e.essHours ? hrs(e.essHours) : "—"}
                           </TD>
+                          {extraCodes.flatMap((code) => [
+                            <TD key={`${code}-a`} align="right" mono>
+                              {e.extra?.[code]?.amount ? money(e.extra[code]?.amount ?? 0) : "—"}
+                            </TD>,
+                            <TD key={`${code}-h`} align="right" mono>
+                              {e.extra?.[code]?.hours ? hrs(e.extra[code]?.hours ?? 0) : "—"}
+                            </TD>,
+                          ])}
                           <TD align="right" mono>
                             {e.carryForward ? money(e.carryForward) : "—"}
                           </TD>
@@ -579,6 +619,14 @@ function SalaryPageContent() {
                       <TD align="right" mono>
                         {hrs(totals.essHours)}
                       </TD>
+                      {extraCodes.flatMap((code) => [
+                        <TD key={`${code}-a`} align="right" mono>
+                          {money(totals.byShift[code]?.amount ?? 0)}
+                        </TD>,
+                        <TD key={`${code}-h`} align="right" mono>
+                          {hrs(totals.byShift[code]?.hours ?? 0)}
+                        </TD>,
+                      ])}
                       <TD align="right" mono>
                         {money(totals.carryForward)}
                       </TD>
@@ -655,6 +703,13 @@ function SalaryPageContent() {
             />
           ) : null}
           <CompaniesDialog open={showCompanies} onOpenChange={setShowCompanies} />
+          <ShiftCompaniesDialog open={showShiftCompanies} onOpenChange={setShowShiftCompanies} />
+          <CheckReportDialog
+            open={showChecks}
+            onOpenChange={setShowChecks}
+            periodId={sheet.period.id}
+            month={sheet.period.month}
+          />
           <UnmatchedDialog
             open={showUnmatched}
             onOpenChange={setShowUnmatched}

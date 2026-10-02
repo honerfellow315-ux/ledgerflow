@@ -55,10 +55,14 @@ export function toIsoDate(cell: Cell | undefined): string {
   return typeof cell === "string" ? parseDateText(cell.trim()) : "";
 }
 
+// Header text -> comparable key. Spaces around a slash are ignored so that
+// "Clock In/Clock Out hours", "CLOCK IN/ CLOCK OUT hours" and
+// "clock in / clock out hours" are all the same header.
 const norm = (s: string) =>
   s
     .toLowerCase()
     .replace(/[^a-z0-9+/-]+/g, " ")
+    .replace(/\s*\/\s*/g, "/")
     .trim();
 
 /* ------------------------------ file reading ------------------------------ */
@@ -205,8 +209,8 @@ export interface ShiftParse {
 // Header names (lower-cased by norm()) for both layouts:
 //  - the raw shift export:  EMPLOYEE ID / EMPLOYEE NAME / HOURS / GUARD RATE / AMOUNT ...
 //  - the RSS / ESS tabs:    ESS ID / Officer / Clock In/Clock Out hours / Guard rate / guard Amount ...
-//    (the ID column is headed "ESS ID" even on the RSS tab, so which system it is
-//    comes from the "Which system?" choice, never from the header)
+//    (the ID column is headed "ESS ID" even on the RSS tab, so which company it is
+//    comes from the "Which company?" choice, never from the header)
 const SHIFT_COLS = {
   employeeId: ["employee id", "ess id", "rss id"],
   employeeName: ["employee name", "officer"],
@@ -214,7 +218,7 @@ const SHIFT_COLS = {
   date: ["date"],
   clientName: ["client name", "customer name"],
   siteName: ["site name"],
-  hours: ["hours", "clock in/clock out hours"],
+  hours: ["hours", "clock in/clock out hours", "clock in clock out hours"],
   rate: ["guard rate"],
   amount: ["amount", "guard amount"],
   expenses: ["payable expenses"],
@@ -236,6 +240,12 @@ function findHeaderRow(matrix: Matrix, needles: string[]): number {
   }
   return -1;
 }
+
+/** Cheap header-only checks used to tell what kind of file was uploaded. */
+export const looksLikeShiftSheet = (matrix: Matrix): boolean =>
+  SHIFT_HEADER_SETS.some((set) => findHeaderRow(matrix, set.needles) >= 0);
+export const looksLikeMasterSheet = (matrix: Matrix): boolean =>
+  findHeaderRow(matrix, ["total amount", "outstanding", "name"]) >= 0;
 
 export function parseShiftExport(matrix: Matrix): ShiftParse {
   const empty: ShiftParse = {
@@ -291,6 +301,7 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
   const months: Record<string, number> = {};
   const seen = new Map<string, number>();
   let skipped = 0;
+  let repeatedHeaders = 0;
   let hours = 0;
   let amount = 0;
   let noDate = 0;
@@ -304,6 +315,17 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
     const employeeName = toText(get(r, idx.employeeName));
     if (!employeeId && !employeeName) {
       skipped++;
+      continue;
+    }
+    // Exports that are stacked / pasted together repeat the header row in the
+    // middle of the data. That row is not a person — skip it.
+    const nameKey = idx.employeeName >= 0 ? header[idx.employeeName] : "";
+    const idKey = idx.employeeId >= 0 ? header[idx.employeeId] : "";
+    if (
+      (nameKey && norm(employeeName) === nameKey) ||
+      (idKey && employeeId && norm(employeeId) === idKey && !employeeName)
+    ) {
+      repeatedHeaders++;
       continue;
     }
     const h2 = round2(toNumber(get(r, idx.hours)));
@@ -354,6 +376,11 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
       `${dupes} shift${dupes === 1 ? "" : "s"} look like exact duplicates (same person, date, site, hours and amount). They are still counted — check the export if that's not right.`,
     );
   }
+  if (repeatedHeaders > 0) {
+    warnings.push(
+      `${repeatedHeaders} repeated header row${repeatedHeaders === 1 ? "" : "s"} inside the data ${repeatedHeaders === 1 ? "was" : "were"} ignored.`,
+    );
+  }
   if (noDate > 0) warnings.push(`${noDate} shifts have no readable date.`);
   if (noRate > 0) {
     warnings.push(
@@ -376,7 +403,7 @@ export function parseShiftExport(matrix: Matrix): ShiftParse {
     warnings,
     totals: { hours: round2(hours), amount: round2(amount) },
     months,
-    skipped,
+    skipped: skipped + repeatedHeaders,
     layout,
     sheetName: "",
   };

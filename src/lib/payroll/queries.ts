@@ -1,13 +1,22 @@
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { unwrap } from "@/lib/unwrap";
-import { getPeriodSheet, listPayrollCompanies, listPeriods, listStaff } from "@/lib/actions/salary";
+import {
+  getImportChecks,
+  getPeriodSheet,
+  listPayrollCompanies,
+  listPeriods,
+  listShiftCompanies,
+  listStaff,
+} from "@/lib/actions/salary";
 
 export const salaryKeys = {
   all: ["salary"] as const,
   periods: ["salary", "periods"] as const,
   sheet: (periodId: string) => ["salary", "sheet", periodId] as const,
   companies: ["salary", "companies"] as const,
+  shiftCompanies: ["salary", "shiftCompanies"] as const,
+  checks: (periodId: string) => ["salary", "checks", periodId] as const,
   staff: ["staff"] as const,
 };
 
@@ -23,6 +32,24 @@ export const usePeriodSheet = (periodId: string | null) =>
 
 export const useAllPayrollCompanies = (enabled = true) =>
   useQuery({ queryKey: salaryKeys.companies, queryFn: () => unwrap(listPayrollCompanies()), enabled });
+
+/** Every shift company (RSS, ESS and the ones the client added), incl. switched-off ones. */
+export const useShiftCompanies = (enabled = true) =>
+  useQuery({
+    queryKey: salaryKeys.shiftCompanies,
+    queryFn: () => unwrap(listShiftCompanies()),
+    enabled,
+  });
+
+/** The "Check data" report. Always re-reads when it opens, so it is never stale. */
+export const useImportChecks = (periodId: string, enabled = true) =>
+  useQuery({
+    queryKey: salaryKeys.checks(periodId),
+    queryFn: () => unwrap(getImportChecks({ data: { periodId } })),
+    enabled: enabled && !!periodId,
+    staleTime: 0,
+    gcTime: 0,
+  });
 
 export const useStaffList = (enabled = true) =>
   useQuery({ queryKey: salaryKeys.staff, queryFn: () => unwrap(listStaff()), enabled });

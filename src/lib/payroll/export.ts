@@ -34,22 +34,42 @@ export async function exportSalarySheet(
   ];
   const nPay = Math.max(4, ...rows.map((r) => r.payments.length));
 
+  // Shift companies other than RSS / ESS that have any money, hours or staff ID
+  // in these rows: one ID column and one Amount + Hours pair each.
+  const extraCodes = [
+    ...new Set(
+      rows.flatMap((r) => [
+        ...Object.entries(r.entry.extra ?? {})
+          .filter(([, v]) => v && (v.amount || v.hours))
+          .map(([c]) => c),
+        ...Object.entries(r.staff.extIds ?? {})
+          .filter(([, v]) => v)
+          .map(([c]) => c),
+      ]),
+    ),
+  ].sort();
+  const nx = extraCodes.length;
+
   // column numbers (A is an empty margin column, like the original)
+  const idCol = (k: number) => 4 + k;
+  const base = 4 + nx; // first column after the ID columns
   const C = {
     rssId: 2,
     essId: 3,
-    ni: 4,
-    tag: 5,
-    name: 6,
-    rssAmt: 7,
-    rssHrs: 8,
-    essAmt: 9,
-    essHrs: 10,
-    carry: 11,
-    totHrs: 12,
-    totAmt: 13,
-    check: 14,
+    ni: base,
+    tag: base + 1,
+    name: base + 2,
+    rssAmt: base + 3,
+    rssHrs: base + 4,
+    essAmt: base + 5,
+    essHrs: base + 6,
+    carry: base + 7 + nx * 2,
+    totHrs: base + 8 + nx * 2,
+    totAmt: base + 9 + nx * 2,
+    check: base + 10 + nx * 2,
   };
+  const xAmt = (k: number) => base + 7 + k * 2;
+  const xHrs = (k: number) => base + 8 + k * 2;
   const firstPay = C.check + 1;
   const lastPay = firstPay + payrollCols.length - 1;
   const tax = lastPay + 1;
@@ -67,6 +87,7 @@ export async function exportSalarySheet(
     [C.rssId, "Profile of Staff"],
     [C.rssAmt, "RSS Data"],
     [C.essAmt, "ESS Data"],
+    ...extraCodes.map((code, k): [number, string] => [xAmt(k), `${code} Data`]),
     [C.carry, "Payable"],
     [C.check, "Check status"],
     [firstPay, "Payroll data"],
@@ -84,6 +105,11 @@ export async function exportSalarySheet(
     [C.rssHrs, "Hours"],
     [C.essAmt, "Amount"],
     [C.essHrs, "Hours"],
+    ...extraCodes.flatMap((code, k): [number, string][] => [
+      [idCol(k), `${code} ID`],
+      [xAmt(k), "Amount"],
+      [xHrs(k), "Hours"],
+    ]),
     [C.carry, "-OverPaid/+Remaining"],
     [C.totHrs, "Total Hours"],
     [C.totAmt, "Total Amount"],
@@ -132,10 +158,19 @@ export async function exportSalarySheet(
     set(C.rssHrs, e.rssHours);
     set(C.essAmt, e.essAmount);
     set(C.essHrs, e.essHours);
+    extraCodes.forEach((code, k) => {
+      const id = r.staff.extIds?.[code];
+      set(idCol(k), id ? Number(id) || id : null);
+      set(xAmt(k), e.extra?.[code]?.amount || null);
+      set(xHrs(k), e.extra?.[code]?.hours || null);
+    });
     set(C.carry, e.carryForward);
-    set(C.totHrs, { formula: `${L(C.essHrs)}+${L(C.rssHrs)}`, result: r.computed.totalHours });
+    set(C.totHrs, {
+      formula: [C.essHrs, C.rssHrs, ...extraCodes.map((_, k) => xHrs(k))].map(L).join("+"),
+      result: r.computed.totalHours,
+    });
     set(C.totAmt, {
-      formula: `${L(C.essAmt)}+${L(C.rssAmt)}+${L(C.carry)}`,
+      formula: `${[C.essAmt, C.rssAmt, ...extraCodes.map((_, k) => xAmt(k))].map(L).join("+")}+${L(C.carry)}`,
       result: r.computed.totalAmount,
     });
     set(C.check, e.checkStatus || null);
@@ -182,6 +217,10 @@ export async function exportSalarySheet(
   sumCell(C.rssHrs, totals.rssHours);
   sumCell(C.essAmt, totals.essAmount);
   sumCell(C.essHrs, totals.essHours);
+  extraCodes.forEach((code, k) => {
+    sumCell(xAmt(k), totals.byShift[code]?.amount ?? 0);
+    sumCell(xHrs(k), totals.byShift[code]?.hours ?? 0);
+  });
   sumCell(C.carry, totals.carryForward);
   sumCell(C.totHrs, totals.totalHours);
   sumCell(C.totAmt, totals.totalAmount);
@@ -208,6 +247,7 @@ export async function exportSalarySheet(
   const moneyCols = [
     C.rssAmt,
     C.essAmt,
+    ...extraCodes.map((_, k) => xAmt(k)),
     C.carry,
     C.totAmt,
     ...payrollCols.map((_, i) => firstPay + i),
@@ -219,7 +259,7 @@ export async function exportSalarySheet(
     outstanding,
   ];
   for (const c of moneyCols) ws.getColumn(c).numFmt = money;
-  for (const c of [C.rssHrs, C.essHrs, C.totHrs]) ws.getColumn(c).numFmt = "#,##0.00";
+  for (const c of [C.rssHrs, C.essHrs, C.totHrs, ...extraCodes.map((_, k) => xHrs(k))]) ws.getColumn(c).numFmt = "#,##0.00";
   ws.getColumn(1).width = 2;
   ws.getColumn(C.ni).width = 15;
   ws.getColumn(C.tag).width = 14;

@@ -3,7 +3,23 @@
  * payroll_* / salary_* tables in drizzle/schema.ts, with nulls dropped.
  */
 
-export type ShiftSource = "RSS" | "ESS";
+/** Code of a shift company ("RSS", "ESS", or any company added later). */
+export type ShiftSource = string;
+/** RSS and ESS have their own columns on staff / salary lines; every other code lives in extIds / extra. */
+export const BUILT_IN_SHIFTS = ["RSS", "ESS"] as const;
+export const isBuiltInShift = (code: string): boolean =>
+  (BUILT_IN_SHIFTS as readonly string[]).includes(code);
+
+/** A company that supplies raw shift exports (managed by the user, RSS and ESS are seeded). */
+export interface ShiftCompany {
+  code: string;
+  name: string;
+  active: boolean;
+  sortOrder: number;
+}
+
+/** What one non-RSS/ESS shift company contributed to a salary line. */
+export type ExtraEarnings = Record<string, { amount: number; hours: number }>;
 export type CheckStatus = "" | "Reviewed" | "Verified";
 export type PeriodStatus = "draft" | "reviewed" | "verified" | "closed";
 export type PayStatus = "Current" | "OverPaid" | "Paid in Full";
@@ -47,6 +63,8 @@ export interface Staff extends StaffDetails {
   id: string;
   rssId: string;
   essId: string;
+  /** The person's ID inside every other shift company: { code: id }. */
+  extIds: Record<string, string>;
   ni: string;
   name: string;
   tag: string;
@@ -79,6 +97,8 @@ export interface SalaryEntry {
   rssHours: number;
   essAmount: number;
   essHours: number;
+  /** Earnings from every other shift company: { code: { amount, hours } }. */
+  extra: ExtraEarnings;
   /** -OverPaid / +Remaining carried from the previous month. */
   carryForward: number;
   taxDeduction: number;
@@ -102,7 +122,7 @@ export interface SalaryPayment {
   notes?: string;
 }
 
-/** One parsed line of a raw shift export (RSS / ESS). */
+/** One parsed line of a raw shift export (any shift company). */
 export interface ShiftRowInput {
   employeeId: string;
   employeeName: string;
@@ -151,7 +171,8 @@ export interface PeriodSheet {
   companies: PayrollCompany[];
   /** Shifts in the raw import that couldn't be matched to anyone. */
   unmatchedShifts: number;
-  shiftCounts: { RSS: number; ESS: number };
+  /** Imported shift count per shift company code. */
+  shiftCounts: Record<string, number>;
 }
 
 /** One person's line of the "Employee details" import preview / result. */
@@ -165,4 +186,29 @@ export interface StaffDetailsImportRow {
 
 export interface StaffDetailsImportResult {
   rows: StaffDetailsImportRow[];
+}
+
+/** One shift company's line in the "Check data" report. */
+export interface ImportCheckSummary {
+  source: string;
+  shifts: number;
+  people: number;
+  hours: number;
+  amount: number;
+}
+
+export interface ImportCheckIssue {
+  level: "error" | "warn";
+  /** Stable key, used as the list key. */
+  code: string;
+  title: string;
+  count: number;
+  hint: string;
+  examples: string[];
+}
+
+/** Result of the month's data checks (read-only). */
+export interface ImportCheckReport {
+  summary: ImportCheckSummary[];
+  issues: ImportCheckIssue[];
 }

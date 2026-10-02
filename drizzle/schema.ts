@@ -411,6 +411,9 @@ export const payrollStaff = pgTable("payroll_staff", {
   id: text("id").primaryKey(),
   rssId: text("rss_id").notNull().default(""),
   essId: text("ess_id").notNull().default(""),
+  // The person's ID inside every other shift company: { "ABC": "1234" }.
+  // RSS / ESS keep their own columns above.
+  extIds: jsonb("ext_ids").$type<Record<string, string>>().notNull().default({}),
   ni: text("ni").notNull().default(""),
   name: text("name").notNull(),
   tag: text("tag").notNull().default(""),
@@ -440,6 +443,16 @@ export const payrollStaff = pgTable("payroll_staff", {
   siaNumber: text("sia_number"),
   role: text("role"),
   serviceType: text("service_type"),
+});
+
+// The companies that supply raw shift exports. RSS and ESS are seeded; the
+// client can add as many more as needed from the UI (no code change).
+export const shiftCompanies = pgTable("shift_companies", {
+  code: text("code").primaryKey(), // upper-case, e.g. "RSS"
+  name: text("name").notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // The payroll columns of the sheet (ESS, Fortexo, Secure FM, SES, SPL,
@@ -477,6 +490,12 @@ export const salaryEntries = pgTable(
     rssHours: numeric("rss_hours", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
     essAmount: money("ess_amount").notNull().default(0),
     essHours: numeric("ess_hours", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
+    // Earnings from every other shift company: { "ABC": { amount, hours } }.
+    // Derived from salary_shifts on each import, like the RSS / ESS columns.
+    extra: jsonb("extra")
+      .$type<Record<string, { amount: number; hours: number }>>()
+      .notNull()
+      .default({}),
     // -OverPaid / +Remaining from the previous month (replaces the Excel
     // "OverPaid last month" lookup sheet).
     carryForward: money("carry_forward").notNull().default(0),

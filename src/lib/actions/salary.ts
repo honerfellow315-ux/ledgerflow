@@ -9,23 +9,20 @@ import {
   salaryEntries,
   salaryPayments,
   salaryPeriods,
-  salaryShifts,
+  shiftCompanies,
 } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
 import { uid } from "../server/id";
 import { recordActivity, changedFieldsSummary } from "../server/activity";
-import {
-  INCLUDE_EXPENSES_AND_PENALTY,
-  buildRows,
-  formatMonthLabel,
-  normName,
-  formatNi,
-  normNi,
-  round2,
-} from "../payroll/calc";
-import { CONTRACT_STATUSES, STAFF_DETAIL_FIELDS } from "../payroll/types";
+import { importShiftRows } from "../server/shiftImport";
+import { recomputeFromShifts } from "../server/salaryShifts";
+import { buildImportChecks } from "../server/importChecks";
+import { buildRows, formatMonthLabel, formatNi, normName, normNi, round2 } from "../payroll/calc";
+import { CONTRACT_STATUSES, STAFF_DETAIL_FIELDS, isBuiltInShift } from "../payroll/types";
 import type {
   CheckStatus,
+  ImportCheckReport,
+  ShiftCompany,
   PayrollCompany,
   PeriodSheet,
   PeriodStatus,
@@ -52,6 +49,7 @@ const toSheetStaff = (r: typeof payrollStaff.$inferSelect): Staff => ({
   id: r.id,
   rssId: r.rssId,
   essId: r.essId,
+  extIds: r.extIds ?? {},
   ni: r.ni,
   name: r.name,
   tag: r.tag,
@@ -84,6 +82,13 @@ const toCompany = (r: typeof payrollCompanies.$inferSelect): PayrollCompany => (
   active: r.active,
 });
 
+const toShiftCompany = (r: typeof shiftCompanies.$inferSelect): ShiftCompany => ({
+  code: r.code,
+  name: r.name,
+  active: r.active,
+  sortOrder: r.sortOrder,
+});
+
 const toPeriod = (r: typeof salaryPeriods.$inferSelect): SalaryPeriod => ({
   id: r.id,
   month: r.month,
@@ -101,6 +106,7 @@ const toEntry = (r: typeof salaryEntries.$inferSelect): SalaryEntry => ({
   rssHours: r.rssHours,
   essAmount: r.essAmount,
   essHours: r.essHours,
+  extra: r.extra ?? {},
   carryForward: r.carryForward,
   taxDeduction: r.taxDeduction,
   deduction: r.deduction,
@@ -242,47 +248,6 @@ async function refreshCarryForwardFor(periodId: string) {
       .onConflictDoNothing();
   }
   return { previousMonth: prev.month, updated: existing.length, added: missing.length };
-}
-
-/** Same aggregation Excel did by hand: sum each person's imported shifts
- * for a source into their RSS/ESS amount + hours, one SQL statement each. */
-async function recomputeFromShifts(periodId: string) {
-  // 1) shifts whose person wasn't known at import time, matched now
-  await db.execute(sql`
-    UPDATE salary_shifts sh SET staff_id = s.id FROM payroll_staff s
-    WHERE sh.period_id = ${periodId} AND sh.staff_id IS NULL AND sh.source = 'RSS'
-      AND sh.employee_id <> '' AND s.rss_id = sh.employee_id`);
-  await db.execute(sql`
-    UPDATE salary_shifts sh SET staff_id = s.id FROM payroll_staff s
-    WHERE sh.period_id = ${periodId} AND sh.staff_id IS NULL AND sh.source = 'ESS'
-      AND sh.employee_id <> '' AND s.ess_id = sh.employee_id`);
-  await db.execute(sql`
-    UPDATE salary_shifts sh SET staff_id = s.id FROM payroll_staff s
-    WHERE sh.period_id = ${periodId} AND sh.staff_id IS NULL AND sh.ni <> '' AND s.ni <> ''
-      AND upper(regexp_replace(sh.ni, '[^A-Za-z0-9]', '', 'g')) = upper(regexp_replace(s.ni, '[^A-Za-z0-9]', '', 'g'))`);
-
-  // 2) aggregate per person, per source
-  const pay = INCLUDE_EXPENSES_AND_PENALTY
-    ? sql`round(sum(amount + expenses - penalty), 2)`
-    : sql`round(sum(amount), 2)`;
-  await db.execute(sql`
-    INSERT INTO salary_entries (id, period_id, staff_id, rss_amount, rss_hours)
-    SELECT 'se-' || substr(md5(random()::text || clock_timestamp()::text || staff_id), 1, 14),
-           period_id, staff_id, ${pay}, round(sum(hours), 2)
-    FROM salary_shifts
-    WHERE period_id = ${periodId} AND source = 'RSS' AND staff_id IS NOT NULL
-    GROUP BY period_id, staff_id
-    ON CONFLICT (period_id, staff_id)
-    DO UPDATE SET rss_amount = EXCLUDED.rss_amount, rss_hours = EXCLUDED.rss_hours`);
-  await db.execute(sql`
-    INSERT INTO salary_entries (id, period_id, staff_id, ess_amount, ess_hours)
-    SELECT 'se-' || substr(md5(random()::text || clock_timestamp()::text || staff_id), 1, 14),
-           period_id, staff_id, ${pay}, round(sum(hours), 2)
-    FROM salary_shifts
-    WHERE period_id = ${periodId} AND source = 'ESS' AND staff_id IS NOT NULL
-    GROUP BY period_id, staff_id
-    ON CONFLICT (period_id, staff_id)
-    DO UPDATE SET ess_amount = EXCLUDED.ess_amount, ess_hours = EXCLUDED.ess_hours`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -824,11 +789,10 @@ export const getPeriodSheet = createServerFn({ method: "POST" })
                count(*) FILTER (WHERE staff_id IS NULL)::int AS unmatched
         FROM salary_shifts WHERE period_id = ${data.periodId} GROUP BY source`),
     ]);
-    const shiftCounts = { RSS: 0, ESS: 0 };
+    const shiftCounts: Record<string, number> = { RSS: 0, ESS: 0 };
     let unmatchedShifts = 0;
     for (const r of counts.rows as { source: string; total: number; unmatched: number }[]) {
-      if (r.source === "RSS") shiftCounts.RSS = Number(r.total);
-      if (r.source === "ESS") shiftCounts.ESS = Number(r.total);
+      shiftCounts[r.source] = Number(r.total);
       unmatchedShifts += Number(r.unmatched);
     }
     return {
@@ -844,7 +808,7 @@ export const getPeriodSheet = createServerFn({ method: "POST" })
 
 /**
  * Where one person's earnings for the month came from: their imported shifts
- * grouped by system (RSS / ESS) and client company. A person is ONE staff
+ * grouped by shift company and client company. A person is ONE staff
  * record (matched on NI), so work done for several companies all lands on the
  * same salary line; this just shows the split. Read-only.
  */
@@ -1065,7 +1029,113 @@ export const deleteSalaryPayment = createServerFn({ method: "POST" })
   });
 
 /* ------------------------------------------------------------------ */
-/* Import 1: raw shift export (RSS / ESS)                               */
+/* Shift companies (RSS, ESS and any the client adds)                   */
+/* ------------------------------------------------------------------ */
+
+/** RSS / ESS always work; any other code must be an active shift company. */
+async function assertShiftCompany(code: string) {
+  if (isBuiltInShift(code)) return;
+  const [row] = await db
+    .select({ active: shiftCompanies.active })
+    .from(shiftCompanies)
+    .where(eq(shiftCompanies.code, code))
+    .limit(1);
+  if (!row) throw new Error(`"${code}" is not a shift company. Add it first.`);
+  if (!row.active) throw new Error(`Shift company ${code} is switched off. Switch it on to import.`);
+}
+
+const shiftCode = z
+  .string()
+  .trim()
+  .transform((v) => v.toUpperCase())
+  .pipe(z.string().regex(/^[A-Z0-9]{2,20}$/, "Use 2-20 letters or numbers, e.g. ABC"));
+
+/** All shift companies incl. switched-off ones (for the dropdown + manage dialog). */
+export const listShiftCompanies = createServerFn({ method: "POST" }).handler(async () => {
+  await requirePermission("salary", "view");
+  const rows = await db
+    .select()
+    .from(shiftCompanies)
+    .orderBy(asc(shiftCompanies.sortOrder), asc(shiftCompanies.code));
+  return rows.map(toShiftCompany);
+});
+
+export const createShiftCompany = createServerFn({ method: "POST" })
+  .validator(z.object({ code: shiftCode, name: z.string().trim().min(1).max(60) }))
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("salary", "edit");
+    const all = await db.select().from(shiftCompanies);
+    const dupe = all.find((c) => c.code === data.code);
+    if (dupe) {
+      if (dupe.active) throw new Error(`${data.code} already exists.`);
+      const [back] = await db
+        .update(shiftCompanies)
+        .set({ active: true })
+        .where(eq(shiftCompanies.code, data.code))
+        .returning();
+      return back ? toShiftCompany(back) : undefined;
+    }
+    const sortOrder = all.reduce((m, c) => Math.max(m, c.sortOrder), -1) + 1;
+    const [row] = await db
+      .insert(shiftCompanies)
+      .values({ code: data.code, name: data.name, sortOrder })
+      .returning();
+    if (row) {
+      await recordActivity({
+        actor,
+        action: "created",
+        module: "salary",
+        entityId: row.code,
+        label: `Shift company — ${row.code} (${row.name})`,
+      });
+    }
+    return row ? toShiftCompany(row) : undefined;
+  });
+
+/** Rename or switch on/off. Never deletes: imported shifts keep pointing at the code. */
+export const updateShiftCompany = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      code: z.string(),
+      patch: z.object({
+        name: z.string().trim().min(1).max(60).optional(),
+        active: z.boolean().optional(),
+        sortOrder: z.number().int().optional(),
+      }),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("salary", "edit");
+    if (Object.keys(data.patch).length === 0) return undefined;
+    const [row] = await db
+      .update(shiftCompanies)
+      .set(data.patch)
+      .where(eq(shiftCompanies.code, data.code))
+      .returning();
+    if (row) {
+      await recordActivity({
+        actor,
+        action: "updated",
+        module: "salary",
+        entityId: row.code,
+        label: `Shift company — ${row.code} (${row.name})`,
+        details: changedFieldsSummary(data.patch),
+      });
+    }
+    return row ? toShiftCompany(row) : undefined;
+  });
+
+/** The "Check data" report for one month. Read-only. */
+export const getImportChecks = createServerFn({ method: "POST" })
+  .validator(z.object({ periodId: z.string() }))
+  .handler(async ({ data }): Promise<ImportCheckReport> => {
+    await requirePermission("salary", "view");
+    const period = await getPeriodOrThrow(data.periodId);
+    return buildImportChecks(db, period.id, period.month);
+  });
+
+/* ------------------------------------------------------------------ */
+/* Import 1: raw shift export (any shift company)                       */
 /* ------------------------------------------------------------------ */
 
 const shiftRow = z.object({
@@ -1087,15 +1157,16 @@ const shiftRow = z.object({
 /**
  * The browser sends the parsed export in chunks (a month can be 10k+ shifts,
  * which won't fit one request on Vercel). The first chunk (`reset`) clears
- * whatever was imported before for this period + source, so re-uploading a
+ * whatever was imported before for this period + company, so re-uploading a
  * corrected file replaces it instead of doubling it. `recomputeSheetFromShifts`
- * is called once after the last chunk.
+ * is called once after the last chunk. The matching itself lives in
+ * server/shiftImport.ts.
  */
 export const importShiftsChunk = createServerFn({ method: "POST" })
   .validator(
     z.object({
       periodId: z.string(),
-      source: z.enum(["RSS", "ESS"]),
+      source: z.string().trim().min(1).max(20),
       rows: z.array(shiftRow).max(1500),
       reset: z.boolean(),
       createMissingStaff: z.boolean(),
@@ -1105,149 +1176,8 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
     await requirePermission("salary", "edit");
     await assertOpen(data.periodId);
     if (data.createMissingStaff) await requirePermission("staff", "create");
-
-    if (data.reset) {
-      // Zero the source columns of everyone previously fed by this source so
-      // people missing from the corrected file don't keep stale amounts.
-      if (data.source === "RSS") {
-        await db.execute(sql`
-          UPDATE salary_entries SET rss_amount = 0, rss_hours = 0
-          WHERE period_id = ${data.periodId} AND staff_id IN (
-            SELECT DISTINCT staff_id FROM salary_shifts
-            WHERE period_id = ${data.periodId} AND source = 'RSS' AND staff_id IS NOT NULL)`);
-      } else {
-        await db.execute(sql`
-          UPDATE salary_entries SET ess_amount = 0, ess_hours = 0
-          WHERE period_id = ${data.periodId} AND staff_id IN (
-            SELECT DISTINCT staff_id FROM salary_shifts
-            WHERE period_id = ${data.periodId} AND source = 'ESS' AND staff_id IS NOT NULL)`);
-      }
-      await db
-        .delete(salaryShifts)
-        .where(and(eq(salaryShifts.periodId, data.periodId), eq(salaryShifts.source, data.source)));
-    }
-
-    // Lookup tables for matching: system ID first, then NI, then unique name.
-    const staffRows = await db.select().from(payrollStaff);
-    const idKey = data.source === "RSS" ? "rssId" : "essId";
-    const byId = new Map<string, string>();
-    const byNi = new Map<string, string>();
-    const nameCount = new Map<string, number>();
-    const byName = new Map<string, string>();
-    const idOf = new Map<string, { rssId: string; essId: string; ni: string }>();
-    const register = (s: {
-      id: string;
-      rssId: string;
-      essId: string;
-      ni: string;
-      name: string;
-    }) => {
-      const sid = s[idKey];
-      if (sid) byId.set(sid, s.id);
-      if (s.ni) byNi.set(normNi(s.ni), s.id);
-      const n = normName(s.name);
-      nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
-      byName.set(n, s.id);
-      idOf.set(s.id, { rssId: s.rssId, essId: s.essId, ni: s.ni });
-    };
-    staffRows.forEach(register);
-
-    const newStaff: (typeof payrollStaff.$inferInsert)[] = [];
-    const idBackfill = new Map<string, string>(); // staffId -> system id to fill in
-    const niBackfill = new Map<string, string>(); // staffId -> NI to fill in (staff had none)
-    let matched = 0;
-    let created = 0;
-    let unmatched = 0;
-
-    const shiftValues = data.rows.map((r) => {
-      let staffId: string | null = null;
-      if (r.employeeId && byId.has(r.employeeId)) staffId = byId.get(r.employeeId) ?? null;
-      else if (r.ni && byNi.has(normNi(r.ni))) staffId = byNi.get(normNi(r.ni)) ?? null;
-      else if (r.employeeName && nameCount.get(normName(r.employeeName)) === 1) {
-        const cand = byName.get(normName(r.employeeName)) ?? null;
-        const candNi = cand ? normNi(idOf.get(cand)?.ni) : "";
-        const rowNi = normNi(r.ni);
-        // Same name but a DIFFERENT NI number is a different person — never merge them.
-        if (cand && !(candNi && rowNi && candNi !== rowNi)) staffId = cand;
-      }
-
-      if (!staffId && data.createMissingStaff && (r.employeeId || r.employeeName)) {
-        const id = uid("st");
-        const fresh = {
-          id,
-          rssId: data.source === "RSS" ? r.employeeId : "",
-          essId: data.source === "ESS" ? r.employeeId : "",
-          ni: formatNi(r.ni),
-          name: r.employeeName || `Employee ${r.employeeId}`,
-          tag: r.tag,
-          accountDetail: r.accountDetail,
-        };
-        newStaff.push(fresh);
-        register(fresh);
-        staffId = id;
-        created++;
-      } else if (staffId) {
-        matched++;
-        const have = idOf.get(staffId);
-        if (r.employeeId && have && !have[idKey] && !idBackfill.has(staffId)) {
-          idBackfill.set(staffId, r.employeeId);
-          byId.set(r.employeeId, staffId);
-        }
-        // The file knows this person's NI and we don't yet: keep it, so every
-        // later import (either system) can match them by NI.
-        const rowNi = normNi(r.ni);
-        if (rowNi && have && !normNi(have.ni) && !byNi.has(rowNi)) {
-          niBackfill.set(staffId, formatNi(r.ni));
-          byNi.set(rowNi, staffId);
-          have.ni = formatNi(r.ni);
-        }
-      } else {
-        unmatched++;
-      }
-      return {
-        id: uid("sh"),
-        periodId: data.periodId,
-        source: data.source,
-        staffId,
-        employeeId: r.employeeId,
-        employeeName: r.employeeName,
-        ni: formatNi(r.ni),
-        date: r.date,
-        clientName: r.clientName,
-        siteName: r.siteName,
-        hours: r.hours,
-        rate: r.rate,
-        amount: r.amount,
-        expenses: r.expenses,
-        penalty: r.penalty,
-      };
-    });
-
-    for (const part of chunk(newStaff, 500)) await db.insert(payrollStaff).values(part);
-    if (idBackfill.size > 0) {
-      const col = data.source === "RSS" ? sql`rss_id` : sql`ess_id`;
-      for (const part of chunk([...idBackfill], 500)) {
-        const list = sql.join(
-          part.map(([sid, v]) => sql`(${sid}::text, ${v}::text)`),
-          sql`, `,
-        );
-        await db.execute(sql`
-          UPDATE payroll_staff s SET ${col} = v.sys_id
-          FROM (VALUES ${list}) AS v(id, sys_id) WHERE s.id = v.id AND s.${col} = ''`);
-      }
-    }
-    for (const part of chunk([...niBackfill], 500)) {
-      const list = sql.join(
-        part.map(([sid, v]) => sql`(${sid}::text, ${v}::text)`),
-        sql`, `,
-      );
-      await db.execute(sql`
-        UPDATE payroll_staff s SET ni = v.ni
-        FROM (VALUES ${list}) AS v(id, ni) WHERE s.id = v.id AND s.ni = ''`);
-    }
-    for (const part of chunk(shiftValues, 800)) await db.insert(salaryShifts).values(part);
-
-    return { received: data.rows.length, matched, created, unmatched };
+    await assertShiftCompany(data.source);
+    return importShiftRows(db, data);
   });
 
 /** Call once after the last `importShiftsChunk`. */
@@ -1255,14 +1185,14 @@ export const recomputeSheetFromShifts = createServerFn({ method: "POST" })
   .validator(
     z.object({
       periodId: z.string(),
-      source: z.enum(["RSS", "ESS"]),
+      source: z.string().trim().min(1).max(20),
       fileName: z.string().default(""),
     }),
   )
   .handler(async ({ data }) => {
     const actor = await requirePermission("salary", "edit");
     const period = await assertOpen(data.periodId);
-    await recomputeFromShifts(data.periodId);
+    await recomputeFromShifts(db, data.periodId);
     const counts = await db.execute(sql`
       SELECT count(*)::int AS total, count(*) FILTER (WHERE staff_id IS NULL)::int AS unmatched
       FROM salary_shifts WHERE period_id = ${data.periodId} AND source = ${data.source}`);
@@ -1288,7 +1218,7 @@ export const rematchShifts = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await requirePermission("salary", "edit");
     await assertOpen(data.periodId);
-    await recomputeFromShifts(data.periodId);
+    await recomputeFromShifts(db, data.periodId);
     const res = await db.execute(sql`
       SELECT count(*)::int AS unmatched FROM salary_shifts
       WHERE period_id = ${data.periodId} AND staff_id IS NULL`);

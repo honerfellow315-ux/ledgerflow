@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -41,10 +41,25 @@ import {
   type TableParse,
 } from "@/lib/payroll/excel";
 import { computeEntry, formatMonthLabel } from "@/lib/payroll/calc";
-import { errorMessage, useRefreshSalary } from "@/lib/payroll/queries";
+import { detectFileKind, guessShiftCompany, type FileKind } from "@/lib/payroll/detect";
+import { errorMessage, useRefreshSalary, useShiftCompanies } from "@/lib/payroll/queries";
+import { ShiftCompaniesDialog } from "@/components/app/salary/ShiftCompaniesDialog";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { formatMoney } from "@/lib/ledger/calc";
 import type { PayrollCompany, ShiftSource, StaffDetailsImportRow } from "@/lib/payroll/types";
+
+type TabKind = Exclude<FileKind, "unknown">;
+const TAB_NAME: Record<TabKind, string> = {
+  shifts: "Shift export",
+  master: "Excel salary sheet",
+  details: "Employee details",
+};
+/** Passed to every file tab: lets it hand a file to the tab it really belongs to. */
+interface TabProps {
+  /** A file moved here from the wrong tab; read it as soon as the tab opens. */
+  initialFile?: File | null;
+  onWrongTab: (kind: TabKind, file: File) => void;
+}
 
 interface Props {
   open: boolean;
@@ -56,6 +71,14 @@ interface Props {
 
 export function ImportDialog({ open, onOpenChange, periodId, month, companies }: Props) {
   const [tab, setTab] = useState("shifts");
+  // A file dropped into the wrong tab is moved to the right one, not rejected.
+  const [handoff, setHandoff] = useState<{ tab: TabKind; file: File } | null>(null);
+  const onWrongTab = (kind: TabKind, file: File) => {
+    toast.info(`That file is a ${TAB_NAME[kind]} file. Moved it to the ${TAB_NAME[kind]} tab.`);
+    setHandoff({ tab: kind, file });
+    setTab(kind);
+  };
+  const initialFor = (k: TabKind) => (handoff?.tab === k ? handoff.file : null);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto">
@@ -65,7 +88,13 @@ export function ImportDialog({ open, onOpenChange, periodId, month, companies }:
             Files are read in your browser — nothing is saved until you press Import.
           </DialogDescription>
         </DialogHeader>
-        <Tabs value={tab} onValueChange={setTab}>
+        <Tabs
+          value={tab}
+          onValueChange={(v) => {
+            setHandoff(null);
+            setTab(v);
+          }}
+        >
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="shifts">Shift export</TabsTrigger>
             <TabsTrigger value="payroll">Payroll file</TabsTrigger>
@@ -73,16 +102,21 @@ export function ImportDialog({ open, onOpenChange, periodId, month, companies }:
             <TabsTrigger value="details">Employee details</TabsTrigger>
           </TabsList>
           <TabsContent value="shifts" className="pt-3">
-            <ShiftImport periodId={periodId} month={month} />
+            <ShiftImport
+              periodId={periodId}
+              month={month}
+              initialFile={initialFor("shifts")}
+              onWrongTab={onWrongTab}
+            />
           </TabsContent>
           <TabsContent value="payroll" className="pt-3">
             <PayrollImport periodId={periodId} companies={companies} />
           </TabsContent>
           <TabsContent value="master" className="pt-3">
-            <MasterImport periodId={periodId} />
+            <MasterImport periodId={periodId} initialFile={initialFor("master")} onWrongTab={onWrongTab} />
           </TabsContent>
           <TabsContent value="details" className="pt-3">
-            <DetailsImport />
+            <DetailsImport initialFile={initialFor("details")} onWrongTab={onWrongTab} />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -104,14 +138,33 @@ function Notice({ tone, children }: { tone: "warn" | "ok" | "info"; children: Re
 
 /* ------------------------------ 1) shifts ------------------------------ */
 
-function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
+function ShiftImport({
+  periodId,
+  month,
+  initialFile,
+  onWrongTab,
+}: { periodId: string; month: string } & TabProps) {
   const refresh = useRefreshSalary();
   const { can } = usePermissions();
   const canCreateStaff = can("staff", "create");
   const [source, setSource] = useState<ShiftSource>("RSS");
+  const { data: allCompanies = [] } = useShiftCompanies(true);
+  // Only switched-on companies can be imported. RSS / ESS stay available even
+  // if the list can't be loaded.
+  const options = useMemo(() => {
+    const on = allCompanies.filter((c) => c.active);
+    return on.length > 0
+      ? on
+      : [
+          { code: "RSS", name: "RSS" },
+          { code: "ESS", name: "ESS" },
+        ];
+  }, [allCompanies]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [guessed, setGuessed] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
   // The file is read once; what it contains for RSS vs ESS is worked out from
-  // the chosen system, so switching "Which system?" re-reads the right tab.
+  // the chosen company, so switching "Which company?" re-reads the right tab.
   const [sheets, setSheets] = useState<SheetMatrix[] | null>(null);
   const parse = useMemo(
     () => (sheets ? parseShiftWorkbook(sheets, source) : null),
@@ -130,6 +183,14 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
     setBusy(true);
     try {
       const read = await readFileToSheets(file);
+      const kind = detectFileKind(read.sheets);
+      if (kind !== "unknown" && kind !== "shifts") {
+        onWrongTab(kind, file);
+        return;
+      }
+      const g = guessShiftCompany(file.name, read.sheets, options);
+      setGuessed(g);
+      if (g) setSource(g);
       setSheets(read.sheets);
     } catch (err) {
       toast.error(errorMessage(err, "Could not read that file."));
@@ -137,6 +198,18 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
       setBusy(false);
     }
   }
+
+  // A file moved here from another tab is read as soon as this tab opens.
+  useEffect(() => {
+    if (initialFile) void onFile(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const noRate = useMemo(() => {
+    if (!parse) return { shifts: 0, hours: 0 };
+    const bad = parse.rows.filter((r) => r.hours > 0 && r.amount === 0);
+    return { shifts: bad.length, hours: Math.round(bad.reduce((t, r) => t + r.hours, 0) * 100) / 100 };
+  }, [parse]);
 
   const outside = useMemo(() => {
     if (!parse) return 0;
@@ -191,12 +264,13 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
-        <Field label="Which system?">
+      <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
+        <Field label="Which company?">
           <Select
             value={source}
             onValueChange={(v) => {
-              setSource(v as ShiftSource);
+              setSource(v);
+              setGuessed(null);
               setResult(null);
             }}
           >
@@ -204,24 +278,50 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="RSS">RSS</SelectItem>
-              <SelectItem value="ESS">ESS</SelectItem>
+              {options.map((c) => (
+                <SelectItem key={c.code} value={c.code}>
+                  {c.name && c.name !== c.code ? `${c.code} · ${c.name}` : c.code}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
+          <button
+            type="button"
+            className="mt-1 text-[11px] font-medium text-primary hover:underline"
+            onClick={() => setAddOpen(true)}
+          >
+            + Add new company
+          </button>
         </Field>
         <Field label="Shift export (.xlsx / .csv)">
           <Input type="file" accept={FILE_ACCEPT} onChange={(e) => onFile(e.target.files?.[0])} />
         </Field>
       </div>
 
+      <ShiftCompaniesDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onCreated={(code) => {
+          setSource(code);
+          setGuessed(null);
+        }}
+      />
+
       {parse ? (
         <div className="space-y-2">
+          {guessed ? (
+            <Notice tone="info">
+              Company set to <strong className="text-foreground">{guessed}</strong> from the file
+              name. Change it above if that's wrong.
+            </Notice>
+          ) : null}
           {parse.rows.length > 0 && parse.layout === "tabs" ? (
             <Notice tone="info">
-              Read from the <strong className="text-foreground">{parse.sheetName}</strong> tab (RSS
-              / ESS sheet layout). Its ID column is treated as the{" "}
+              Read from the <strong className="text-foreground">{parse.sheetName}</strong> tab
+              (RSS / ESS company sheet layout). Its ID column is treated as the{" "}
               <strong className="text-foreground">{source} ID</strong>, and hours are the Clock
-              In/Clock Out hours.
+              In/Clock Out hours. Shifts are added to <strong className="text-foreground">{source}</strong>{" "}
+              for each person.
             </Notice>
           ) : null}
           {parse.warnings.map((w) => (
@@ -239,6 +339,12 @@ function ShiftImport({ periodId, month }: { periodId: string; month: string }) {
                 .map(([m, n]) => `${formatMonthLabel(m)} (${n})`)
                 .join(", ") || "none"}
               .
+            </Notice>
+          ) : null}
+          {noRate.shifts > 0 ? (
+            <Notice tone="warn">
+              {noRate.shifts} shifts ({noRate.hours} hours) have no pay rate, so they will pay £0.
+              Ask for the rate to be filled in the file, then import again.
             </Notice>
           ) : null}
           {outside > 0 ? (
@@ -515,7 +621,7 @@ function PayrollImport({ periodId, companies }: { periodId: string; companies: P
 
 /* --------------------------- 3) Excel salary sheet --------------------------- */
 
-function MasterImport({ periodId }: { periodId: string }) {
+function MasterImport({ periodId, initialFile, onWrongTab }: { periodId: string } & TabProps) {
   const refresh = useRefreshSalary();
   const [parse, setParse] = useState<MasterParse | null>(null);
   const [fileName, setFileName] = useState("");
@@ -530,6 +636,11 @@ function MasterImport({ periodId }: { periodId: string }) {
     setBusy(true);
     try {
       const { sheets } = await readFileToSheets(file);
+      const kind = detectFileKind(sheets);
+      if (kind !== "unknown" && kind !== "master") {
+        onWrongTab(kind, file);
+        return;
+      }
       let best: MasterParse | null = null;
       for (const s of sheets) {
         const p = parseMasterSheet(s.matrix);
@@ -542,6 +653,11 @@ function MasterImport({ periodId }: { periodId: string }) {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (initialFile) void onFile(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Cross-check: recompute every line with our formulas and compare with the
   // Outstanding the Excel file itself showed.
@@ -561,6 +677,7 @@ function MasterImport({ periodId }: { periodId: string }) {
           rssHours: r.rssHours,
           essAmount: r.essAmount,
           essHours: r.essHours,
+          extra: {},
           carryForward: r.carryForward,
           taxDeduction: r.taxDeduction,
           deduction: r.deduction,
@@ -681,7 +798,7 @@ const DETAILS_CHUNK = 200;
  * It never overwrites a value, never creates staff, and shows a preview
  * (matched / not matched / fields that would be filled) before anything is saved.
  */
-function DetailsImport() {
+function DetailsImport({ initialFile, onWrongTab }: TabProps) {
   const refresh = useRefreshSalary();
   const { can } = usePermissions();
   const canEditStaff = can("staff", "edit");
@@ -707,6 +824,11 @@ function DetailsImport() {
     return all;
   }
 
+  useEffect(() => {
+    if (initialFile) void onFile(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function onFile(file: File | undefined) {
     setResult(null);
     setParse(null);
@@ -716,6 +838,11 @@ function DetailsImport() {
     setBusy(true);
     try {
       const { sheets } = await readFileToSheets(file);
+      const kind = detectFileKind(sheets);
+      if (kind !== "unknown" && kind !== "details") {
+        onWrongTab(kind, file);
+        return;
+      }
       const parsed =
         sheets
           .map((sh) => parseStaffDetails(sh.matrix))

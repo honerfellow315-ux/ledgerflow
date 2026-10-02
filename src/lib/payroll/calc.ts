@@ -1,8 +1,8 @@
 /**
  * Salary sheet arithmetic — the single place the Excel formulas live.
  *
- *   Total Hours    = RSS hours + ESS hours
- *   Total Amount   = RSS amount + ESS amount + carry-forward (-OverPaid/+Remaining)
+ *   Total Hours    = RSS hours + ESS hours + every other shift company's hours
+ *   Total Amount   = RSS + ESS + every other shift company + carry-forward (-OverPaid/+Remaining)
  *   Total Payroll  = sum(payroll company amounts) - tax deduction
  *   Total Cash     = sum(P1..Pn)
  *   Outstanding    = Total Amount - Total Payroll - Total Cash - Deduction
@@ -25,6 +25,17 @@ export const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 1
 
 const num = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) ? n : 0);
 
+/** Sum of what every shift company other than RSS / ESS contributed to a line. */
+export function extraTotals(entry: Pick<SalaryEntry, "extra">): { amount: number; hours: number } {
+  let amount = 0;
+  let hours = 0;
+  for (const v of Object.values(entry.extra ?? {})) {
+    amount += num(v?.amount);
+    hours += num(v?.hours);
+  }
+  return { amount, hours };
+}
+
 export interface ComputedEntry {
   totalHours: number;
   totalAmount: number;
@@ -45,8 +56,11 @@ export function computeEntry(
   entry: SalaryEntry,
   payments: readonly SalaryPayment[],
 ): ComputedEntry {
-  const totalHours = round2(num(entry.rssHours) + num(entry.essHours));
-  const totalAmount = round2(num(entry.rssAmount) + num(entry.essAmount) + num(entry.carryForward));
+  const extra = extraTotals(entry);
+  const totalHours = round2(num(entry.rssHours) + num(entry.essHours) + extra.hours);
+  const totalAmount = round2(
+    num(entry.rssAmount) + num(entry.essAmount) + extra.amount + num(entry.carryForward),
+  );
   // Every company amount counts, including one archived later, so archiving a
   // column can never silently change somebody's balance.
   const grossPayroll = Object.values(entry.payroll ?? {}).reduce((s, v) => s + num(v), 0);
@@ -114,6 +128,8 @@ export interface SheetTotals {
   deduction: number;
   outstanding: number;
   byCompany: Record<string, number>;
+  /** Totals of every shift company other than RSS / ESS, keyed by its code. */
+  byShift: Record<string, { amount: number; hours: number }>;
 }
 
 export function sumRows(rows: readonly SheetRow[]): SheetTotals {
@@ -132,6 +148,7 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     deduction: 0,
     outstanding: 0,
     byCompany: {},
+    byShift: {},
   };
   for (const r of rows) {
     const e = r.entry;
@@ -150,20 +167,44 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     for (const [id, v] of Object.entries(e.payroll ?? {})) {
       t.byCompany[id] = (t.byCompany[id] ?? 0) + num(v);
     }
+    for (const [code, v] of Object.entries(e.extra ?? {})) {
+      const cur = t.byShift[code] ?? { amount: 0, hours: 0 };
+      t.byShift[code] = { amount: cur.amount + num(v?.amount), hours: cur.hours + num(v?.hours) };
+    }
   }
   for (const k of Object.keys(t) as (keyof SheetTotals)[]) {
     const v = t[k];
     if (typeof v === "number") (t[k] as number) = round2(v);
   }
   for (const id of Object.keys(t.byCompany)) t.byCompany[id] = round2(t.byCompany[id] ?? 0);
+  for (const code of Object.keys(t.byShift)) {
+    const v = t.byShift[code] ?? { amount: 0, hours: 0 };
+    t.byShift[code] = { amount: round2(v.amount), hours: round2(v.hours) };
+  }
   return t;
 }
 
 /* ------------------------------ text helpers ------------------------------ */
 
+/**
+ * Cyrillic / Greek capitals that look exactly like Latin letters. Spreadsheets
+ * exported from other systems sometimes contain them (e.g. "RY949861В" with a
+ * Cyrillic В), which would otherwise be stripped and break NI matching.
+ */
+const LOOKALIKES: Record<string, string> = {
+  А: "A", В: "B", Е: "E", К: "K", М: "M", Н: "H", О: "O", Р: "P", С: "C", Т: "T", Х: "X", У: "Y",
+  Ѕ: "S", І: "I", Ј: "J",
+  Α: "A", Β: "B", Ε: "E", Ζ: "Z", Η: "H", Ι: "I", Κ: "K", Μ: "M", Ν: "N", Ο: "O", Ρ: "P",
+  Τ: "T", Υ: "Y", Χ: "X",
+};
+const foldLookalikes = (s: string) =>
+  s.toUpperCase().replace(/[\u0370-\u03FF\u0400-\u04FF]/g, (ch) => LOOKALIKES[ch] ?? ch);
+
 /** "AB 12 34 56 C" / "ab123456c" / "AB-123456-C" all compare equal. */
 export const normNi = (s: string | null | undefined): string =>
-  (s ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  foldLookalikes(s ?? "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toUpperCase();
 
 /**
  * UK National Insurance number: 2 letters + 6 digits + a suffix letter A-D.
@@ -185,7 +226,7 @@ export function isValidNi(s: string | null | undefined): boolean {
  */
 export function formatNi(s: string | null | undefined): string {
   const n = normNi(s);
-  if (!NI_PATTERN.test(n)) return (s ?? "").trim().toUpperCase();
+  if (!NI_PATTERN.test(n)) return foldLookalikes((s ?? "").trim());
   return `${n.slice(0, 2)} ${n.slice(2, 4)} ${n.slice(4, 6)} ${n.slice(6, 8)} ${n.slice(8)}`;
 }
 

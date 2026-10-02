@@ -25,13 +25,13 @@ export function EarningsBreakdown({ entryId }: { entryId: string }) {
         <p className="text-[12px] font-semibold text-foreground">Earned from</p>
         <p className="text-[11px] text-muted-foreground">
           {clients.size} client {clients.size === 1 ? "company" : "companies"} · {systems.size}{" "}
-          {systems.size === 1 ? "system" : "systems"} — all added to this one person
+          {systems.size === 1 ? "shift company" : "shift companies"} — all added to this one person
         </p>
       </div>
       <table className="w-full text-[12px]">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-[0.04em] text-muted-foreground">
-            <th className="px-3 py-1.5 font-semibold">System</th>
+            <th className="px-3 py-1.5 font-semibold">Shift company</th>
             <th className="px-3 py-1.5 font-semibold">Client company</th>
             <th className="px-3 py-1.5 text-right font-semibold">Shifts</th>
             <th className="px-3 py-1.5 text-right font-semibold">Hours</th>
