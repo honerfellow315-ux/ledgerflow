@@ -317,16 +317,17 @@ export function InvoiceDialog({
     form.lineItems,
   ]);
 
-  // Payroll split: when payroll hours + payroll rate are both filled, the payroll
-  // part is "already paid, no VAT", so VAT is automatically charged on the
-  // remaining hours only (VAT basis = remaining, already-paid = payroll value).
+  // Payroll split only changes the AMOUNT (payroll hours x payroll rate + the rest x
+  // rate). VAT stays entirely the person's choice: "VAT Included" on/off and "VAT
+  // Basis" full/remaining work exactly as before. The only help given: while the VAT
+  // basis is already "Remaining", keep "already paid before VAT" in step with the
+  // payroll value (it can still be overtyped).
   const setSplit = (patch: Partial<typeof blank>) =>
     setForm((f) => {
       const next = { ...f, ...patch };
       const pH = Number(next.payrollHours) || 0;
       const pR = Number(next.payrollRate) || 0;
-      if (next.billingType === "hours" && pH > 0 && pR > 0) {
-        next.vatMode = "remaining";
+      if (next.billingType === "hours" && next.vatMode === "remaining" && pH > 0 && pR > 0) {
         next.vatPaidBefore = String(round2(pH * pR));
       }
       return next;
@@ -968,7 +969,7 @@ export function InvoiceDialog({
                         <span className="num font-semibold">
                           {formatMoney(round2(Number(form.payrollHours) * Number(form.payrollRate)))}
                         </span>{" "}
-                        (already paid, no VAT)
+                        (payroll part)
                       </p>
                       <p>
                         Remaining:{" "}
@@ -984,13 +985,13 @@ export function InvoiceDialog({
                             ),
                           )}
                         </span>{" "}
-                        (VAT is charged on this part only)
+                        (remaining part)
                       </p>
                     </div>
                   ) : null}
                   <Field
                     label="Amount ex VAT (£)"
-                    hint="Calculated automatically from Hours × Rate (payroll part at payroll rate, if set)."
+                    hint="Calculated automatically from Hours × Rate (payroll part at payroll rate, if set). VAT is separate: use the VAT switch and VAT Basis below."
                     className="sm:col-span-2"
                   >
                     <Input readOnly disabled value={formatMoney(computedAmount ?? 0)} />
@@ -1075,7 +1076,20 @@ export function InvoiceDialog({
               >
                 <Select
                   value={form.vatMode}
-                  onValueChange={(v) => set("vatMode", v as VatMode)}
+                  onValueChange={(v) => {
+                    const mode = v as VatMode;
+                    setForm((f) => {
+                      const next = { ...f, vatMode: mode };
+                      const pH = Number(f.payrollHours) || 0;
+                      const pR = Number(f.payrollRate) || 0;
+                      // Choosing "Remaining" on a payroll-split invoice: prefill the
+                      // already-paid amount with the payroll value if still empty.
+                      if (mode === "remaining" && pH > 0 && pR > 0 && !Number(f.vatPaidBefore)) {
+                        next.vatPaidBefore = String(round2(pH * pR));
+                      }
+                      return next;
+                    });
+                  }}
                   disabled={!form.vatIncluded}
                 >
                   <SelectTrigger>

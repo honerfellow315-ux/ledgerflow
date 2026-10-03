@@ -152,7 +152,8 @@ export function InvoiceDocumentSafari({
                 <thead>
                   <tr>
                     <th>Description</th>
-                    {invoice.balanceOnly ? null : invoice.lineItems && invoice.lineItems.length > 0 ? (
+                    {invoice.balanceOnly ? null : invoice.lineItems &&
+                      invoice.lineItems.length > 0 ? (
                       <>
                         <th className="id-num">Qty</th>
                         <th className="id-num">Unit Price</th>
@@ -175,7 +176,9 @@ export function InvoiceDocumentSafari({
                       <td>
                         {invoice.description || "Services rendered"} — balance outstanding
                         {invoice.description2?.trim() ? (
-                          <div style={{ whiteSpace: "pre-line" }}>{invoice.description2.trim()}</div>
+                          <div style={{ whiteSpace: "pre-line" }}>
+                            {invoice.description2.trim()}
+                          </div>
                         ) : null}
                       </td>
                       <td className="id-num">{formatMoney(invoice.vatBase)}</td>
@@ -189,12 +192,54 @@ export function InvoiceDocumentSafari({
                         <td className="id-num">{formatMoney(li.quantity * li.unitPrice)}</td>
                       </tr>
                     ))
+                  ) : invoice.hours != null &&
+                    invoice.rate != null &&
+                    (invoice.payrollHours ?? 0) > 0 &&
+                    (invoice.payrollRate ?? 0) > 0 ? (
+                    // Payroll split on the full invoice: two lines, each at its own rate,
+                    // so Hours x Rate always adds up to the printed amount.
+                    <>
+                      <tr>
+                        <td>
+                          {invoice.description || "Services rendered"} — payroll hours
+                          {invoice.description2?.trim() ? (
+                            <div style={{ whiteSpace: "pre-line" }}>
+                              {invoice.description2.trim()}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="id-num">{invoice.payrollHours}</td>
+                        <td className="id-num">{formatMoney(invoice.payrollRate ?? 0)}/hr</td>
+                        <td className="id-num">
+                          {formatMoney(
+                            round2((invoice.payrollHours ?? 0) * (invoice.payrollRate ?? 0)),
+                          )}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>{invoice.description || "Services rendered"} — remaining hours</td>
+                        <td className="id-num">
+                          {round2(invoice.hours - (invoice.payrollHours ?? 0))}
+                        </td>
+                        <td className="id-num">{formatMoney(invoice.rate)}/hr</td>
+                        <td className="id-num">
+                          {formatMoney(
+                            round2(
+                              invoice.amountExVat -
+                                (invoice.payrollHours ?? 0) * (invoice.payrollRate ?? 0),
+                            ),
+                          )}
+                        </td>
+                      </tr>
+                    </>
                   ) : (
                     <tr>
                       <td>
                         {invoice.description || "Services rendered"}
                         {invoice.description2?.trim() ? (
-                          <div style={{ whiteSpace: "pre-line" }}>{invoice.description2.trim()}</div>
+                          <div style={{ whiteSpace: "pre-line" }}>
+                            {invoice.description2.trim()}
+                          </div>
                         ) : null}
                       </td>
                       {invoice.hours != null && invoice.rate != null ? (
@@ -213,7 +258,9 @@ export function InvoiceDocumentSafari({
                 <dl>
                   <div>
                     <dt>Sub total</dt>
-                    <dd>{formatMoney(invoice.balanceOnly ? invoice.vatBase : invoice.amountExVat)}</dd>
+                    <dd>
+                      {formatMoney(invoice.balanceOnly ? invoice.vatBase : invoice.amountExVat)}
+                    </dd>
                   </div>
                   {invoice.vatIncluded ? (
                     <div>
