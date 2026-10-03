@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   Banknote,
+  FileSpreadsheet,
   Building2,
   ClipboardList,
   Clock,
@@ -168,6 +169,7 @@ const MODULE_ICONS: Record<Module, typeof LayoutDashboard> = {
   creditNotes: FileMinus,
   hours: Clock,
   salary: Banknote,
+  payroll: FileSpreadsheet,
   staff: IdCard,
   reports: Receipt,
   settings: SettingsIcon,

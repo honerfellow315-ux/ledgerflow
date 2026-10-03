@@ -19,6 +19,7 @@ import { Route as ExpensesIndexRouteImport } from './routes/expenses.index'
 import { Route as HoursIndexRouteImport } from './routes/hours.index'
 import { Route as InvoicesIndexRouteImport } from './routes/invoices.index'
 import { Route as PaymentsIndexRouteImport } from './routes/payments.index'
+import { Route as PayrollIndexRouteImport } from './routes/payroll.index'
 import { Route as RecycleBinIndexRouteImport } from './routes/recycle-bin.index'
 import { Route as ReportsIndexRouteImport } from './routes/reports.index'
 import { Route as SalaryIndexRouteImport } from './routes/salary.index'
@@ -78,6 +79,11 @@ const PaymentsIndexRoute = PaymentsIndexRouteImport.update({
   path: '/payments/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PayrollIndexRoute = PayrollIndexRouteImport.update({
+  id: '/payroll/',
+  path: '/payroll/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RecycleBinIndexRoute = RecycleBinIndexRouteImport.update({
   id: '/recycle-bin/',
   path: '/recycle-bin/',
@@ -130,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/hours/': typeof HoursIndexRoute
   '/invoices/': typeof InvoicesIndexRoute
   '/payments/': typeof PaymentsIndexRoute
+  '/payroll/': typeof PayrollIndexRoute
   '/recycle-bin/': typeof RecycleBinIndexRoute
   '/reports/': typeof ReportsIndexRoute
   '/salary/': typeof SalaryIndexRoute
@@ -150,6 +157,7 @@ export interface FileRoutesByTo {
   '/hours': typeof HoursIndexRoute
   '/invoices': typeof InvoicesIndexRoute
   '/payments': typeof PaymentsIndexRoute
+  '/payroll': typeof PayrollIndexRoute
   '/recycle-bin': typeof RecycleBinIndexRoute
   '/reports': typeof ReportsIndexRoute
   '/salary': typeof SalaryIndexRoute
@@ -171,6 +179,7 @@ export interface FileRoutesById {
   '/hours/': typeof HoursIndexRoute
   '/invoices/': typeof InvoicesIndexRoute
   '/payments/': typeof PaymentsIndexRoute
+  '/payroll/': typeof PayrollIndexRoute
   '/recycle-bin/': typeof RecycleBinIndexRoute
   '/reports/': typeof ReportsIndexRoute
   '/salary/': typeof SalaryIndexRoute
@@ -193,6 +202,7 @@ export interface FileRouteTypes {
     | '/hours/'
     | '/invoices/'
     | '/payments/'
+    | '/payroll/'
     | '/recycle-bin/'
     | '/reports/'
     | '/salary/'
@@ -213,6 +223,7 @@ export interface FileRouteTypes {
     | '/hours'
     | '/invoices'
     | '/payments'
+    | '/payroll'
     | '/recycle-bin'
     | '/reports'
     | '/salary'
@@ -233,6 +244,7 @@ export interface FileRouteTypes {
     | '/hours/'
     | '/invoices/'
     | '/payments/'
+    | '/payroll/'
     | '/recycle-bin/'
     | '/reports/'
     | '/salary/'
@@ -254,6 +266,7 @@ export interface RootRouteChildren {
   HoursIndexRoute: typeof HoursIndexRoute
   InvoicesIndexRoute: typeof InvoicesIndexRoute
   PaymentsIndexRoute: typeof PaymentsIndexRoute
+  PayrollIndexRoute: typeof PayrollIndexRoute
   RecycleBinIndexRoute: typeof RecycleBinIndexRoute
   ReportsIndexRoute: typeof ReportsIndexRoute
   SalaryIndexRoute: typeof SalaryIndexRoute
@@ -336,6 +349,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PaymentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/payroll/': {
+      id: '/payroll/'
+      path: '/payroll'
+      fullPath: '/payroll/'
+      preLoaderRoute: typeof PayrollIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/recycle-bin/': {
       id: '/recycle-bin/'
       path: '/recycle-bin'
@@ -406,6 +426,7 @@ const rootRouteChildren: RootRouteChildren = {
   HoursIndexRoute: HoursIndexRoute,
   InvoicesIndexRoute: InvoicesIndexRoute,
   PaymentsIndexRoute: PaymentsIndexRoute,
+  PayrollIndexRoute: PayrollIndexRoute,
   RecycleBinIndexRoute: RecycleBinIndexRoute,
   ReportsIndexRoute: ReportsIndexRoute,
   SalaryIndexRoute: SalaryIndexRoute,

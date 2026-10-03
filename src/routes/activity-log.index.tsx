@@ -52,6 +52,7 @@ const MODULE_OPTIONS = [
   { value: "hours", label: "Hours" },
   { value: "subcontracting", label: "Subcontracting" },
   { value: "creditNotes", label: "Credit Notes" },
+  { value: "payroll", label: "Payroll Sheet" },
   { value: "settings", label: "Settings" },
   { value: "users", label: "Users" },
   { value: "auth", label: "Auth" },

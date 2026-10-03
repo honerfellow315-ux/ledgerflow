@@ -31,6 +31,7 @@ export const MODULES = [
   "creditNotes",
   "hours",
   "salary",
+  "payroll",
   "staff",
   "reports",
   "settings",
@@ -62,6 +63,8 @@ export const MODULE_ACTIONS: Record<Module, readonly Action[]> = {
   // approve = verify / close / reopen a salary month (the sensitive steps)
   salary: ["view", "create", "edit", "delete", "approve"],
   // NI numbers + bank details live here, so it is granted separately
+  // payroll sheets (All Payroll Format); approve = verify / close / reopen / push to salary sheet
+  payroll: ["view", "create", "edit", "delete", "approve"],
   staff: ["view", "create", "edit"],
   reports: ["view"],
   settings: ["view", "edit"],
@@ -79,6 +82,7 @@ export const MODULE_LABELS: Record<Module, string> = {
   creditNotes: "Credit Notes",
   hours: "Hours",
   salary: "Salary Sheet",
+  payroll: "Payroll Sheet",
   staff: "Staff (NI & bank details)",
   reports: "Reports",
   settings: "Settings",

@@ -495,7 +495,87 @@ export const payrollCompanies = pgTable("payroll_companies", {
   name: text("name").notNull(),
   orderIndex: integer("order_index").notNull().default(0),
   active: boolean("active").notNull().default(true),
+  // Payroll sheet (All Payroll Format): default hourly rate + print details.
+  defaultRate: numeric("default_rate", { precision: 10, scale: 2, mode: "number" })
+    .notNull()
+    .default(0),
+  address: text("address"),
+  notes: text("notes"),
 });
+
+// Which staff belong to which payroll company. One person can be in several
+// companies (same staff record, same ID). rate NULL = the company's default rate.
+export const payrollCompanyStaff = pgTable(
+  "payroll_company_staff",
+  {
+    id: text("id").primaryKey(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => payrollCompanies.id, { onDelete: "cascade" }),
+    staffId: text("staff_id")
+      .notNull()
+      .references(() => payrollStaff.id, { onDelete: "cascade" }),
+    active: boolean("active").notNull().default(true),
+    rate: numeric("rate", { precision: 10, scale: 2, mode: "number" }),
+    startDate: text("start_date"),
+    endDate: text("end_date"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("payroll_company_staff_uq").on(t.companyId, t.staffId),
+    index("payroll_company_staff_staff_idx").on(t.staffId),
+  ],
+);
+
+// One payroll sheet = one payroll company x one month. draft -> reviewed -> verified -> closed.
+export const payrollSheets = pgTable(
+  "payroll_sheets",
+  {
+    id: text("id").primaryKey(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => payrollCompanies.id, { onDelete: "cascade" }),
+    month: text("month").notNull(), // yyyy-mm
+    status: text("status").notNull().default("draft"),
+    notes: text("notes"),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("payroll_sheets_company_month_uq").on(t.companyId, t.month)],
+);
+
+// One line = one staff member on one sheet. Total hours and amount are computed, never stored.
+export const payrollLines = pgTable(
+  "payroll_lines",
+  {
+    id: text("id").primaryKey(),
+    sheetId: text("sheet_id")
+      .notNull()
+      .references(() => payrollSheets.id, { onDelete: "cascade" }),
+    staffId: text("staff_id")
+      .notNull()
+      .references(() => payrollStaff.id, { onDelete: "cascade" }),
+    unitsHours: numeric("units_hours", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
+    bankHolidayHours: numeric("bank_holiday_hours", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
+    holidayEntitlement: numeric("holiday_entitlement", {
+      precision: 10,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    comment: text("comment").notNull().default(""),
+    rate: numeric("rate", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex("payroll_lines_sheet_staff_uq").on(t.sheetId, t.staffId),
+    index("payroll_lines_staff_idx").on(t.staffId),
+  ],
+);
 
 // One month = one run. draft -> reviewed -> verified -> closed (locked).
 export const salaryPeriods = pgTable("salary_periods", {

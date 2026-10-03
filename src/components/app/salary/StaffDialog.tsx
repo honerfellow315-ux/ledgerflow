@@ -183,12 +183,15 @@ export function StaffDialog({
   onOpenChange,
   staff,
   canEdit,
+  onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   /** null = add a new person */
   staff: Staff | null;
   canEdit: boolean;
+  /** Called after a successful save with the saved record (used by the payroll sheet to attach a new person). */
+  onSaved?: (saved: Staff | undefined, isNew: boolean) => void | Promise<void>;
 }) {
   const refresh = useRefreshSalary();
   const [form, setForm] = useState<FormState>(blank);
@@ -249,11 +252,13 @@ export function StaffDialog({
         role: t(form.role),
         serviceType: t(form.serviceType),
       };
+      let saved: Staff | undefined;
       if (staff)
-        await updateStaff({
+        saved = await updateStaff({
           data: { id: staff.id, patch: { ...values, notes: form.notes.trim() } },
         });
-      else await addStaff({ data: values });
+      else saved = await addStaff({ data: values });
+      await onSaved?.(saved, !staff);
       await refresh();
       toast.success(staff ? "Staff updated." : "Staff added.");
       onOpenChange(false);
