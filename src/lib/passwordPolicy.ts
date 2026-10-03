@@ -2,7 +2,7 @@
  * Password rules shared by the server (authoritative) and the UI (instant
  * feedback). Pure function — safe to import on both sides.
  */
-export const MIN_PASSWORD_LENGTH = 12;
+export const MIN_PASSWORD_LENGTH = 8;
 
 const COMMON = new Set([
   "password1234",

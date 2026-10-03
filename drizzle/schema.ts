@@ -64,33 +64,6 @@ export const users = pgTable("users", {
   // bootstrap admin (created via scripts/create-admin.ts, not through the
   // app). Self-referencing, so it must stay nullable.
   createdBy: text("created_by").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
-
-  // ---- Security (see schema/security-migration.sql) ----
-  // AES-256-GCM encrypted TOTP secret (see src/lib/server/crypto.ts).
-  totpSecretEnc: text("totp_secret_enc"),
-  totpEnabled: boolean("totp_enabled").notNull().default(false),
-  // Last accepted 30s TOTP time-step, so one code can't be replayed.
-  totpLastStep: integer("totp_last_step"),
-  // New / pre-existing non-admin users must enter an admin-issued one-time
-  // activation code on their first login (and then choose their own password).
-  mustActivate: boolean("must_activate").notNull().default(false),
-  activationCodeHash: text("activation_code_hash"),
-  activationExpiresAt: timestamp("activation_expires_at", { withTimezone: true }),
-  activationAttempts: integer("activation_attempts").notNull().default(0),
-  // Brute-force protection.
-  failedLoginCount: integer("failed_login_count").notNull().default(0),
-  lockedUntil: timestamp("locked_until", { withTimezone: true }),
-});
-
-// Admin 2FA backup codes. Only a hash is stored; each code works once.
-export const recoveryCodes = pgTable("recovery_codes", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  codeHash: text("code_hash").notNull(),
-  usedAt: timestamp("used_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // Proper user activity log: who created/edited/deleted/restored what, and
@@ -128,11 +101,6 @@ export const sessions = pgTable("sessions", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  // "full" = a real logged-in session. "totp_setup" / "change_password" are
-  // short-lived half-logged-in states that can only call their own setup step.
-  stage: text("stage").notNull().default("full"),
-  // Idle timeout is measured from this.
-  lastActiveAt: timestamp("last_active_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -599,9 +567,13 @@ export const salaryEntries = pgTable(
       .notNull()
       .references(() => payrollStaff.id, { onDelete: "cascade" }),
     rssAmount: money("rss_amount").notNull().default(0),
-    rssHours: numeric("rss_hours", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
+    rssHours: numeric("rss_hours", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
     essAmount: money("ess_amount").notNull().default(0),
-    essHours: numeric("ess_hours", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
+    essHours: numeric("ess_hours", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
     // Earnings from every other shift company: { "ABC": { amount, hours } }.
     // Derived from salary_shifts on each import, like the RSS / ESS columns.
     extra: jsonb("extra")

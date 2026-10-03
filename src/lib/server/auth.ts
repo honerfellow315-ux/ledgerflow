@@ -4,45 +4,26 @@ import { getCookie, setCookie, deleteCookie, getRequestHeader } from "@tanstack/
 import { db } from "./db";
 import { users, sessions, activityLog } from "../../../drizzle/schema";
 import { hasPermission, type Action, type Module } from "../permissions";
-import { makeCode, normalizeCode, randomToken, sha256Hex } from "./crypto";
+import { randomToken, sha256Hex } from "./crypto";
 
 /* ------------------------------------------------------------------ *
- * Session design
+ * Sessions
  *  - The cookie holds a random 256-bit token. Only its SHA-256 hash is
  *    stored in `sessions.id`, so a leaked database can't be used to
- *    hijack sessions.
- *  - It is a *session cookie* (no expiry): the browser drops it when it
- *    is closed. The server enforces the real limits: an idle timeout and
- *    an absolute lifetime.
- *  - `stage` lets a half-finished login (2FA setup, forced password
- *    change) exist without granting access to any data.
+ *    hijack a session.
+ *  - Sessions last SESSION_TTL_MS (7 days) — the user stays logged in
+ *    on that browser until then or until they press "Log out".
  * ------------------------------------------------------------------ */
 
-const IS_PROD = process.env["NODE_ENV"] === "production";
-// "__Host-" pins the cookie to this exact host over HTTPS (production only,
-// the prefix requires `Secure`).
-const COOKIE_NAME = IS_PROD ? "__Host-lf_session" : "lf_session";
-const LEGACY_COOKIE_NAME = "ledgerflow_session";
+const COOKIE_NAME = "ledgerflow_session";
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
-const ABSOLUTE_TTL_MS = 1000 * 60 * 60 * 12; // 12 h hard cap, however active
-const PENDING_TTL_MS = 1000 * 60 * 10; // half-finished logins live 10 min
-const ADMIN_IDLE_MS = 1000 * 60 * 15;
-const USER_IDLE_MS = 1000 * 60 * 30;
+// Brute-force protection (no schema needed: it counts rows in activity_log).
+const THROTTLE_WINDOW_MS = 1000 * 60 * 15;
+const MAX_FAILS_PER_IP = 20;
+const MAX_FAILS_PER_USER = 10;
 
-export const MAX_FAILED_ATTEMPTS = 5;
-export const LOCK_MS = 1000 * 60 * 15;
-const IP_WINDOW_MS = 1000 * 60 * 15;
-const IP_MAX_FAILURES = 20;
-
-export const ACTIVATION_TTL_MS = 1000 * 60 * 60 * 24;
-export const MAX_ACTIVATION_ATTEMPTS = 5;
-
-export type SessionStage = "full" | "totp_setup" | "change_password";
 export type UserRow = typeof users.$inferSelect;
-
-export function idleTimeoutMs(role: "admin" | "user"): number {
-  return role === "admin" ? ADMIN_IDLE_MS : USER_IDLE_MS;
-}
 
 export async function hashPassword(password: string) {
   return bcrypt.hash(password, 12);
@@ -53,8 +34,8 @@ export async function verifyPassword(password: string, hash: string) {
 }
 
 let dummyHash: Promise<string> | undefined;
-/** Verifies against a throw-away hash when the user doesn't exist, so response
- * time doesn't reveal which usernames are real. */
+/** Compares against a throw-away hash when the user doesn't exist, so the
+ * response time doesn't reveal which usernames are real. */
 export async function verifyPasswordOrDummy(password: string, hash: string | undefined) {
   if (hash) return bcrypt.compare(password, hash);
   dummyHash ??= bcrypt.hash("not-a-real-password", 12);
@@ -69,25 +50,21 @@ export function getClientIp(): string {
   return (first || getRequestHeader("x-real-ip") || "unknown").slice(0, 64);
 }
 
-/** Creates a session row and sets the (session-only) cookie. */
-export async function createSession(userId: string, stage: SessionStage = "full") {
-  // A user only ever has one half-finished login at a time.
-  await db.delete(sessions).where(and(eq(sessions.userId, userId), ne(sessions.stage, "full")));
-
+/** Call after a successful login: creates a session row and sets the cookie. */
+export async function createSession(userId: string) {
   const token = randomToken(32);
   const id = sha256Hex(token);
-  const now = Date.now();
-  const expiresAt = new Date(now + (stage === "full" ? ABSOLUTE_TTL_MS : PENDING_TTL_MS));
-  await db.insert(sessions).values({ id, userId, expiresAt, stage, lastActiveAt: new Date(now) });
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+  await db.insert(sessions).values({ id, userId, expiresAt });
 
   setCookie(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: IS_PROD,
-    sameSite: "strict",
+    secure: process.env["NODE_ENV"] === "production",
+    sameSite: "lax",
     path: "/",
-    // no `expires` / `maxAge`  ->  cookie is discarded when the browser closes
+    expires: expiresAt,
   });
-  deleteCookie(LEGACY_COOKIE_NAME, { path: "/" });
+
   return id;
 }
 
@@ -95,7 +72,6 @@ export async function destroySession() {
   const token = getCookie(COOKIE_NAME);
   if (token) await db.delete(sessions).where(eq(sessions.id, sha256Hex(token)));
   deleteCookie(COOKIE_NAME, { path: "/" });
-  deleteCookie(LEGACY_COOKIE_NAME, { path: "/" });
 }
 
 /** Signs a user out of every device (optionally keeping one session). */
@@ -109,58 +85,30 @@ export async function deleteSessionsForUser(userId: string, exceptSessionId?: st
     );
 }
 
-async function loadSession(stage: SessionStage) {
+/** Current logged-in user plus the id of their session row, or null. */
+export async function getCurrentSession() {
   const token = getCookie(COOKIE_NAME);
   if (!token) return null;
   const sessionId = sha256Hex(token);
 
   const [row] = await db
-    .select({ user: users, session: sessions })
+    .select({ user: users, expiresAt: sessions.expiresAt })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
     .where(eq(sessions.id, sessionId))
     .limit(1);
   if (!row) return null;
 
-  const now = Date.now();
-  const { session, user } = row;
-
-  if (session.expiresAt.getTime() < now) {
+  if (row.expiresAt.getTime() < Date.now()) {
     await db.delete(sessions).where(eq(sessions.id, sessionId));
     return null;
   }
-  if (session.stage !== stage) return null;
-
-  if (stage === "full") {
-    const lastActive = session.lastActiveAt.getTime();
-    if (now - lastActive > idleTimeoutMs(user.role)) {
-      await db.delete(sessions).where(eq(sessions.id, sessionId));
-      return null;
-    }
-    // Refresh the idle clock (at most once a minute to keep DB writes low).
-    if (now - lastActive > 60_000) {
-      await db
-        .update(sessions)
-        .set({ lastActiveAt: new Date(now) })
-        .where(eq(sessions.id, sessionId));
-    }
-  }
-  return { user, sessionId };
-}
-
-/** Fully logged-in user + their session id, or null. */
-export async function getCurrentSession() {
-  return loadSession("full");
+  return { user: row.user, sessionId };
 }
 
 /** Reads the session cookie and returns the logged-in user row, or null. */
 export async function getCurrentUser() {
-  return (await loadSession("full"))?.user ?? null;
-}
-
-/** A half-finished login (2FA setup / forced password change), or null. */
-export async function getPendingSession(stage: Exclude<SessionStage, "full">) {
-  return loadSession(stage);
+  return (await getCurrentSession())?.user ?? null;
 }
 
 /** Throws a 401 if there's no valid session. Call this at the top of every
@@ -195,82 +143,29 @@ export async function requireAdmin() {
   return user;
 }
 
-/** Best-effort cleanup of expired / long-idle sessions. */
+/** Best-effort cleanup of expired sessions. */
 export async function pruneExpiredSessions() {
-  const now = Date.now();
-  await db.delete(sessions).where(lt(sessions.expiresAt, new Date(now)));
-  // Anything idle longer than the most generous idle limit is dead too.
-  await db.delete(sessions).where(lt(sessions.lastActiveAt, new Date(now - USER_IDLE_MS)));
+  await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
 }
 
 /* ------------------------- brute-force protection ------------------------- */
 
-export function isLocked(user: UserRow): boolean {
-  return !!user.lockedUntil && user.lockedUntil.getTime() > Date.now();
-}
-
-/** Counts a failed attempt (atomically) and locks the account after too many. */
-export async function registerFailure(user: UserRow) {
+async function recentFailures(filter: ReturnType<typeof eq>): Promise<number> {
+  const since = new Date(Date.now() - THROTTLE_WINDOW_MS);
   const [r] = await db
-    .update(users)
-    .set({ failedLoginCount: sql`${users.failedLoginCount} + 1` })
-    .where(eq(users.id, user.id))
-    .returning({ count: users.failedLoginCount });
-  if (r && r.count >= MAX_FAILED_ATTEMPTS) {
-    await db
-      .update(users)
-      .set({ failedLoginCount: 0, lockedUntil: new Date(Date.now() + LOCK_MS) })
-      .where(eq(users.id, user.id));
-  }
-}
-
-export async function clearFailures(userId: string) {
-  await db
-    .update(users)
-    .set({ failedLoginCount: 0, lockedUntil: null })
-    .where(eq(users.id, userId));
+    .select({ n: sql<number>`count(*)::int` })
+    .from(activityLog)
+    .where(and(eq(activityLog.action, "login_failed"), filter, gte(activityLog.createdAt, since)));
+  return r?.n ?? 0;
 }
 
 /** True when this IP has produced too many failed logins recently. */
 export async function ipThrottled(ip: string): Promise<boolean> {
-  const since = new Date(Date.now() - IP_WINDOW_MS);
-  const [r] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(activityLog)
-    .where(
-      and(
-        eq(activityLog.action, "login_failed"),
-        eq(activityLog.details, `ip:${ip}`),
-        gte(activityLog.createdAt, since),
-      ),
-    );
-  return (r?.n ?? 0) >= IP_MAX_FAILURES;
+  return (await recentFailures(eq(activityLog.details, `ip:${ip}`))) >= MAX_FAILS_PER_IP;
 }
 
-/* ----------------------------- activation codes ----------------------------- */
-
-export function hashUserCode(userId: string, code: string) {
-  return sha256Hex(`${userId}:${normalizeCode(code)}`);
-}
-
-/**
- * Issues a fresh one-time activation code for a user. Returns the plain code —
- * it is shown to the admin exactly once and only its hash is stored.
- * Also signs the user out everywhere and clears any lockout.
- */
-export async function issueActivationCode(userId: string): Promise<string> {
-  const code = makeCode(8, 4);
-  await db
-    .update(users)
-    .set({
-      mustActivate: true,
-      activationCodeHash: hashUserCode(userId, code),
-      activationExpiresAt: new Date(Date.now() + ACTIVATION_TTL_MS),
-      activationAttempts: 0,
-      failedLoginCount: 0,
-      lockedUntil: null,
-    })
-    .where(eq(users.id, userId));
-  await deleteSessionsForUser(userId);
-  return code;
+/** True when this account has had too many failed logins recently
+ * (it unlocks by itself after 15 minutes). */
+export async function userThrottled(userId: string): Promise<boolean> {
+  return (await recentFailures(eq(activityLog.userId, userId))) >= MAX_FAILS_PER_USER;
 }
