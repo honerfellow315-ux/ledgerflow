@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Trash2,
   Unlock,
+  Upload,
   UserPlus,
 } from "@/lib/icons";
 import { usePermissions } from "@/lib/ledger/permissions";
@@ -28,6 +29,7 @@ import { PeriodStatusBadge } from "@/components/app/salary/badges";
 import { StaffDialog } from "@/components/app/salary/StaffDialog";
 import { PayrollCompanyDialog } from "@/components/app/payroll/PayrollCompanyDialog";
 import { AddStaffDialog } from "@/components/app/payroll/AddStaffDialog";
+import { ImportPayrollDialog } from "@/components/app/payroll/ImportPayrollDialog";
 import { StaffStatusDialog } from "@/components/app/payroll/StaffStatusDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -354,6 +356,7 @@ function PayrollPageContent() {
   const [showCompanies, setShowCompanies] = useState(false);
   const [showNewMonth, setShowNewMonth] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [statusFor, setStatusFor] = useState<string | null>(null);
   const [editStaffId, setEditStaffId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<null | "close" | "delete" | "reopen" | "push">(null);
@@ -583,6 +586,11 @@ function PayrollPageContent() {
               {canEdit ? (
                 <Button size="sm" onClick={() => setShowAdd(true)}>
                   <UserPlus className="size-4" /> Add staff
+                </Button>
+              ) : null}
+              {canEdit ? (
+                <Button variant="outline" size="sm" onClick={() => setShowImport(true)}>
+                  <Upload className="size-4" /> Import Excel
                 </Button>
               ) : null}
               <Button
@@ -962,6 +970,15 @@ function PayrollPageContent() {
             companyName={data.company.name}
             defaultRate={data.company.defaultRate}
             canCreateStaff={can("staff", "create")}
+          />
+          <ImportPayrollDialog
+            open={showImport}
+            onOpenChange={setShowImport}
+            sheetId={data.sheet.id}
+            companyName={data.company.name}
+            month={data.sheet.month}
+            canCreateStaff={can("staff", "create")}
+            canEditStaff={can("staff", "edit")}
           />
           <StaffStatusDialog
             open={statusFor !== null}

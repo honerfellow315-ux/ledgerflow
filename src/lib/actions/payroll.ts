@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../server/db";
 import {
@@ -15,10 +16,12 @@ import { requirePermission } from "../server/auth";
 import { hasPermission } from "../permissions";
 import { uid } from "../server/id";
 import { recordActivity, changedFieldsSummary } from "../server/activity";
-import { formatMonthLabel, round2 } from "../payroll/calc";
+import { formatMonthLabel, formatNi, normName, normNi, round2 } from "../payroll/calc";
 import { lineTotals } from "../payroll/sheetCalc";
 import { STAFF_DETAIL_FIELDS } from "../payroll/types";
-import type { PeriodStatus, Staff, StaffDetails } from "../payroll/types";
+import type { PeriodStatus, Staff, StaffDetailField, StaffDetails } from "../payroll/types";
+import { cleanDetail } from "../payroll/sheetImport";
+import type { PayrollImportResult, PayrollImportRowResult } from "../payroll/sheetImport";
 import type {
   CompanyStaffLink,
   PayrollLine,
@@ -816,4 +819,328 @@ export const pushToSalarySheet = createServerFn({ method: "POST" })
       updated: toPush.length,
       skipped: zeroIds.length,
     };
+  });
+
+
+/* ------------------------------------------------------------------ */
+/* Excel import ("All Payroll Format" file -> this sheet)               */
+/* ------------------------------------------------------------------ */
+
+const importDetailText = z.string().max(300).optional();
+const importHours = z.number().min(0).max(100000).nullable();
+
+const importRow = z.object({
+  name: z.string().trim().min(1).max(300),
+  ni: z.string().max(60),
+  unitsHours: importHours,
+  bankHolidayHours: importHours,
+  holidayEntitlement: importHours,
+  comment: z.string().trim().max(200),
+  rate: z.number().min(0).max(10000).nullable(),
+  dob: importDetailText,
+  gender: importDetailText,
+  rtwShareCode: importDetailText,
+  shareCodeExpiry: importDetailText,
+  address: importDetailText,
+  town: importDetailText,
+  postCode: importDetailText,
+  uniform: importDetailText,
+  accountHolderName: importDetailText,
+  accountNumber: importDetailText,
+  sortCode: importDetailText,
+  employmentStartDate: importDetailText,
+  employmentEndDate: importDetailText,
+  contractStatus: importDetailText,
+  email: importDetailText,
+  immigrationStatus: importDetailText,
+  hoursAllowed: importDetailText,
+  siaNumber: importDetailText,
+  role: importDetailText,
+  serviceType: importDetailText,
+});
+
+/**
+ * Imports an "All Payroll Format" file into ONE open payroll sheet.
+ *
+ *  - People are matched by NI number first (spaces / case ignored), then by a UNIQUE name
+ *    (refused when both sides have an NI and the two differ).
+ *  - Not found: a new staff record is created (only with createMissing + "staff" create permission).
+ *  - Hours / comment / rate / holiday entitlement go onto the person's line for this sheet. A line that
+ *    is already there is updated only with updateExisting, and only with the values the file really has.
+ *  - fillDetails (needs "staff" edit permission) fills EMPTY staff detail fields only, never overwrites.
+ *  - Someone who already has a link to this company is left untouched (so importing an old month can't
+ *    re-activate people who have since left).
+ *  - Total Hours and Amount are never imported: they are always recomputed (Total = Units + Bank
+ *    Holiday, Amount = Rate x Total).
+ * `apply: false` is the preview: it reads and reports, writes nothing.
+ */
+export const importPayrollSheet = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      sheetId: z.string(),
+      apply: z.boolean(),
+      createMissing: z.boolean(),
+      updateExisting: z.boolean(),
+      fillDetails: z.boolean(),
+      rows: z.array(importRow).max(1500),
+    }),
+  )
+  .handler(async ({ data }): Promise<PayrollImportResult> => {
+    const actor = await requirePermission("payroll", "edit");
+    const sheet = await assertOpen(data.sheetId);
+    const company = await getCompanyOrThrow(sheet.companyId);
+    const canCreate =
+      data.createMissing && hasPermission(actor.role, actor.permissions, "staff", "create");
+    const canFill =
+      data.fillDetails && hasPermission(actor.role, actor.permissions, "staff", "edit");
+
+    const [staffRows, links, lines] = await Promise.all([
+      db.select().from(payrollStaff),
+      db.select().from(payrollCompanyStaff).where(eq(payrollCompanyStaff.companyId, company.id)),
+      db.select().from(payrollLines).where(eq(payrollLines.sheetId, sheet.id)),
+    ]);
+    type StaffRow = (typeof staffRows)[number];
+    const byNi = new Map<string, StaffRow>();
+    const byName = new Map<string, StaffRow[]>();
+    for (const st of staffRows) {
+      const ni = normNi(st.ni);
+      if (ni && !byNi.has(ni)) byNi.set(ni, st);
+      const nm = normName(st.name);
+      if (nm) byName.set(nm, [...(byName.get(nm) ?? []), st]);
+    }
+    const linkByStaff = new Map(links.map((l) => [l.staffId, l]));
+    const lineByStaff = new Map(lines.map((l) => [l.staffId, l]));
+
+    const out: PayrollImportRowResult[] = [];
+    const totals = {
+      added: 0,
+      updated: 0,
+      unchanged: 0,
+      skipped: 0,
+      created: 0,
+      filledStaff: 0,
+      filledFields: 0,
+      noRate: 0,
+      writtenHours: 0,
+      writtenAmount: 0,
+    };
+    let applied = 0;
+
+    for (const row of data.rows) {
+      const fileNi = normNi(row.ni);
+      let person: StaffRow | undefined;
+      let match: PayrollImportRowResult["match"] = "notFound";
+      if (fileNi && byNi.has(fileNi)) {
+        person = byNi.get(fileNi);
+        match = "matched";
+      } else {
+        const named = byName.get(normName(row.name)) ?? [];
+        if (named.length > 1) match = "ambiguous";
+        else if (named.length === 1) {
+          const cand = named[0]!;
+          if (fileNi && normNi(cand.ni) && normNi(cand.ni) !== fileNi) match = "niConflict";
+          else {
+            person = cand;
+            match = "matched";
+          }
+        }
+      }
+
+      const blank = (m: PayrollImportRowResult["match"]): PayrollImportRowResult => ({
+        name: row.name,
+        match: m,
+        line: "none",
+        fills: 0,
+        unitsHours: 0,
+        bankHolidayHours: 0,
+        totalHours: 0,
+        rate: 0,
+        amount: 0,
+      });
+
+      const willCreate = !person && match === "notFound" && canCreate;
+      if (!person && !willCreate) {
+        out.push(blank(match));
+        continue;
+      }
+
+      // ---- the line this person gets on the sheet ----
+      const existing = person ? lineByStaff.get(person.id) : undefined;
+      const link = person ? linkByStaff.get(person.id) : undefined;
+      const fileUnits = row.unitsHours;
+      const fileBh = row.bankHolidayHours;
+      let action: PayrollImportRowResult["line"];
+      let units: number;
+      let bh: number;
+      let entitlement: number;
+      let comment: string;
+      let rate: number;
+      if (existing) {
+        units = fileUnits ?? existing.unitsHours;
+        bh = fileBh ?? existing.bankHolidayHours;
+        entitlement = row.holidayEntitlement ?? existing.holidayEntitlement;
+        comment = row.comment || existing.comment;
+        rate = row.rate ?? existing.rate;
+        if (!data.updateExisting) {
+          action = "skip";
+          units = existing.unitsHours;
+          bh = existing.bankHolidayHours;
+          entitlement = existing.holidayEntitlement;
+          comment = existing.comment;
+          rate = existing.rate;
+        } else if (
+          units === existing.unitsHours &&
+          bh === existing.bankHolidayHours &&
+          entitlement === existing.holidayEntitlement &&
+          comment === existing.comment &&
+          rate === existing.rate
+        ) {
+          action = "unchanged";
+        } else action = "update";
+      } else {
+        action = "add";
+        units = fileUnits ?? 0;
+        bh = fileBh ?? 0;
+        entitlement = row.holidayEntitlement ?? 0;
+        comment = row.comment;
+        rate = row.rate ?? link?.rate ?? company.defaultRate;
+      }
+      const totalHours = round2(units + bh);
+      const amount = round2(rate * totalHours);
+
+      // ---- detail fields that fill empty slots on an existing staff record ----
+      const fills: Partial<Record<StaffDetailField, string>> = {};
+      if (person && canFill) {
+        for (const f of STAFF_DETAIL_FIELDS) {
+          const value = cleanDetail(f, row[f]);
+          if (value && !person[f]) fills[f] = value;
+        }
+      }
+      const fillKeys = Object.keys(fills) as StaffDetailField[];
+
+      if (action === "add" || action === "update") {
+        totals[action === "add" ? "added" : "updated"]++;
+        totals.writtenHours = round2(totals.writtenHours + totalHours);
+        totals.writtenAmount = round2(totals.writtenAmount + amount);
+        if (rate === 0) totals.noRate++;
+      } else if (action === "unchanged") totals.unchanged++;
+      else totals.skipped++;
+      if (willCreate) totals.created++;
+      if (fillKeys.length > 0) {
+        totals.filledStaff++;
+        totals.filledFields += fillKeys.length;
+      }
+
+      out.push({
+        name: row.name,
+        match: willCreate ? "new" : "matched",
+        line: action,
+        fills: fillKeys.length,
+        unitsHours: units,
+        bankHolidayHours: bh,
+        totalHours,
+        rate,
+        amount,
+      });
+
+      if (!data.apply) continue;
+
+      // ---------------------------- write ----------------------------
+      let staff = person;
+      if (!staff) {
+        const details: Record<string, string> = {};
+        for (const f of STAFF_DETAIL_FIELDS) {
+          const value = cleanDetail(f, row[f]);
+          if (value) details[f] = value;
+        }
+        const [created] = await db
+          .insert(payrollStaff)
+          .values({
+            id: uid("st"),
+            name: row.name,
+            ni: formatNi(row.ni),
+            ...details,
+          } as typeof payrollStaff.$inferInsert)
+          .returning();
+        if (!created) continue;
+        staff = created;
+        // later rows can't match it twice, but keep the maps honest
+        const key = normNi(created.ni);
+        if (key) byNi.set(key, created);
+      }
+
+      if (!linkByStaff.has(staff.id)) {
+        const ended = row.contractStatus === "P45" || staff.contractStatus === "P45";
+        const endDate = cleanDetail("employmentEndDate", row.employmentEndDate ?? staff.employmentEndDate ?? "");
+        const [newLink] = await db
+          .insert(payrollCompanyStaff)
+          .values({
+            id: uid("pcs"),
+            companyId: company.id,
+            staffId: staff.id,
+            active: !ended,
+            rate: null,
+            startDate: staff.employmentStartDate || cleanDetail("employmentStartDate", row.employmentStartDate) || null,
+            endDate: endDate || null,
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (newLink) linkByStaff.set(staff.id, newLink);
+      }
+
+      if (action === "add") {
+        await db
+          .insert(payrollLines)
+          .values({
+            id: uid("pl"),
+            sheetId: sheet.id,
+            staffId: staff.id,
+            unitsHours: units,
+            bankHolidayHours: bh,
+            holidayEntitlement: entitlement,
+            comment,
+            rate,
+          })
+          .onConflictDoNothing();
+      } else if (action === "update" && existing) {
+        await db
+          .update(payrollLines)
+          .set({
+            unitsHours: units,
+            bankHolidayHours: bh,
+            holidayEntitlement: entitlement,
+            comment,
+            rate,
+          })
+          .where(eq(payrollLines.id, existing.id));
+      }
+
+      if (fillKeys.length > 0 && person) {
+        const set: Record<string, unknown> = {};
+        for (const [f, v] of Object.entries(fills)) {
+          const column = payrollStaff[f as StaffDetailField];
+          // keeps any value that is already there, so two imports at once can't overwrite anything
+          set[f] = sql`CASE WHEN ${column} IS NULL OR ${column} = '' THEN ${v}::text ELSE ${column} END`;
+        }
+        await db
+          .update(payrollStaff)
+          .set(set as PgUpdateSetSource<typeof payrollStaff>)
+          .where(eq(payrollStaff.id, person.id));
+      }
+      applied++;
+    }
+
+    if (data.apply && applied > 0) {
+      await recordActivity({
+        actor,
+        action: "updated",
+        module: "payroll",
+        entityId: sheet.id,
+        label: `${await sheetLabel(sheet)} — Excel import`,
+        // counts only — never names, NI or bank values
+        details: `${totals.added} added, ${totals.updated} updated, ${totals.created} new staff, ${totals.filledFields} empty staff fields filled`,
+      });
+    }
+
+    return { rows: out, ...totals };
   });

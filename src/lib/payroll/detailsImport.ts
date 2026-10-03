@@ -23,10 +23,10 @@ export interface StaffDetailsParse {
   found: boolean;
 }
 
-const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+export const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 /** normalised header -> where its value goes */
-const HEADER_TO_FIELD: Record<string, StaffDetailField | "name" | "ni"> = {
+export const HEADER_TO_FIELD: Record<string, StaffDetailField | "name" | "ni"> = {
   employeename: "name",
   ninumber: "ni",
   dob: "dob",
@@ -52,11 +52,11 @@ const HEADER_TO_FIELD: Record<string, StaffDetailField | "name" | "ni"> = {
   servicetype: "serviceType",
 };
 
-const PLACEHOLDERS = new Set(
+export const PLACEHOLDERS = new Set(
   ["Employee Name", "RTW Share Code", "Expiry", "Sia Number", "email", "NI Number"].map(squash),
 );
 
-const DATE_FIELDS = new Set<StaffDetailField>([
+export const DATE_FIELDS = new Set<StaffDetailField>([
   "dob",
   "shareCodeExpiry",
   "employmentStartDate",
@@ -66,7 +66,7 @@ const DATE_FIELDS = new Set<StaffDetailField>([
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 /** Accepts what toIsoDate accepts, plus "5 Jan 2024" / "5-Jan-2024" / "5/Jan/2024". */
-function readDate(cell: Cell | undefined): string {
+export function readDate(cell: Cell | undefined): string {
   const iso = toIsoDate(cell);
   if (iso) return iso;
   if (typeof cell !== "string") return "";
@@ -77,7 +77,7 @@ function readDate(cell: Cell | undefined): string {
   return `${m[3]}-${String(mi + 1).padStart(2, "0")}-${m[1]!.padStart(2, "0")}`;
 }
 
-const validIso = (iso: string) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(iso);
+export const validIso = (iso: string) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(iso);
 
 export function parseStaffDetails(matrix: Matrix): StaffDetailsParse {
   // 1) find the header row

@@ -28,8 +28,7 @@ import {
   vatAmount,
   amountIncVat,
   paidForInvoice,
-  processedHoursForInvoice,
-  remainingInvoiceHours,
+  invoiceHoursDisplay,
   round2,
   endClientOptions,
   suggestNextInvoiceNumber,
@@ -879,7 +878,15 @@ export function InvoiceDialog({
                   >
                     <Input readOnly disabled value={formatMoney(computedAmount ?? 0)} />
                   </Field>
-                  {invoice ? (
+                  {invoice ? (() => {
+                    const dialogPaid = paidForInvoice(invoice.id, data.payments);
+                    const dialogHours = invoiceHoursDisplay(
+                      invoice,
+                      data.subcontracts,
+                      dialogPaid,
+                      amountIncVat(invoice, dialogPaid),
+                    );
+                    return (
                     <div className="grid grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3 sm:col-span-2">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -894,7 +901,7 @@ export function InvoiceDialog({
                           Processed Hours
                         </p>
                         <p className="num text-[15px] font-semibold">
-                          {formatHours(processedHoursForInvoice(invoice.id, data.subcontracts))}
+                          {formatHours(dialogHours.processed)}
                         </p>
                       </div>
                       <div>
@@ -902,11 +909,12 @@ export function InvoiceDialog({
                           Remaining Hours
                         </p>
                         <p className="num text-[15px] font-semibold">
-                          {formatHours(remainingInvoiceHours(invoice, data.subcontracts) ?? 0)}
+                          {formatHours(dialogHours.remaining)}
                         </p>
                       </div>
                     </div>
-                  ) : null}
+                    );
+                  })() : null}
                 </>
               ) : (
                 <Field label="Amount ex VAT (£)" htmlFor="inv-amount">

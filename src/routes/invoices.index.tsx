@@ -22,8 +22,7 @@ import {
   formatMoney,
   invoiceTracksHours,
   matchesEndClient,
-  processedHoursForInvoice,
-  remainingInvoiceHours,
+  invoiceHoursDisplay,
   round2,
   UNASSIGNED_END_CLIENT,
 } from "@/lib/ledger/calc";
@@ -553,28 +552,41 @@ function InvoicesPageContent() {
                           </div>
                         ) : null}
                       </TD>
-                      <TD mono align="right" className="text-muted-foreground">
-                        {invoiceTracksHours(inv) ? formatHours(inv.hours ?? 0) : "—"}
-                      </TD>
-                      <TD mono align="right" className="text-muted-foreground">
-                        {invoiceTracksHours(inv)
-                          ? formatHours(processedHoursForInvoice(inv.id, data.subcontracts))
-                          : "—"}
-                      </TD>
-                      <TD
-                        mono
-                        align="right"
-                        className={
-                          invoiceTracksHours(inv) &&
-                          (remainingInvoiceHours(inv, data.subcontracts) ?? 0) <= 0.004
-                            ? "font-medium text-destructive"
-                            : "font-medium"
-                        }
-                      >
-                        {invoiceTracksHours(inv)
-                          ? formatHours(remainingInvoiceHours(inv, data.subcontracts) ?? 0)
-                          : "—"}
-                      </TD>
+                      {(() => {
+                        const hrs = invoiceTracksHours(inv)
+                          ? invoiceHoursDisplay(inv, data.subcontracts, inv.paid, inv.total)
+                          : null;
+                        return (
+                          <>
+                            <TD mono align="right" className="text-muted-foreground">
+                              {hrs ? formatHours(hrs.total) : "—"}
+                            </TD>
+                            <TD
+                              mono
+                              align="right"
+                              className="text-muted-foreground"
+                              title={
+                                hrs
+                                  ? `Subcontract ${formatHours(hrs.subcontractHours)} + paid ${formatHours(hrs.paidHours)}`
+                                  : undefined
+                              }
+                            >
+                              {hrs ? formatHours(hrs.processed) : "—"}
+                            </TD>
+                            <TD
+                              mono
+                              align="right"
+                              className={
+                                hrs && hrs.remaining <= 0.004
+                                  ? "font-medium text-destructive"
+                                  : "font-medium"
+                              }
+                            >
+                              {hrs ? formatHours(hrs.remaining) : "—"}
+                            </TD>
+                          </>
+                        );
+                      })()}
                       <TD>
                         <div className="flex items-center gap-1.5">
                           <Select

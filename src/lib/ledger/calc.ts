@@ -385,6 +385,47 @@ export function remainingInvoiceHours(
   return Math.max(0, round2(total - processed));
 }
 
+/**
+ * Hours covered by payments received on this invoice. Proportional to the
+ * paid share of the invoice total (so VAT and part-payments are handled
+ * automatically): paidHours = hours x (paid / total), capped at the invoice
+ * hours. Returns 0 for invoices that don't track hours.
+ */
+export function paidHoursForInvoice(
+  invoice: Pick<Invoice, "hours">,
+  paid: number,
+  total: number,
+): number {
+  if (!invoiceTracksHours(invoice) || total <= 0.004 || paid <= 0) return 0;
+  const hours = invoice.hours ?? 0;
+  return Math.min(hours, round2(hours * (paid / total)));
+}
+
+/**
+ * Display figures for the Invoices screen. Processed = subcontract hours +
+ * hours covered by payments received; Remaining = Total - Processed (never
+ * negative). Display only: the subcontract allocation cap
+ * (remainingInvoiceHours) is intentionally unchanged.
+ */
+export function invoiceHoursDisplay(
+  invoice: Pick<Invoice, "id" | "hours">,
+  subcontracts: SubcontractEntry[],
+  paid: number,
+  total: number,
+): { total: number; subcontractHours: number; paidHours: number; processed: number; remaining: number } {
+  const totalHours = invoice.hours ?? 0;
+  const subcontractHours = processedHoursForInvoice(invoice.id, subcontracts);
+  const paidHours = paidHoursForInvoice(invoice, paid, total);
+  const processed = round2(subcontractHours + paidHours);
+  return {
+    total: totalHours,
+    subcontractHours,
+    paidHours,
+    processed,
+    remaining: Math.max(0, round2(totalHours - processed)),
+  };
+}
+
 export interface InvoiceHoursSummary {
   invoiceId: string;
   invoiceNumber: string;
