@@ -54,6 +54,8 @@ const toLine = (r: typeof payrollLines.$inferSelect): PayrollLine => ({
   holidayEntitlement: r.holidayEntitlement,
   comment: r.comment,
   rate: r.rate,
+  fixedAmount: r.fixedAmount ?? null,
+  holidayRate: r.holidayRate ?? null,
 });
 
 const toLink = (r: typeof payrollCompanyStaff.$inferSelect): CompanyStaffLink => ({
@@ -297,7 +299,7 @@ export const listPayrollSheets = createServerFn({ method: "POST" })
       SELECT s.id, s.company_id, s.month, s.status, s.notes,
              count(l.id)::int AS lines,
              COALESCE(sum(l.units_hours + l.bank_holiday_hours), 0)::float AS total_hours,
-             COALESCE(sum(round((l.units_hours + l.bank_holiday_hours) * l.rate, 2)), 0)::float AS amount
+             COALESCE(sum(COALESCE(l.fixed_amount, round((l.units_hours + l.bank_holiday_hours) * l.rate + CASE WHEN l.holiday_rate IS NULL THEN 0 ELSE l.holiday_entitlement * l.holiday_rate END, 2))), 0)::float AS amount
       FROM payroll_sheets s LEFT JOIN payroll_lines l ON l.sheet_id = s.id
       WHERE s.company_id = ${data.companyId}
       GROUP BY s.id ORDER BY s.month DESC`);
@@ -494,6 +496,8 @@ const linePatch = z
     holidayEntitlement: hoursNum,
     comment: z.string().trim().max(200),
     rate: z.number().min(0).max(10000),
+    fixedAmount: z.number().min(0).max(1000000).nullable(),
+    holidayRate: z.number().min(0).max(10000).nullable(),
   })
   .partial();
 
@@ -837,6 +841,8 @@ const importRow = z.object({
   holidayEntitlement: importHours,
   comment: z.string().trim().max(200),
   rate: z.number().min(0).max(10000).nullable(),
+  fixedAmount: z.number().min(0).max(1000000).nullable().optional(),
+  holidayRate: z.number().min(0).max(10000).nullable().optional(),
   dob: importDetailText,
   gender: importDetailText,
   rtwShareCode: importDetailText,
@@ -871,7 +877,8 @@ const importRow = z.object({
  *  - Someone who already has a link to this company is left untouched (so importing an old month can't
  *    re-activate people who have since left).
  *  - Total Hours and Amount are never imported: they are always recomputed (Total = Units + Bank
- *    Holiday, Amount = Rate x Total).
+ *    Holiday, Amount = Rate x Total + paid holiday). The one exception is a fixed-pay line (Rate 0 +
+ *    typed Amount in the file): its fixed amount is stored and used as the Amount.
  * `apply: false` is the preview: it reads and reports, writes nothing.
  */
 export const importPayrollSheet = createServerFn({ method: "POST" })
@@ -975,12 +982,17 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
       let entitlement: number;
       let comment: string;
       let rate: number;
+      let fixed: number | null;
+      let holidayRate: number | null;
       if (existing) {
         units = fileUnits ?? existing.unitsHours;
         bh = fileBh ?? existing.bankHolidayHours;
         entitlement = row.holidayEntitlement ?? existing.holidayEntitlement;
         comment = row.comment || existing.comment;
         rate = row.rate ?? existing.rate;
+        // a file row with hours is an hourly line; a file row without hours may be a fixed-pay line
+        fixed = row.fixedAmount ?? (fileUnits !== null || fileBh !== null ? null : existing.fixedAmount);
+        holidayRate = row.holidayRate ?? existing.holidayRate;
         if (!data.updateExisting) {
           action = "skip";
           units = existing.unitsHours;
@@ -988,12 +1000,16 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
           entitlement = existing.holidayEntitlement;
           comment = existing.comment;
           rate = existing.rate;
+          fixed = existing.fixedAmount;
+          holidayRate = existing.holidayRate;
         } else if (
           units === existing.unitsHours &&
           bh === existing.bankHolidayHours &&
           entitlement === existing.holidayEntitlement &&
           comment === existing.comment &&
-          rate === existing.rate
+          rate === existing.rate &&
+          fixed === existing.fixedAmount &&
+          holidayRate === existing.holidayRate
         ) {
           action = "unchanged";
         } else action = "update";
@@ -1004,9 +1020,17 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
         entitlement = row.holidayEntitlement ?? 0;
         comment = row.comment;
         rate = row.rate ?? link?.rate ?? company.defaultRate;
+        fixed = row.fixedAmount ?? null;
+        holidayRate = row.holidayRate ?? null;
       }
-      const totalHours = round2(units + bh);
-      const amount = round2(rate * totalHours);
+      const { totalHours, amount } = lineTotals({
+        unitsHours: units,
+        bankHolidayHours: bh,
+        holidayEntitlement: entitlement,
+        rate,
+        fixedAmount: fixed,
+        holidayRate,
+      });
 
       // ---- detail fields that fill empty slots on an existing staff record ----
       const fills: Partial<Record<StaffDetailField, string>> = {};
@@ -1022,7 +1046,7 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
         totals[action === "add" ? "added" : "updated"]++;
         totals.writtenHours = round2(totals.writtenHours + totalHours);
         totals.writtenAmount = round2(totals.writtenAmount + amount);
-        if (rate === 0) totals.noRate++;
+        if (rate === 0 && fixed === null) totals.noRate++;
       } else if (action === "unchanged") totals.unchanged++;
       else totals.skipped++;
       if (willCreate) totals.created++;
@@ -1100,6 +1124,8 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
             holidayEntitlement: entitlement,
             comment,
             rate,
+            fixedAmount: fixed,
+            holidayRate,
           })
           .onConflictDoNothing();
       } else if (action === "update" && existing) {
@@ -1111,6 +1137,8 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
             holidayEntitlement: entitlement,
             comment,
             rate,
+            fixedAmount: fixed,
+            holidayRate,
           })
           .where(eq(payrollLines.id, existing.id));
       }

@@ -158,7 +158,11 @@ export async function buildPayrollWorkbook(
       row.getCell(5).value = { formula: `C${r}+B${r}`, result: t.totalHours };
       row.getCell(6).value = line.comment || null;
       row.getCell(7).value = line.rate;
-      row.getCell(8).value = { formula: `G${r}*E${r}`, result: t.amount };
+      // normal line: live formula. Fixed pay / paid holiday: the real figure (the formula would not match)
+      row.getCell(8).value =
+        line.fixedAmount != null || line.holidayRate != null
+          ? t.amount
+          : { formula: `G${r}*E${r}`, result: t.amount };
       row.getCell(9).value = dob;
       row.getCell(10).value = dob
         ? { formula: `IF(I${r}="","",DATEDIF(I${r},TODAY(),"Y"))`, result: age === "" ? "" : age }

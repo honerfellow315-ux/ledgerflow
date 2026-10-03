@@ -263,9 +263,19 @@ export function ImportPayrollDialog({
                   ? ` · ${parse.skippedRows} template / empty rows ignored`
                   : ""}
                 {parse.duplicates.length > 0
-                  ? ` · ${parse.duplicates.length}+ repeated (${parse.duplicates.slice(0, 3).join(", ")}) — first row used`
+                  ? ` · ${parse.duplicates.length}+ repeated (${parse.duplicates.slice(0, 3).join(", ")}) — the row with pay is used`
+                  : ""}
+                {parse.mergedRows > 0
+                  ? ` · ${parse.mergedRows} extra row${parse.mergedRows === 1 ? "" : "s"} (no name) merged into the person above`
                   : ""}
               </p>
+              {parse.mismatches.length > 0 ? (
+                <p className="rounded-md border border-amber-400/50 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+                  The amount differs from the file’s Amount column for {parse.mismatches.length}{" "}
+                  {parse.mismatches.length === 1 ? "person" : "people"} — check before importing:{" "}
+                  {parse.mismatches.join(" · ")}.
+                </p>
+              ) : null}
               {invalidList.length > 0 ? (
                 <p className="rounded-md border border-amber-400/50 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
                   Some cells could not be read and were left out:{" "}

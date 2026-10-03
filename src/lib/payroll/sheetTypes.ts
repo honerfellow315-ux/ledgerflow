@@ -50,6 +50,10 @@ export interface PayrollLine {
   holidayEntitlement: number;
   comment: string;
   rate: number;
+  /** Fixed monthly pay (guards not paid by hours). null = Amount is Rate x Total Hours. */
+  fixedAmount: number | null;
+  /** Rate the Holiday Entitlement hours are paid at. null = information only (old behaviour). */
+  holidayRate: number | null;
 }
 
 /**

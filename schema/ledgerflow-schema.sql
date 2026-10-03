@@ -564,7 +564,9 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
   bank_holiday_hours  numeric(10,2) NOT NULL DEFAULT 0,
   holiday_entitlement numeric(10,2) NOT NULL DEFAULT 0,  -- information only, not part of the total
   comment             text NOT NULL DEFAULT '',
-  rate                numeric(10,2) NOT NULL DEFAULT 0
+  rate                numeric(10,2) NOT NULL DEFAULT 0,
+  fixed_amount        numeric(10,2),   -- NULL = Amount is Rate x Total Hours; set = fixed monthly pay
+  holiday_rate        numeric(10,2)    -- NULL = holiday entitlement is information only; set = paid at this rate
 );
 CREATE UNIQUE INDEX IF NOT EXISTS payroll_lines_sheet_staff_uq ON payroll_lines (sheet_id, staff_id);
 CREATE INDEX IF NOT EXISTS payroll_lines_staff_idx ON payroll_lines (staff_id);

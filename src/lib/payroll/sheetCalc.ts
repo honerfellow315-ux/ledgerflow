@@ -2,10 +2,13 @@
  * Payroll sheet arithmetic — the single place the "All Payroll Format" Excel formulas live.
  *
  *   Total Hours = Units (Hours) + Bank Holiday Hours          (E = C + B)
- *   Amount      = Rate x Total Hours                           (H = G x E)
+ *   Amount      = Rate x Total Hours (+ Holiday Entitlement x Holiday Rate, when that is set)
+ *   Fixed pay   = a line with a Fixed Amount is paid exactly that, whatever its hours
  *   Age         = whole years from DOB                         (J = DATEDIF)
  *
- * Holiday Entitlement is information only and is NOT part of Total Hours, exactly as in the sheet.
+ * Holiday Entitlement is NOT part of Total Hours, exactly as in the sheet. It is only paid when the
+ * line has a Holiday Rate (the ESS sheet pays it at 12.71: Amount = Rate x Hours + Holiday x 12.71).
+ * Old lines have no Holiday Rate, so their Amount does not change.
  * Everything is rounded to 2 decimals so float noise never shows (597.37 not 597.3700000001).
  */
 import { normNi, round2, isValidNi } from "./calc";
@@ -20,10 +23,18 @@ export interface LineTotals {
 }
 
 export function lineTotals(
-  l: Pick<PayrollLine, "unitsHours" | "bankHolidayHours" | "rate">,
+  l: Pick<PayrollLine, "unitsHours" | "bankHolidayHours" | "rate"> &
+    Partial<Pick<PayrollLine, "holidayEntitlement" | "fixedAmount" | "holidayRate">>,
 ): LineTotals {
   const totalHours = round2(n(l.unitsHours) + n(l.bankHolidayHours));
-  return { totalHours, amount: round2(n(l.rate) * totalHours) };
+  if (typeof l.fixedAmount === "number" && Number.isFinite(l.fixedAmount)) {
+    return { totalHours, amount: round2(l.fixedAmount) };
+  }
+  const holidayPay =
+    typeof l.holidayRate === "number" && Number.isFinite(l.holidayRate)
+      ? n(l.holidayEntitlement) * l.holidayRate
+      : 0;
+  return { totalHours, amount: round2(n(l.rate) * totalHours + holidayPay) };
 }
 
 export interface SheetTotals {
@@ -89,7 +100,8 @@ export function lineWarnings(
   if (!staff) return out;
   const { totalHours } = lineTotals(line);
 
-  if (line.rate <= 0 && totalHours > 0) out.push({ severity: "error", text: "Rate is 0" });
+  if (line.rate <= 0 && totalHours > 0 && line.fixedAmount == null)
+    out.push({ severity: "error", text: "Rate is 0" });
   if (staff.contractStatus === "P45" && totalHours > 0)
     out.push({ severity: "warn", text: "Has hours but contract status is P45" });
   if (!staff.active && totalHours > 0)
