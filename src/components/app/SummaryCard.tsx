@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from "react";
 import type { LucideIcon } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
@@ -7,12 +8,20 @@ export function SummaryCard({
   sublabel,
   icon: Icon,
   tone = "default",
+  onClick,
+  active = false,
+  title,
 }: {
   label: string;
   value: string;
   sublabel?: string;
   icon?: LucideIcon;
   tone?: "default" | "success" | "warning" | "danger";
+  /** Makes the whole card a button (keyboard + click). */
+  onClick?: () => void;
+  /** Highlights the card while the filter it controls is on. */
+  active?: boolean;
+  title?: string;
 }) {
   const accent = {
     default: "text-primary bg-gradient-to-br from-info-soft to-info-soft/40",
@@ -28,8 +37,30 @@ export function SummaryCard({
     danger: "from-destructive/70 via-destructive to-destructive/70",
   }[tone];
 
+  const clickable = typeof onClick === "function";
   return (
-    <div className="panel-interactive relative flex min-h-28 items-start justify-between gap-3 overflow-hidden px-4 py-4">
+    <div
+      {...(clickable
+        ? {
+            role: "button",
+            tabIndex: 0,
+            title,
+            "aria-pressed": active,
+            onClick,
+            onKeyDown: (e: KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            },
+          }
+        : {})}
+      className={cn(
+        "panel-interactive relative flex min-h-28 items-start justify-between gap-3 overflow-hidden px-4 py-4",
+        clickable && "cursor-pointer text-left",
+        active && "ring-2 ring-warning/60",
+      )}
+    >
       <span aria-hidden className={cn("absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r", bar)} />
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -398,6 +398,21 @@ function PayrollPageContent() {
   const allTotals = useMemo(() => sumLines(rows.map((r) => r.line)), [rows]);
   const totals = useMemo(() => sumLines(filtered.map((r) => r.line)), [filtered]);
   const warnCount = rows.filter((r) => r.warnings.length > 0).length;
+  const tableRef = useRef<HTMLDivElement | null>(null);
+
+  /** "Needs attention" card: show every line with a warning (clears search / status filter) and jump to the table. */
+  function showAttention() {
+    if (onlyWarn) {
+      setOnlyWarn(false);
+      return;
+    }
+    setQ("");
+    setStatusFilter(ALL);
+    setOnlyWarn(true);
+    requestAnimationFrame(() =>
+      tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  }
   const filtersOn = q.trim() !== "" || statusFilter !== ALL || onlyWarn;
   const statusCount = (s: string) =>
     rows.filter((r) => (r.staff.contractStatus ?? "Active") === s).length;
@@ -677,9 +692,17 @@ function PayrollPageContent() {
               sublabel={warnCount ? "lines with a warning" : "all clear"}
               tone={warnCount ? "warning" : "default"}
               icon={AlertTriangle}
+              {...(warnCount > 0
+                ? {
+                    onClick: showAttention,
+                    active: onlyWarn,
+                    title: onlyWarn ? "Click to show all staff again" : "Click to show only these lines",
+                  }
+                : {})}
             />
           </div>
 
+          <div ref={tableRef} className="scroll-mt-4">
           <Panel>
             <PanelHeader
               title={`Payroll — ${filtered.length} of ${rows.length} staff`}
@@ -934,6 +957,7 @@ function PayrollPageContent() {
               </TableWrap>
             )}
           </Panel>
+          </div>
         </>
       )}
 
