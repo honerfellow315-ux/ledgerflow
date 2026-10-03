@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { IdCard, Pencil, Plus, Search } from "@/lib/icons";
+import { IdCard, Pencil, Plus, Search, Trash2 } from "@/lib/icons";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { SummaryCard } from "@/components/app/SummaryCard";
 import { StaffDialog } from "@/components/app/salary/StaffDialog";
+import { DeleteStaffDialog } from "@/components/app/salary/DeleteStaffDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { normName, normNi } from "@/lib/payroll/calc";
-import { useStaffList } from "@/lib/payroll/queries";
+import { useRefreshSalary, useStaffList } from "@/lib/payroll/queries";
 import {
   SHARE_CODE_WARN_DAYS,
   daysToShareCodeExpiry,
@@ -71,10 +72,15 @@ function ShareCodeCell({ staff }: { staff: Staff }) {
 }
 
 function StaffPageContent() {
-  const { can } = usePermissions();
+  const { can, isAdmin } = usePermissions();
   const canCreate = can("staff", "create");
   const canEdit = can("staff", "edit");
+  // Deleting staff removes their lines from every sheet, so it is admin-only
+  // (same as the Recycle Bin that can undo it).
+  const canDelete = isAdmin;
+  const refresh = useRefreshSalary();
   const { data: staff = [], isLoading, error } = useStaffList();
+  const [del, setDel] = useState<{ ids: string[]; label: string; typing: boolean } | null>(null);
 
   const [q, setQ] = useState("");
   const [area, setArea] = useState(ALL);
@@ -142,11 +148,28 @@ function StaffPageContent() {
             Master records reused by every salary month. Contains NI numbers and bank details.
           </p>
         </div>
-        {canCreate ? (
-          <Button onClick={() => setDialog({ open: true, staff: null })}>
-            <Plus className="size-4" /> Add staff
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {canDelete && staff.length > 0 ? (
+            <Button
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={() =>
+                setDel({
+                  ids: staff.map((s) => s.id),
+                  label: `all ${staff.length} staff`,
+                  typing: true,
+                })
+              }
+            >
+              <Trash2 className="size-4" /> Delete all staff
+            </Button>
+          ) : null}
+          {canCreate ? (
+            <Button onClick={() => setDialog({ open: true, staff: null })}>
+              <Plus className="size-4" /> Add staff
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
@@ -297,9 +320,23 @@ function StaffPageContent() {
                       </span>
                     </TD>
                     <TD align="right">
-                      {canEdit ? (
-                        <Pencil className="ml-auto size-3.5 text-muted-foreground" />
-                      ) : null}
+                      <div className="flex items-center justify-end gap-3">
+                        {canEdit ? <Pencil className="size-3.5 text-muted-foreground" /> : null}
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            aria-label={`Delete ${s.name}`}
+                            title="Delete"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDel({ ids: [s.id], label: s.name, typing: false });
+                            }}
+                            className="rounded p-1 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-destructive"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        ) : null}
+                      </div>
                     </TD>
                   </TR>
                 ))}
@@ -314,6 +351,20 @@ function StaffPageContent() {
         onOpenChange={(v) => setDialog((d) => ({ ...d, open: v }))}
         staff={dialog.staff}
         canEdit={dialog.staff ? canEdit : canCreate}
+      />
+
+      <DeleteStaffDialog
+        open={del !== null}
+        onOpenChange={(v) => {
+          if (!v) setDel(null);
+        }}
+        ids={del?.ids ?? []}
+        label={del?.label ?? ""}
+        requireTyping={del?.typing ?? false}
+        onDone={() => {
+          setDel(null);
+          void refresh();
+        }}
       />
     </div>
   );

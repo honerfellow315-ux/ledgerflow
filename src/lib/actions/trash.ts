@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { eq, isNotNull } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../server/db";
 import {
@@ -11,9 +11,11 @@ import {
   hoursEntries,
   subcontractEntries,
   creditNotes,
+  staffTrash,
 } from "../../../drizzle/schema";
 import { requireAdmin } from "../server/auth";
 import { recordActivity } from "../server/activity";
+import { purgeStaffTrash, restoreStaffFromTrash } from "../server/staffTrash";
 
 /**
  * Recycle bin: every table that gets soft-deleted (see the `deletedAt`
@@ -24,7 +26,15 @@ import { recordActivity } from "../server/activity";
  */
 
 export type TrashType =
-  "client" | "company" | "invoice" | "payment" | "expense" | "hours" | "subcontract" | "creditNote";
+  | "client"
+  | "company"
+  | "invoice"
+  | "payment"
+  | "expense"
+  | "hours"
+  | "subcontract"
+  | "creditNote"
+  | "staff";
 
 export interface TrashItem {
   type: TrashType;
@@ -71,6 +81,21 @@ export const listTrash = createServerFn({ method: "GET" }).handler(
       db.select().from(subcontractEntries).where(isNotNull(subcontractEntries.deletedAt)),
       db.select().from(creditNotes).where(isNotNull(creditNotes.deletedAt)),
     ]);
+
+    // Staff live in their own snapshot table (see src/lib/server/staffTrash.ts).
+    // Only counts are read here — the snapshot itself holds NI / bank details.
+    // If the staff_trash table hasn't been created yet (migration not run), the
+    // rest of the bin must keep working — so a failure here just means "none".
+    const deletedStaff = await db
+      .select({
+        id: staffTrash.id,
+        name: staffTrash.name,
+        deletedAt: staffTrash.deletedAt,
+        salaryLines: sql<number>`jsonb_array_length(${staffTrash.snapshot}->'salaryEntries')`,
+        payrollLines: sql<number>`jsonb_array_length(${staffTrash.snapshot}->'payrollLines')`,
+      })
+      .from(staffTrash)
+      .catch(() => []);
 
     const items: TrashItem[] = [
       ...deletedClients.map((c) => ({
@@ -129,6 +154,17 @@ export const listTrash = createServerFn({ method: "GET" }).handler(
         detail: `${money(n.amountExVat)} · ${n.date}`,
         deletedAt: n.deletedAt!.toISOString(),
       })),
+      ...deletedStaff.map((s) => {
+        const a = Number(s.salaryLines) || 0;
+        const b = Number(s.payrollLines) || 0;
+        return {
+          type: "staff" as const,
+          id: s.id,
+          label: `Staff — ${s.name}`,
+          detail: `${a} salary line${a === 1 ? "" : "s"} · ${b} payroll line${b === 1 ? "" : "s"}`,
+          deletedAt: s.deletedAt.toISOString(),
+        };
+      }),
     ];
 
     return items.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
@@ -169,6 +205,8 @@ function labelForRow(type: TrashType, row: Record<string, unknown> | undefined):
       return `Hours — ${String(row["month"] ?? "")}`;
     case "subcontract":
       return `Subcontract — ${String(row["subcontractorName"] || "")}`;
+    case "staff":
+      return "";
   }
 }
 
@@ -185,6 +223,7 @@ const MODULE_BY_TYPE: Record<TrashType, string> = {
   hours: "hours",
   subcontract: "subcontracting",
   creditNote: "creditNotes",
+  staff: "staff",
 };
 
 const trashRef = z.object({
@@ -197,6 +236,7 @@ const trashRef = z.object({
     "hours",
     "subcontract",
     "creditNote",
+    "staff",
   ]),
   id: z.string(),
 });
@@ -206,6 +246,17 @@ export const restoreFromTrash = createServerFn({ method: "POST" })
   .validator(trashRef)
   .handler(async ({ data }) => {
     const actor = await requireAdmin();
+    if (data.type === "staff") {
+      const { name, note } = await restoreStaffFromTrash(data.id);
+      await recordActivity({
+        actor,
+        action: "restored",
+        module: MODULE_BY_TYPE.staff,
+        entityId: data.id,
+        label: `Staff — ${name}`,
+      });
+      return { ok: true, note };
+    }
     const table = TABLE_BY_TYPE[data.type];
     const [existing] = await db.select().from(table).where(eq(table.id, data.id)).limit(1);
     await db.update(table).set({ deletedAt: null }).where(eq(table.id, data.id));
@@ -216,7 +267,7 @@ export const restoreFromTrash = createServerFn({ method: "POST" })
       entityId: data.id,
       label: labelForRow(data.type, existing as Record<string, unknown> | undefined),
     });
-    return { ok: true };
+    return { ok: true, note: "" };
   });
 
 /** Permanently removes a row — only reachable from the Recycle Bin screen, admin-only, no way back. */
@@ -224,6 +275,17 @@ export const permanentlyDelete = createServerFn({ method: "POST" })
   .validator(trashRef)
   .handler(async ({ data }) => {
     const actor = await requireAdmin();
+    if (data.type === "staff") {
+      const name = await purgeStaffTrash(data.id);
+      await recordActivity({
+        actor,
+        action: "purged",
+        module: MODULE_BY_TYPE.staff,
+        entityId: data.id,
+        label: `Staff — ${name}`,
+      });
+      return { ok: true };
+    }
     const table = TABLE_BY_TYPE[data.type];
     const [existing] = await db.select().from(table).where(eq(table.id, data.id)).limit(1);
     await db.delete(table).where(eq(table.id, data.id));

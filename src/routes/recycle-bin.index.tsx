@@ -41,6 +41,7 @@ const TYPE_LABELS: Record<TrashType, string> = {
   hours: "Hours entry",
   subcontract: "Subcontract",
   creditNote: "Credit Note",
+  staff: "Staff",
 };
 
 function RecycleBinPage() {
@@ -62,11 +63,13 @@ function RecycleBinPageContent() {
 
   const restoreMutation = useMutation({
     mutationFn: (item: TrashItem) => restoreFromTrash({ data: { type: item.type, id: item.id } }),
-    onSuccess: (_, item) => {
+    onSuccess: (res, item) => {
       // The restored row's own list (invoices, payments, ...) is stale now too.
       qc.invalidateQueries({ queryKey: ["trash"] });
       qc.invalidateQueries({ queryKey: [listQueryKeyFor(item.type)] });
-      toast.success("Restored.");
+      if (item.type === "staff") qc.invalidateQueries({ queryKey: ["salary"] });
+      const note = res && typeof res === "object" && "note" in res ? String(res.note) : "";
+      toast.success(note ? `Restored. ${note}` : "Restored.");
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Restore failed."),
   });
@@ -193,5 +196,7 @@ function listQueryKeyFor(type: TrashType): string {
       return "subcontracts";
     case "creditNote":
       return "creditNotes";
+    case "staff":
+      return "staff";
   }
 }

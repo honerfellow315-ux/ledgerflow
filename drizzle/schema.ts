@@ -644,3 +644,19 @@ export const salaryShifts = pgTable(
     index("salary_shifts_staff_idx").on(t.staffId),
   ],
 );
+
+// Recycle bin for staff. Deleting a payroll_staff row cascades to their salary /
+// payroll lines, so the whole person is stored here first (see
+// src/lib/server/staffTrash.ts) and can be restored from the Recycle Bin.
+export const staffTrash = pgTable(
+  "staff_trash",
+  {
+    id: text("id").primaryKey(),
+    staffId: text("staff_id").notNull(),
+    name: text("name").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    deletedBy: text("deleted_by").notNull().default(""),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("staff_trash_staff_idx").on(t.staffId)],
+);
