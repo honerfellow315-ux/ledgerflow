@@ -5,6 +5,7 @@ import {
   FileSpreadsheet,
   Bell,
   Building2,
+  ChevronDown,
   ChevronRight,
   ClipboardList,
   Clock,
@@ -33,6 +34,14 @@ import { signOutAndReload } from "@/components/app/LoginGate";
 import { formatMoney } from "@/lib/ledger/calc";
 import type { Module } from "@/lib/permissions";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type NavPath =
   | "/"
@@ -225,8 +234,18 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function AppHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
   const { data, invoiceViews, invoiceViewsWithCredit } = useLedger();
+  const { user } = usePermissions();
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
+
+  const displayName = user?.displayName || user?.username || "Account";
+  const initials =
+    displayName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w.charAt(0).toUpperCase())
+      .join("") || "U";
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -252,27 +271,26 @@ function AppHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
   return (
     <header
       role="banner"
-      className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-surface/90 px-4 shadow-[0_1px_0_0_var(--color-border),0_4px_12px_-8px_oklch(0.25_0.03_255/0.15)] backdrop-blur-sm lg:px-6"
+      className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-surface/95 px-4 backdrop-blur-sm lg:px-6"
     >
       <button className="lg:hidden" onClick={onMenu} aria-label="Open navigation">
         <Menu className="size-5" />
       </button>
       <div className="flex items-center gap-2">
-        <span className="hidden h-4 w-1 rounded-full bg-gradient-to-b from-primary to-primary-emphasis sm:block" />
-        <h1 className="text-[15px] font-semibold tracking-tight text-foreground">{title}</h1>
+        <h1 className="text-base font-semibold tracking-tight text-foreground">{title}</h1>
       </div>
 
-      <div className="relative ml-auto hidden w-72 md:block">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <div className="relative ml-auto hidden w-80 md:block lg:w-[26rem]">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search clients or invoices…"
           aria-label="Search clients or invoices"
-          className="h-8 w-full rounded-full border border-input bg-surface-muted pl-8 pr-3 text-[13px] outline-none transition-all duration-150 placeholder:text-muted-foreground focus:border-ring focus:bg-surface focus:shadow-[0_0_0_3px_oklch(0.51_0.09_190/0.14)]"
+          className="h-10 w-full rounded-xl border border-border bg-surface-muted/70 pl-9 pr-3 text-[13px] outline-none transition-all duration-150 placeholder:text-muted-foreground focus:border-ring focus:bg-surface focus:shadow-[0_0_0_3px_oklch(0.51_0.09_190/0.14)]"
         />
         {showResults ? (
-          <div className="absolute left-0 right-0 top-9 z-30 max-h-80 overflow-y-auto rounded-sm border border-border bg-popover p-1 shadow-lg">
+          <div className="absolute left-0 right-0 top-12 z-30 max-h-80 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-lg">
             {results.clients.length === 0 && results.invoices.length === 0 ? (
               <p className="px-2 py-3 text-xs text-muted-foreground">No matches found.</p>
             ) : null}
@@ -309,7 +327,7 @@ function AppHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
       <Popover>
         <PopoverTrigger asChild>
           <button
-            className="relative ml-auto flex size-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:border-primary/30 hover:bg-accent hover:text-accent-foreground md:ml-0"
+            className="relative ml-auto flex size-10 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:border-primary/30 hover:bg-accent hover:text-accent-foreground md:ml-0"
             aria-label="Notifications"
           >
             <Bell className="size-4" />
@@ -339,16 +357,40 @@ function AppHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
         </PopoverContent>
       </Popover>
 
-      <button
-        type="button"
-        onClick={() => void signOutAndReload()}
-        className="flex h-8 items-center gap-1.5 rounded-full border border-border px-3 text-[12px] font-medium text-muted-foreground transition-colors duration-150 hover:border-primary/30 hover:bg-accent hover:text-accent-foreground"
-        aria-label="Log out"
-        title="Log out"
-      >
-        <LogOut className="size-3.5" />
-        <span className="hidden sm:inline">Log out</span>
-      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-10 items-center gap-2 rounded-full border border-border pl-1 pr-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:border-primary/30 hover:bg-accent"
+            aria-label="Account menu"
+          >
+            <span className="flex size-8 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+              {initials}
+            </span>
+            <span className="hidden max-w-32 truncate sm:inline">{displayName}</span>
+            <ChevronDown className="size-3.5 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuLabel className="font-normal">
+            <p className="truncate text-[13px] font-semibold text-foreground">{displayName}</p>
+            {user?.username ? (
+              <p className="truncate text-xs text-muted-foreground">
+                {user.username}
+                {user.role === "admin" ? " · Administrator" : ""}
+              </p>
+            ) : null}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => void signOutAndReload()}
+            className="cursor-pointer text-[13px]"
+          >
+            <LogOut />
+            Log out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </header>
   );
 }

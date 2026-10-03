@@ -11,6 +11,7 @@ export function SummaryCard({
   onClick,
   active = false,
   title,
+  premium = false,
 }: {
   label: string;
   value: string;
@@ -22,6 +23,8 @@ export function SummaryCard({
   /** Highlights the card while the filter it controls is on. */
   active?: boolean;
   title?: string;
+  /** Dashboard-style card: larger number, softer accent, rounder corners. */
+  premium?: boolean;
 }) {
   const accent = {
     default: "text-primary bg-gradient-to-br from-info-soft to-info-soft/40",
@@ -55,18 +58,32 @@ export function SummaryCard({
             },
           }
         : {})}
+      style={premium ? { borderRadius: 14 } : undefined}
       className={cn(
-        "panel-interactive relative flex min-h-28 items-start justify-between gap-3 overflow-hidden px-4 py-4",
+        "panel-interactive relative flex items-start justify-between gap-3 overflow-hidden",
+        premium ? "min-h-32 px-5 py-5" : "min-h-28 px-4 py-4",
         clickable && "cursor-pointer text-left",
         active && "ring-2 ring-warning/60",
       )}
     >
-      <span aria-hidden className={cn("absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r", bar)} />
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-x-0 top-0 bg-gradient-to-r",
+          premium ? "h-[2px] opacity-50" : "h-[3px]",
+          bar,
+        )}
+      />
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
           {label}
         </p>
-        <p className="num mt-2 truncate text-xl font-semibold leading-tight text-foreground">
+        <p
+          className={cn(
+            "num truncate font-semibold leading-tight text-foreground",
+            premium ? "mt-3 text-[28px] tracking-tight" : "mt-2 text-xl",
+          )}
+        >
           {value}
         </p>
         {sublabel ? <p className="mt-1 text-xs text-muted-foreground">{sublabel}</p> : null}
@@ -74,7 +91,8 @@ export function SummaryCard({
       {Icon ? (
         <span
           className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-lg shadow-sm ring-1 ring-inset ring-black/[0.03]",
+            "flex shrink-0 items-center justify-center shadow-sm ring-1 ring-inset ring-black/[0.03]",
+            premium ? "size-10 rounded-xl" : "size-9 rounded-lg",
             accent,
           )}
         >
