@@ -98,8 +98,14 @@ export interface Invoice {
   amountExVat: number;
   /** Set when this invoice was billed as Hours × Rate rather than a fixed amount. */
   hours?: number;
-  /** Rate per hour used with `hours` to compute `amountExVat`. */
+  /** Rate per hour used with `hours` to compute `amountExVat`. When a payroll
+   * split is set (below), this is the rate for the NON-payroll (remaining) hours. */
   rate?: number;
+  /** Payroll split (Hours × Rate invoices only): how many of `hours` were
+   * already paid through payroll. Billed at `payrollRate`, with no VAT. */
+  payrollHours?: number;
+  /** Rate per hour for the payroll hours (e.g. 12.45). */
+  payrollRate?: number;
   vatIncluded: boolean;
   vatRate: number; // percent
   /** How VAT is calculated against this invoice. Defaults to "full". */
@@ -161,7 +167,10 @@ export interface HoursEntry {
   payrollHours: number;
   managementPayrollHours: number;
   unpaidHours: number;
+  /** Rate for the remaining (billable) hours. */
   rate: number;
+  /** Rate the payroll hours were paid at (e.g. 12.45). Optional / 0 = not set. */
+  payrollRate?: number;
   notes?: string;
   /** Invoice this month's hours were billed on, once raised. */
   invoiceId?: string;

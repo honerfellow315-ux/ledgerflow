@@ -29,6 +29,7 @@ import {
   amountIncVat,
   paidForInvoice,
   invoiceHoursDisplay,
+  hoursInvoiceAmount,
   round2,
   endClientOptions,
   suggestNextInvoiceNumber,
@@ -80,6 +81,8 @@ const blank = {
   amountExVat: "",
   hours: "",
   rate: "",
+  payrollHours: "",
+  payrollRate: "",
   vatIncluded: true,
   vatRate: "20",
   vatMode: "full" as VatMode,
@@ -154,12 +157,20 @@ export function InvoiceDialog({
         amountExVat: String(invoice.amountExVat),
         hours: invoice.hours != null ? String(invoice.hours) : "",
         rate: invoice.rate != null ? String(invoice.rate) : "",
+        payrollHours: invoice.payrollHours != null ? String(invoice.payrollHours) : "",
+        payrollRate: invoice.payrollRate != null ? String(invoice.payrollRate) : "",
         vatIncluded: invoice.vatIncluded,
         vatRate: String(invoice.vatRate),
         vatMode: invoice.vatMode ?? "full",
-        // Frozen value if already saved (> 0); a missing OR 0 value (legacy rows / DB
-        // default 0) falls back to what has been paid so far, so the field is prefilled.
-        vatPaidBefore: String(invoice.vatPaidBefore || paidForInvoice(invoice.id, data.payments)),
+        // Frozen value if already saved (> 0). A payroll-split invoice falls back to
+        // its payroll value (never to "all payments so far"); other legacy rows (missing
+        // OR 0) fall back to what has been paid so far, so the field is prefilled.
+        vatPaidBefore: String(
+          invoice.vatPaidBefore ||
+            (invoice.payrollHours && invoice.payrollRate
+              ? round2(invoice.payrollHours * invoice.payrollRate)
+              : paidForInvoice(invoice.id, data.payments)),
+        ),
         paymentTerms: invoice.paymentTerms,
         notes: invoice.notes ?? "",
         lineItems:
@@ -201,6 +212,8 @@ export function InvoiceDialog({
         amountExVat: String(duplicateFrom.amountExVat),
         hours: duplicateFrom.hours != null ? String(duplicateFrom.hours) : "",
         rate: duplicateFrom.rate != null ? String(duplicateFrom.rate) : "",
+        payrollHours: duplicateFrom.payrollHours != null ? String(duplicateFrom.payrollHours) : "",
+        payrollRate: duplicateFrom.payrollRate != null ? String(duplicateFrom.payrollRate) : "",
         vatIncluded: duplicateFrom.vatIncluded,
         vatRate: String(duplicateFrom.vatRate),
         vatMode: duplicateFrom.vatMode ?? "full",
@@ -280,9 +293,12 @@ export function InvoiceDialog({
 
   const computedAmount = useMemo(() => {
     if (form.billingType === "hours") {
-      const hrs = Number(form.hours) || 0;
-      const rate = Number(form.rate) || 0;
-      return round2(hrs * rate);
+      return hoursInvoiceAmount({
+        hours: Number(form.hours) || 0,
+        rate: Number(form.rate) || 0,
+        payrollHours: Number(form.payrollHours) || 0,
+        payrollRate: Number(form.payrollRate) || 0,
+      });
     }
     if (form.billingType === "items") {
       const sum = form.lineItems.reduce(
@@ -292,7 +308,29 @@ export function InvoiceDialog({
       return round2(sum);
     }
     return null;
-  }, [form.billingType, form.hours, form.rate, form.lineItems]);
+  }, [
+    form.billingType,
+    form.hours,
+    form.rate,
+    form.payrollHours,
+    form.payrollRate,
+    form.lineItems,
+  ]);
+
+  // Payroll split: when payroll hours + payroll rate are both filled, the payroll
+  // part is "already paid, no VAT", so VAT is automatically charged on the
+  // remaining hours only (VAT basis = remaining, already-paid = payroll value).
+  const setSplit = (patch: Partial<typeof blank>) =>
+    setForm((f) => {
+      const next = { ...f, ...patch };
+      const pH = Number(next.payrollHours) || 0;
+      const pR = Number(next.payrollRate) || 0;
+      if (next.billingType === "hours" && pH > 0 && pR > 0) {
+        next.vatMode = "remaining";
+        next.vatPaidBefore = String(round2(pH * pR));
+      }
+      return next;
+    });
 
   const preview = useMemo(() => {
     const draft = {
@@ -349,7 +387,11 @@ export function InvoiceDialog({
       rate = Number(form.rate);
       if (!Number.isFinite(hours) || hours <= 0) return fail("Enter hours greater than zero.");
       if (!Number.isFinite(rate) || rate <= 0) return fail("Enter a rate greater than zero.");
-      amount = round2(hours * rate);
+      const pH = Number(form.payrollHours) || 0;
+      const pR = Number(form.payrollRate) || 0;
+      if (pH > 0 && pR <= 0) return fail("Enter the payroll rate for the payroll hours.");
+      if (pH > hours) return fail("Payroll hours cannot be more than the total hours.");
+      amount = hoursInvoiceAmount({ hours, rate, payrollHours: pH, payrollRate: pR });
     } else if (form.billingType === "items") {
       if (form.lineItems.length === 0) return fail("Add at least one line item.");
       lineItemsPayload = form.lineItems.map((li, i) => {
@@ -396,6 +438,15 @@ export function InvoiceDialog({
       amountExVat: amount,
       hours,
       rate,
+      // 0 (not undefined) so removing the split on edit really clears it server-side.
+      payrollHours:
+        form.billingType === "hours" && Number(form.payrollRate) > 0
+          ? Math.max(0, Number(form.payrollHours) || 0)
+          : 0,
+      payrollRate:
+        form.billingType === "hours" && Number(form.payrollHours) > 0
+          ? Math.max(0, Number(form.payrollRate) || 0)
+          : 0,
       vatIncluded: form.vatIncluded,
       vatRate: form.vatIncluded ? Number(form.vatRate) || 0 : 0,
       vatMode: form.vatMode,
@@ -831,7 +882,18 @@ export function InvoiceDialog({
                             hoursEntryId: v,
                             hours: entry ? String(entry.totalHours) : f.hours,
                             rate: entry ? String(entry.rate) : f.rate,
+                            // Payroll split comes across too, so the invoice is
+                            // priced exactly like the Hours entry.
+                            payrollHours:
+                              entry && entry.payrollHours > 0
+                                ? String(entry.payrollHours)
+                                : f.payrollHours,
+                            payrollRate:
+                              entry && (entry.payrollRate ?? 0) > 0
+                                ? String(entry.payrollRate)
+                                : f.payrollRate,
                           }));
+                          if (entry) setSplit({});
                         }}
                       >
                         <SelectTrigger id="inv-hours-entry">
@@ -872,8 +934,63 @@ export function InvoiceDialog({
                     />
                   </Field>
                   <Field
+                    label="Payroll Hours (optional)"
+                    htmlFor="inv-payroll-hours"
+                    hint="Hours already paid through payroll. Leave blank for a normal single-rate invoice."
+                  >
+                    <Input
+                      id="inv-payroll-hours"
+                      type="number"
+                      min="0"
+                      step="0.25"
+                      value={form.payrollHours}
+                      onChange={(e) => setSplit({ payrollHours: e.target.value })}
+                    />
+                  </Field>
+                  <Field
+                    label="Payroll Rate (£/hr)"
+                    htmlFor="inv-payroll-rate"
+                    hint="Rate the payroll hours are valued at. The Rate above is then used only for the remaining hours."
+                  >
+                    <Input
+                      id="inv-payroll-rate"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.payrollRate}
+                      onChange={(e) => setSplit({ payrollRate: e.target.value })}
+                    />
+                  </Field>
+                  {Number(form.payrollHours) > 0 && Number(form.payrollRate) > 0 ? (
+                    <div className="rounded-sm border border-border bg-surface-muted px-4 py-3 text-[12.5px] sm:col-span-2">
+                      <p>
+                        Payroll: {formatHours(Number(form.payrollHours))} h × £{form.payrollRate} ={" "}
+                        <span className="num font-semibold">
+                          {formatMoney(round2(Number(form.payrollHours) * Number(form.payrollRate)))}
+                        </span>{" "}
+                        (already paid, no VAT)
+                      </p>
+                      <p>
+                        Remaining:{" "}
+                        {formatHours(
+                          Math.max(0, (Number(form.hours) || 0) - Number(form.payrollHours)),
+                        )}{" "}
+                        h × £{form.rate || 0} ={" "}
+                        <span className="num font-semibold">
+                          {formatMoney(
+                            round2(
+                              Math.max(0, (Number(form.hours) || 0) - Number(form.payrollHours)) *
+                                (Number(form.rate) || 0),
+                            ),
+                          )}
+                        </span>{" "}
+                        (VAT is charged on this part only)
+                      </p>
+                    </div>
+                  ) : null}
+                  <Field
                     label="Amount ex VAT (£)"
-                    hint="Calculated automatically from Hours × Rate."
+                    hint="Calculated automatically from Hours × Rate (payroll part at payroll rate, if set)."
                     className="sm:col-span-2"
                   >
                     <Input readOnly disabled value={formatMoney(computedAmount ?? 0)} />

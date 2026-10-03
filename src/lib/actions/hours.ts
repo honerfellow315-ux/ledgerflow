@@ -16,6 +16,12 @@ const hoursInput = z.object({
   managementPayrollHours: z.number().default(0),
   unpaidHours: z.number().default(0),
   rate: z.number().default(0),
+  // Rate the payroll hours were paid at. 0 / missing = not set (NULL).
+  payrollRate: z
+    .number()
+    .min(0)
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v > 0 ? v : null)),
   notes: z.string().optional(),
   // Optional link to the invoice raised for this month's hours — see
   // drizzle/schema.ts hoursEntries.invoiceId. Transforms to `null` (not

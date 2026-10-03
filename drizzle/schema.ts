@@ -194,6 +194,10 @@ export const invoices = pgTable("invoices", {
   // amount. `amountExVat` above always holds the final total either way.
   hours: numeric("hours", { precision: 10, scale: 2, mode: "number" }),
   rate: money("rate"),
+  // Payroll split: of `hours`, this many were paid through payroll at
+  // `payrollRate` (no VAT). The remaining hours use `rate`. NULL = no split.
+  payrollHours: numeric("payroll_hours", { precision: 10, scale: 2, mode: "number" }),
+  payrollRate: money("payroll_rate"),
   vatIncluded: boolean("vat_included").notNull().default(false),
   vatRate: numeric("vat_rate", { precision: 5, scale: 2, mode: "number" }).notNull().default(20),
   paymentTerms: text("payment_terms").notNull().default(""),
@@ -305,6 +309,8 @@ export const hoursEntries = pgTable("hours_entries", {
     .notNull()
     .default(0),
   rate: money("rate").notNull().default(0),
+  // Rate the payroll hours were paid at (e.g. 12.45). NULL = not set.
+  payrollRate: money("payroll_rate"),
   notes: text("notes"),
   // The invoice raised for this month's hours, if any — same pattern as
   // subcontractEntries.invoiceId below. Lets the Hours screen show that an

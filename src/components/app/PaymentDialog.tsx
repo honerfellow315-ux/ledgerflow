@@ -20,7 +20,14 @@ import {
 } from "@/components/ui/select";
 import { Field } from "./Field";
 import { useLedger } from "@/lib/ledger/store";
-import { formatHours, formatMoney, hoursRemainingToPay, round2 } from "@/lib/ledger/calc";
+import {
+  formatHours,
+  formatMoney,
+  hasPayrollSplit,
+  hoursRemainingToPay,
+  payrollValue,
+  round2,
+} from "@/lib/ledger/calc";
 import type { Payment, PaymentMethod } from "@/lib/ledger/types";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -135,6 +142,14 @@ export function PaymentDialog({
       ? payment && payment.invoiceId === selected.id
         ? selected.outstanding + payment.amount
         : selected.effectiveOutstanding
+      : 0;
+
+  // Payroll split invoice (e.g. 10,000 h at the payroll rate + remaining hours at
+  // the billing rate): the payroll part is paid first and has its own figure, so
+  // offer it as a one-click amount. Method does not matter (Payroll, Bank, Cash...).
+  const payrollDue =
+    !payment && selected && hasPayrollSplit(selected)
+      ? round2(payrollValue(selected) - selected.paid)
       : 0;
 
   const fail = (message: string): void => {
@@ -376,6 +391,27 @@ export function PaymentDialog({
               disabled={amountMode === "hours"}
             />
           </Field>
+          {payrollDue > 0.004 && selected && amountMode === "amount" ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3 sm:col-span-2">
+              <p className="text-[12.5px]">
+                Payroll part of this invoice: {formatHours(selected.payrollHours ?? 0)} h × £
+                {selected.payrollRate} ={" "}
+                <span className="num font-semibold">{formatMoney(payrollDue)}</span> still to record.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setAmount(String(payrollDue));
+                  setNotes((n) => n || "Payroll payment");
+                  if (data.settings.paymentMethods.includes("Payroll")) setMethod("Payroll");
+                }}
+              >
+                Use payroll amount
+              </Button>
+            </div>
+          ) : null}
           <Field label="Reference" htmlFor="pm-ref">
             <Input
               id="pm-ref"

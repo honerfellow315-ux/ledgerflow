@@ -341,6 +341,45 @@ export function hoursRemainingToPay(entry: HoursEntry, payments: Payment[]): num
   return Math.max(0, round2(remainingHours(entry) - hoursPaidForEntry(entry.id, payments)));
 }
 
+/* ---------- Payroll split (two rates on one hours invoice) ---------- */
+
+/** True when an Hours × Rate invoice has a payroll part (payrollHours at payrollRate). */
+export function hasPayrollSplit(
+  invoice: Pick<Invoice, "hours"> & Partial<Pick<Invoice, "payrollHours" | "payrollRate">>,
+): boolean {
+  return invoice.hours != null && (invoice.payrollHours ?? 0) > 0 && (invoice.payrollRate ?? 0) > 0;
+}
+
+/** Ex-VAT value of the payroll hours = payrollHours x payrollRate (0 when no split). */
+export function payrollValue(
+  invoice: Partial<Pick<Invoice, "payrollHours" | "payrollRate">>,
+): number {
+  return round2((invoice.payrollHours ?? 0) * (invoice.payrollRate ?? 0));
+}
+
+/**
+ * Ex-VAT amount of an Hours invoice with an optional payroll split:
+ *   payrollHours x payrollRate  +  (hours - payrollHours) x rate
+ * Without a split this is just hours x rate (unchanged behaviour).
+ */
+export function hoursInvoiceAmount(args: {
+  hours: number;
+  rate: number;
+  payrollHours?: number;
+  payrollRate?: number;
+}): number {
+  const { hours, rate } = args;
+  const pHours = Math.min(Math.max(0, args.payrollHours ?? 0), hours);
+  const pRate = args.payrollRate ?? 0;
+  if (pHours <= 0 || pRate <= 0) return round2(hours * rate);
+  return round2(pHours * pRate + (hours - pHours) * rate);
+}
+
+/** Payroll value of an Hours entry (payroll hours x payroll rate); 0 when no payroll rate set. */
+export function entryPayrollValue(entry: Pick<HoursEntry, "payrollHours" | "payrollRate">): number {
+  return round2((entry.payrollHours ?? 0) * (entry.payrollRate ?? 0));
+}
+
 /**
  * Whether this invoice tracks hours at all. Only invoices billed as
  * Hours × Rate have `hours` set (see InvoiceDialog's "Billing Type"); a
@@ -392,12 +431,24 @@ export function remainingInvoiceHours(
  * hours. Returns 0 for invoices that don't track hours.
  */
 export function paidHoursForInvoice(
-  invoice: Pick<Invoice, "hours">,
+  invoice: Pick<Invoice, "hours"> & Partial<Pick<Invoice, "payrollHours" | "payrollRate">>,
   paid: number,
   total: number,
 ): number {
   if (!invoiceTracksHours(invoice) || total <= 0.004 || paid <= 0) return 0;
   const hours = invoice.hours ?? 0;
+  if (hasPayrollSplit(invoice)) {
+    // Two rates on one invoice: the payroll payment clears the payroll hours at
+    // the payroll rate first; everything paid after that clears the remaining
+    // hours in proportion to the remaining part of the total (VAT included).
+    const pHours = invoice.payrollHours ?? 0;
+    const pValue = payrollValue(invoice);
+    if (paid <= pValue + 0.004) return Math.min(pHours, round2(paid / (invoice.payrollRate ?? 1)));
+    const restTotal = round2(total - pValue);
+    if (restTotal <= 0.004) return hours;
+    const restHours = Math.max(0, hours - pHours);
+    return Math.min(hours, round2(pHours + restHours * ((paid - pValue) / restTotal)));
+  }
   return Math.min(hours, round2(hours * (paid / total)));
 }
 
@@ -408,7 +459,7 @@ export function paidHoursForInvoice(
  * (remainingInvoiceHours) is intentionally unchanged.
  */
 export function invoiceHoursDisplay(
-  invoice: Pick<Invoice, "id" | "hours">,
+  invoice: Pick<Invoice, "id" | "hours"> & Partial<Pick<Invoice, "payrollHours" | "payrollRate">>,
   subcontracts: SubcontractEntry[],
   paid: number,
   total: number,

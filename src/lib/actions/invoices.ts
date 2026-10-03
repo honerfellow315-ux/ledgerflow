@@ -36,6 +36,16 @@ const invoiceInput = z.object({
   amountExVat: z.number(),
   hours: z.number().optional(),
   rate: z.number().optional(),
+  // Payroll split. 0 / missing clears it (stored as NULL), so switching an
+  // invoice back to a single rate really removes the split.
+  payrollHours: z
+    .number()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v > 0 ? v : null)),
+  payrollRate: z
+    .number()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v > 0 ? v : null)),
   vatIncluded: z.boolean().default(false),
   vatRate: z.number().default(20),
   vatMode: z.enum(["full", "remaining"]).default("full"),

@@ -27,6 +27,8 @@ import {
   formatMoney,
   hoursValue,
   remainingHours,
+  entryPayrollValue,
+  round2,
 } from "@/lib/ledger/calc";
 import type { HoursEntry } from "@/lib/ledger/types";
 
@@ -38,6 +40,7 @@ const blank = {
   managementPayrollHours: "",
   unpaidHours: "",
   rate: "",
+  payrollRate: "",
   notes: "",
   invoiceId: "",
 };
@@ -78,6 +81,7 @@ export function HoursDialog({
         managementPayrollHours: String(entry.managementPayrollHours),
         unpaidHours: String(entry.unpaidHours),
         rate: String(entry.rate),
+        payrollRate: entry.payrollRate != null ? String(entry.payrollRate) : "",
         notes: entry.notes ?? "",
         invoiceId: entry.invoiceId ?? "",
       });
@@ -126,8 +130,16 @@ export function HoursDialog({
       managementPayrollHours: Number(form.managementPayrollHours) || 0,
       unpaidHours: Number(form.unpaidHours) || 0,
       rate: Number(form.rate) || 0,
+      payrollRate: Number(form.payrollRate) || 0,
     } as HoursEntry;
-    return { remaining: remainingHours(draft), value: hoursValue(draft) };
+    const payroll = entryPayrollValue(draft);
+    return {
+      remaining: remainingHours(draft),
+      value: hoursValue(draft),
+      payroll,
+      // Payroll part + remaining part = the invoice amount ex VAT for this entry.
+      total: round2(payroll + hoursValue(draft)),
+    };
   }, [form]);
 
   const validate = (): Errors => {
@@ -153,6 +165,11 @@ export function HoursDialog({
       if (!Number.isFinite(value)) next[key] = `${label} must be a number.`;
       else if (value < 0) next[key] = `${label} cannot be negative.`;
       else if (!allowZero && value <= 0) next[key] = `${label} must be greater than zero.`;
+    }
+
+    if (form.payrollRate.trim() !== "") {
+      const pr = Number(form.payrollRate);
+      if (!Number.isFinite(pr) || pr < 0) next.payrollRate = "Payroll rate must be a number, 0 or more.";
     }
 
     if (
@@ -186,6 +203,8 @@ export function HoursDialog({
       managementPayrollHours: Number(form.managementPayrollHours),
       unpaidHours: Number(form.unpaidHours),
       rate: Number(form.rate),
+      // 0 = no payroll rate (server stores NULL).
+      payrollRate: Number(form.payrollRate) || 0,
       notes: form.notes.trim(),
       // Always sent (never omitted), plain "" for none — the server
       // transforms blank to an explicit null so clearing a previous link
@@ -306,6 +325,21 @@ export function HoursDialog({
             />
           </Field>
           <Field
+            label="Payroll Rate (£ per hour)"
+            htmlFor="hr-payroll-rate"
+            error={errors.payrollRate}
+            hint="Optional. Rate the payroll hours were paid at (e.g. 12.45). The Rate above is for the remaining hours."
+          >
+            <Input
+              id="hr-payroll-rate"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.payrollRate}
+              onChange={(e) => set("payrollRate", e.target.value)}
+            />
+          </Field>
+          <Field
             label="Invoice"
             htmlFor="hr-invoice"
             hint={
@@ -331,6 +365,9 @@ export function HoursDialog({
                   invoiceId: v,
                   totalHours: inv?.hours != null ? String(inv.hours) : f.totalHours,
                   rate: inv?.rate != null ? String(inv.rate) : f.rate,
+                  payrollHours:
+                    inv?.payrollHours != null ? String(inv.payrollHours) : f.payrollHours,
+                  payrollRate: inv?.payrollRate != null ? String(inv.payrollRate) : f.payrollRate,
                 }));
                 setErrors((e) => ({ ...e, invoiceId: undefined }));
               }}
@@ -374,6 +411,22 @@ export function HoursDialog({
             </p>
             <p className="num text-[15px] font-semibold">{formatMoney(preview.value)}</p>
           </div>
+          {preview.payroll > 0 ? (
+            <>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Payroll value (no VAT)
+                </p>
+                <p className="num text-[15px] font-semibold">{formatMoney(preview.payroll)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Payroll + remaining (ex VAT)
+                </p>
+                <p className="num text-[15px] font-semibold">{formatMoney(preview.total)}</p>
+              </div>
+            </>
+          ) : null}
         </div>
 
         <DialogFooter>
