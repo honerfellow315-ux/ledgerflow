@@ -14,17 +14,28 @@ import {
   IdCard,
   LayoutDashboard,
   LockKeyhole,
+  LogOut,
   Pencil,
   Plus,
   Receipt,
   ReceiptText,
+  RotateCcw,
   Settings as SettingsIcon,
   ShieldCheck,
   Trash2,
   Users as UsersIcon,
   Wallet,
 } from "@/lib/icons";
-import { listUsers, createUser, updateUser, deleteUser } from "@/lib/actions/users";
+import {
+  listUsers,
+  createUser,
+  updateUser,
+  deleteUser,
+  generateActivationCode,
+  resetUserTotp,
+  revokeUserSessions,
+} from "@/lib/actions/users";
+import { MIN_PASSWORD_LENGTH, validatePassword } from "@/lib/passwordPolicy";
 import {
   MODULES,
   MODULE_ACTIONS,
@@ -73,6 +84,78 @@ export const Route = createFileRoute("/users/")({
 
 type UserRow = Awaited<ReturnType<typeof listUsers>>[number];
 
+/** Server functions reject with a `Response` for 4xx errors — read its text. */
+async function errorText(err: unknown, fallback: string): Promise<string> {
+  if (err instanceof Response) {
+    const t = await err.text().catch(() => "");
+    return t || fallback;
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+/** Short status line shown under the username. */
+function securityStatus(u: UserRow): { label: string; tone: "ok" | "warn" | "bad" } | null {
+  if (u.lockedUntil && new Date(u.lockedUntil).getTime() > Date.now()) {
+    return { label: "Locked (too many failed logins)", tone: "bad" };
+  }
+  if (u.role === "admin") {
+    return u.totpEnabled
+      ? { label: "2FA on", tone: "ok" }
+      : { label: "2FA not set up yet", tone: "warn" };
+  }
+  if (u.mustActivate) {
+    const expired =
+      !u.activationExpiresAt || new Date(u.activationExpiresAt).getTime() < Date.now();
+    return {
+      label: expired ? "Needs a new activation code" : "Waiting for activation",
+      tone: "warn",
+    };
+  }
+  return null;
+}
+
+/** One-time display of an activation code. */
+function ActivationCodeDialog({
+  info,
+  onClose,
+}: {
+  info: { username: string; code: string } | null;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open={!!info} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Activation code for {info?.username}</DialogTitle>
+          <DialogDescription>
+            Give this code to the user (phone or in person). They enter it at their next login and
+            then choose their own password.
+          </DialogDescription>
+        </DialogHeader>
+        <p className="rounded-lg border border-border bg-muted/50 py-5 text-center font-mono text-3xl font-semibold tracking-[0.25em]">
+          {info?.code}
+        </p>
+        <p className="text-xs leading-5 text-muted-foreground">
+          Valid for 24 hours, works once, and is <strong>shown only now</strong>. If it is lost,
+          generate a new one.
+        </p>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (info) void navigator.clipboard?.writeText(info.code);
+              toast.success("Code copied.");
+            }}
+          >
+            Copy
+          </Button>
+          <Button onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const MODULE_ICONS: Record<Module, typeof LayoutDashboard> = {
   dashboard: LayoutDashboard,
   clients: UsersIcon,
@@ -101,13 +184,45 @@ function UsersPage() {
 }
 
 function UsersPageContent() {
-  const { isAdmin, ready } = usePermissions();
+  const { isAdmin, ready, user: me } = usePermissions();
   const qc = useQueryClient();
   const usersQ = useQuery({ queryKey: ["users"], queryFn: () => listUsers() });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [toDelete, setToDelete] = useState<UserRow | null>(null);
+  const [codeInfo, setCodeInfo] = useState<{ username: string; code: string } | null>(null);
+  const [toReset2fa, setToReset2fa] = useState<UserRow | null>(null);
+
+  const refreshUsers = () => qc.invalidateQueries({ queryKey: ["users"] });
+
+  const codeMutation = useMutation({
+    mutationFn: (id: string) => generateActivationCode({ data: { id } }),
+    onSuccess: (r) => {
+      setCodeInfo({ username: r.username, code: r.code });
+      void refreshUsers();
+    },
+    onError: async (err: unknown) =>
+      toast.error(await errorText(err, "Could not generate a code.")),
+  });
+
+  const resetTotpMutation = useMutation({
+    mutationFn: (id: string) => resetUserTotp({ data: { id } }),
+    onSuccess: () => {
+      toast.success("2FA reset. They will set it up again at next login.");
+      void refreshUsers();
+    },
+    onError: async (err: unknown) => toast.error(await errorText(err, "Reset failed.")),
+  });
+
+  const signOutMutation = useMutation({
+    mutationFn: (id: string) => revokeUserSessions({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Signed out of all devices.");
+      void refreshUsers();
+    },
+    onError: async (err: unknown) => toast.error(await errorText(err, "Action failed.")),
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteUser({ data: { id } }),
@@ -170,6 +285,22 @@ function UsersPageContent() {
                   <TR key={u.id}>
                     <TD mono className="font-medium">
                       {u.username}
+                      {(() => {
+                        const st = securityStatus(u);
+                        if (!st) return null;
+                        return (
+                          <span
+                            className={cn(
+                              "mt-0.5 block font-sans text-[11px] font-normal",
+                              st.tone === "ok" && "text-emerald-600",
+                              st.tone === "warn" && "text-amber-600",
+                              st.tone === "bad" && "text-destructive",
+                            )}
+                          >
+                            {st.label}
+                          </span>
+                        );
+                      })()}
                     </TD>
                     <TD>{u.displayName || "—"}</TD>
                     <TD>
@@ -182,6 +313,41 @@ function UsersPageContent() {
                     </TD>
                     <TD align="right">
                       <div className="flex justify-end gap-1">
+                        {u.role !== "admin" ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7"
+                            aria-label={`Generate activation code for ${u.username}`}
+                            title="Generate activation code"
+                            disabled={codeMutation.isPending}
+                            onClick={() => codeMutation.mutate(u.id)}
+                          >
+                            <LockKeyhole className="size-3.5" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7"
+                            aria-label={`Reset 2FA for ${u.username}`}
+                            title="Reset 2FA"
+                            disabled={u.username === me?.username}
+                            onClick={() => setToReset2fa(u)}
+                          >
+                            <RotateCcw className="size-3.5" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          aria-label={`Sign ${u.username} out of all devices`}
+                          title="Sign out of all devices"
+                          onClick={() => signOutMutation.mutate(u.id)}
+                        >
+                          <LogOut className="size-3.5" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -213,7 +379,26 @@ function UsersPageContent() {
         )}
       </Panel>
 
-      <UserDialog open={dialogOpen} onOpenChange={setDialogOpen} user={editing} />
+      <UserDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        user={editing}
+        onCreatedCode={setCodeInfo}
+      />
+
+      <ActivationCodeDialog info={codeInfo} onClose={() => setCodeInfo(null)} />
+
+      <ConfirmDialog
+        open={!!toReset2fa}
+        onOpenChange={(v) => !v && setToReset2fa(null)}
+        title="Reset two-factor login?"
+        description={`${toReset2fa?.username ?? "This admin"} will be signed out and must set up their authenticator app again at next login.`}
+        confirmLabel="Reset 2FA"
+        onConfirm={() => {
+          if (toReset2fa) resetTotpMutation.mutate(toReset2fa.id);
+          setToReset2fa(null);
+        }}
+      />
 
       <ConfirmDialog
         open={!!toDelete}
@@ -234,10 +419,12 @@ function UserDialog({
   open,
   onOpenChange,
   user,
+  onCreatedCode,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   user?: UserRow | null;
+  onCreatedCode: (info: { username: string; code: string }) => void;
 }) {
   const qc = useQueryClient();
   const [username, setUsername] = useState("");
@@ -280,13 +467,12 @@ function UserDialog({
       toast.error("Username is required.");
       return;
     }
-    if (!user && password.length < 8) {
-      toast.error("Password must be at least 8 characters.");
-      return;
-    }
-    if (password && password.length < 8) {
-      toast.error("Password must be at least 8 characters.");
-      return;
+    if (!user || password) {
+      const problem = validatePassword(password, username);
+      if (problem) {
+        toast.error(problem);
+        return;
+      }
     }
 
     setSaving(true);
@@ -305,7 +491,7 @@ function UserDialog({
         });
         toast.success("User updated.");
       } else {
-        await createUser({
+        const created = await createUser({
           data: {
             username: username.trim(),
             password,
@@ -315,11 +501,14 @@ function UserDialog({
           },
         });
         toast.success("User created.");
+        if (created && "activationCode" in created && created.activationCode) {
+          onCreatedCode({ username: created.username, code: created.activationCode });
+        }
       }
       await qc.invalidateQueries({ queryKey: ["users"] });
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed.");
+      toast.error(await errorText(err, "Save failed."));
     } finally {
       setSaving(false);
     }
@@ -366,7 +555,7 @@ function UserDialog({
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={user ? "••••••••" : "At least 8 characters"}
+              placeholder={user ? "••••••••" : `At least ${MIN_PASSWORD_LENGTH} characters`}
             />
           </div>
           <div>

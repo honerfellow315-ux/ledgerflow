@@ -11,6 +11,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import * as schema from "../drizzle/schema";
 import { fullPermissions } from "../src/lib/permissions";
+import { validatePassword } from "../src/lib/passwordPolicy";
 
 async function main() {
   const [username, password] = process.argv.slice(2);
@@ -18,8 +19,9 @@ async function main() {
     console.error("Usage: bun run scripts/create-admin.ts <username> <password>");
     process.exit(1);
   }
-  if (password.length < 6) {
-    console.error("Password must be at least 6 characters.");
+  const problem = validatePassword(password, username);
+  if (problem) {
+    console.error(problem);
     process.exit(1);
   }
 

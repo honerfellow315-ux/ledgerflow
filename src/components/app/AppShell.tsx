@@ -13,6 +13,7 @@ import {
   History,
   IdCard,
   LayoutDashboard,
+  LogOut,
   Menu,
   Receipt,
   ReceiptText,
@@ -27,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useLedger } from "@/lib/ledger/store";
 import { usePermissions } from "@/lib/ledger/permissions";
+import { signOutAndReload } from "@/components/app/LoginGate";
 import { formatMoney } from "@/lib/ledger/calc";
 import type { Module } from "@/lib/permissions";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -335,6 +337,17 @@ function AppHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
           </div>
         </PopoverContent>
       </Popover>
+
+      <button
+        type="button"
+        onClick={() => void signOutAndReload()}
+        className="flex h-8 items-center gap-1.5 rounded-full border border-border px-3 text-[12px] font-medium text-muted-foreground transition-colors duration-150 hover:border-primary/30 hover:bg-accent hover:text-accent-foreground"
+        aria-label="Log out"
+        title="Log out"
+      >
+        <LogOut className="size-3.5" />
+        <span className="hidden sm:inline">Log out</span>
+      </button>
     </header>
   );
 }
