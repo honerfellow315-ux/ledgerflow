@@ -139,14 +139,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className="flex h-16 items-center gap-3 border-b border-sidebar-border/80 px-4">
-          <span className="relative flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-mark to-primary text-xs font-bold text-brand-mark-foreground shadow-[0_4px_14px_-3px_oklch(0.7_0.135_168/0.5)] ring-1 ring-white/15 after:absolute after:inset-0 after:rounded-xl after:bg-gradient-to-b after:from-white/25 after:to-transparent">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-mark to-primary text-xs font-bold text-brand-mark-foreground ring-1 ring-white/10">
             LF
           </span>
           <div className="min-w-0 leading-tight">
             <p className="truncate text-[14px] font-semibold tracking-tight text-sidebar-accent-foreground">
               LedgerFlow
             </p>
-            <p className="sidebar-glow-text truncate text-[9.5px] font-semibold uppercase tracking-[0.16em]">
+            <p className="truncate text-[9.5px] font-medium uppercase tracking-[0.16em] text-sidebar-foreground/50">
               Receivables Suite
             </p>
           </div>
@@ -159,13 +159,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
 
-        <nav className="flex-1 space-y-3 overflow-y-auto p-3">
+        <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
           {visibleGroups.map((group) => (
             <div key={group.heading} className="space-y-0.5">
-              <p className="flex items-center gap-1.5 px-2 pb-1.5 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/40">
-                <span className="h-px flex-1 bg-gradient-to-r from-sidebar-border/0 via-sidebar-border to-sidebar-border/0" />
+              <p className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/45">
                 {group.heading}
-                <span className="h-px flex-1 bg-gradient-to-r from-sidebar-border/0 via-sidebar-border to-sidebar-border/0" />
               </p>
               {group.items.map((item) => {
                 const active = item.exact ? pathname === item.to : pathname.startsWith(item.to);
@@ -175,24 +173,24 @@ export function AppShell({ children }: { children: ReactNode }) {
                     to={item.to}
                     onClick={() => setMobileOpen(false)}
                     className={cn(
-                      "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-all duration-150",
+                      "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors duration-150",
                       active
-                        ? "bg-gradient-to-r from-sidebar-primary to-sidebar-primary/75 text-sidebar-primary-foreground shadow-[0_3px_12px_-2px_oklch(0.2_0.03_258/0.55)] ring-1 ring-white/10"
-                        : "text-sidebar-foreground/80 hover:translate-x-0.5 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                        ? "nav-active text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/90 hover:bg-white/[0.06] hover:text-sidebar-accent-foreground",
                     )}
                   >
                     <span
                       className={cn(
                         "flex size-6.5 shrink-0 items-center justify-center rounded-md transition-colors duration-150",
                         active
-                          ? "bg-white/15 text-sidebar-primary-foreground"
+                          ? "bg-brand-mark/20 text-brand-mark"
                           : "bg-white/[0.04] text-sidebar-foreground/70 group-hover:bg-white/10 group-hover:text-sidebar-accent-foreground",
                       )}
                     >
                       <item.icon className="size-3.5 shrink-0" />
                     </span>
                     {item.label}
-                    {active ? <ChevronRight className="ml-auto size-3.5 opacity-70" /> : null}
+                    {active ? <ChevronRight className="ml-auto size-3.5 opacity-50" /> : null}
                   </Link>
                 );
               })}
@@ -200,9 +198,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        <div className="border-t border-sidebar-border/80 bg-black/10 p-3">
+        <div className="border-t border-sidebar-border/60 p-3">
           <div className="flex items-center gap-2 rounded-lg px-1.5 py-1">
-            <span className="flex size-1.5 shrink-0 rounded-full bg-brand-mark shadow-[0_0_6px_1px_oklch(0.7_0.135_168/0.7)]" />
+            <span className="flex size-1.5 shrink-0 rounded-full bg-brand-mark" />
             <p className="truncate text-[10px] font-medium tracking-wide text-sidebar-foreground/50">
               LedgerFlow · Receivables Suite
             </p>
