@@ -965,6 +965,11 @@ function StatementDocument({
                             <td className="sd-nowrap">{r.number}</td>
                             <td className="sd-num">
                               {formatMoney(r.effectiveOutstanding)}
+                              {r.credited > 0.004 ? (
+                                <div style={{ fontSize: "0.85em", opacity: 0.7 }}>
+                                  after {formatMoney(r.credited)} credit note deducted
+                                </div>
+                              ) : null}
                               {r.creditApplied > 0.004 ? (
                                 <div style={{ fontSize: "0.85em", opacity: 0.7 }}>
                                   after {formatMoney(r.creditApplied)} credit applied
@@ -1226,6 +1231,11 @@ function StatementDocumentSafari({
                             <td className="sd-nowrap">{r.number}</td>
                             <td className="sd-num">
                               {formatMoney(r.effectiveOutstanding)}
+                              {r.credited > 0.004 ? (
+                                <div style={{ fontSize: "0.85em", opacity: 0.7 }}>
+                                  after {formatMoney(r.credited)} credit note deducted
+                                </div>
+                              ) : null}
                               {r.creditApplied > 0.004 ? (
                                 <div style={{ fontSize: "0.85em", opacity: 0.7 }}>
                                   after {formatMoney(r.creditApplied)} credit applied

@@ -24,11 +24,30 @@ export function InvoiceDocumentSafari({
   settings,
   client,
   invoice,
+  remainingHours = 0,
 }: {
   settings: Settings;
   client: Client | undefined;
   invoice: InvoiceView;
+  /** Remaining (unprocessed) hours of this invoice; 0 when none / not an hours invoice. */
+  remainingHours?: number;
 }) {
+  // Payroll split invoices: print ONLY the remaining-hours part. Sub total, VAT and
+  // Total are shown for that part alone (display only; stored invoice data is untouched).
+  const remainingOnly =
+    !invoice.balanceOnly &&
+    !(invoice.lineItems && invoice.lineItems.length > 0) &&
+    invoice.hours != null &&
+    invoice.rate != null &&
+    (invoice.payrollHours ?? 0) > 0 &&
+    (invoice.payrollRate ?? 0) > 0;
+  const remainingAmount = remainingOnly
+    ? round2(invoice.amountExVat - (invoice.payrollHours ?? 0) * (invoice.payrollRate ?? 0))
+    : 0;
+  const remainingVat = invoice.vatIncluded
+    ? round2((remainingAmount * (invoice.vatRate ?? 0)) / 100)
+    : 0;
+
   const contactLines: { label: string; value: string }[] = [
     { label: "Email", value: settings.businessEmail.trim() },
     { label: "Phone", value: settings.businessPhone.trim() },
@@ -196,42 +215,30 @@ export function InvoiceDocumentSafari({
                     invoice.rate != null &&
                     (invoice.payrollHours ?? 0) > 0 &&
                     (invoice.payrollRate ?? 0) > 0 ? (
-                    // Payroll split on the full invoice: two lines, each at its own rate,
-                    // so Hours x Rate always adds up to the printed amount.
-                    <>
-                      <tr>
-                        <td>
-                          {invoice.description || "Services rendered"} — payroll hours
-                          {invoice.description2?.trim() ? (
-                            <div style={{ whiteSpace: "pre-line" }}>
-                              {invoice.description2.trim()}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="id-num">{invoice.payrollHours}</td>
-                        <td className="id-num">{formatMoney(invoice.payrollRate ?? 0)}/hr</td>
-                        <td className="id-num">
-                          {formatMoney(
-                            round2((invoice.payrollHours ?? 0) * (invoice.payrollRate ?? 0)),
-                          )}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>{invoice.description || "Services rendered"} — remaining hours</td>
-                        <td className="id-num">
-                          {round2(invoice.hours - (invoice.payrollHours ?? 0))}
-                        </td>
-                        <td className="id-num">{formatMoney(invoice.rate)}/hr</td>
-                        <td className="id-num">
-                          {formatMoney(
-                            round2(
-                              invoice.amountExVat -
-                                (invoice.payrollHours ?? 0) * (invoice.payrollRate ?? 0),
-                            ),
-                          )}
-                        </td>
-                      </tr>
-                    </>
+                    // Payroll split: the payroll row is NOT printed on the invoice
+                    // (only the remaining-hours row). Calculations are untouched.
+                    <tr>
+                      <td>
+                        {invoice.description || "Services rendered"}
+                        {invoice.description2?.trim() ? (
+                          <div style={{ whiteSpace: "pre-line" }}>
+                            {invoice.description2.trim()}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="id-num">
+                        {round2(invoice.hours - (invoice.payrollHours ?? 0))}
+                      </td>
+                      <td className="id-num">{formatMoney(invoice.rate)}/hr</td>
+                      <td className="id-num">
+                        {formatMoney(
+                          round2(
+                            invoice.amountExVat -
+                              (invoice.payrollHours ?? 0) * (invoice.payrollRate ?? 0),
+                          ),
+                        )}
+                      </td>
+                    </tr>
                   ) : (
                     <tr>
                       <td>
@@ -259,20 +266,30 @@ export function InvoiceDocumentSafari({
                   <div>
                     <dt>Sub total</dt>
                     <dd>
-                      {formatMoney(invoice.balanceOnly ? invoice.vatBase : invoice.amountExVat)}
+                      {formatMoney(
+                        remainingOnly
+                          ? remainingAmount
+                          : invoice.balanceOnly
+                            ? invoice.vatBase
+                            : invoice.amountExVat,
+                      )}
                     </dd>
                   </div>
                   {invoice.vatIncluded ? (
                     <div>
                       <dt>VAT ({invoice.vatRate}%)</dt>
-                      <dd>{formatMoney(invoice.vat)}</dd>
+                      <dd>{formatMoney(remainingOnly ? remainingVat : invoice.vat)}</dd>
                     </div>
                   ) : null}
                   <div className="id-total">
                     <dt>Total due</dt>
                     <dd>
                       {formatMoney(
-                        invoice.balanceOnly ? round2(invoice.vatBase + invoice.vat) : invoice.total,
+                        remainingOnly
+                          ? round2(remainingAmount + remainingVat)
+                          : invoice.balanceOnly
+                            ? round2(invoice.vatBase + invoice.vat)
+                            : invoice.total,
                       )}
                     </dd>
                   </div>
@@ -280,6 +297,7 @@ export function InvoiceDocumentSafari({
               </section>
 
               <section className="id-terms">
+                <p>Remaining hours: {remainingHours}</p>
                 {invoice.paymentTerms ? <p>Payment terms: {invoice.paymentTerms}</p> : null}
                 {invoice.notes ? <p className="id-lines">{invoice.notes}</p> : null}
               </section>

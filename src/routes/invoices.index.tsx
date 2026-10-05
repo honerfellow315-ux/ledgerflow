@@ -114,6 +114,14 @@ function InvoicesPageContent() {
   const [printInvoice, setPrintInvoice] = useState<InvoiceView | null>(null);
   const [toMarkUnpaid, setToMarkUnpaid] = useState<InvoiceView | null>(null);
   const [clearingPayments, setClearingPayments] = useState(false);
+  // Remaining hours printed on the invoice: same figure as the "Remaining Hrs"
+  // column on screen; 0 when the invoice has none / doesn't track hours.
+  const printRemainingHours = printInvoice
+    ? invoiceTracksHours(printInvoice)
+      ? invoiceHoursDisplay(printInvoice, data.subcontracts, printInvoice.paid, printInvoice.total)
+          .remaining
+      : 0
+    : 0;
   // Chrome's print workflow (InvoiceDocument) stays the default; only flips
   // to the Safari-safe variant after mount, once we can check the browser.
   // See src/lib/print-browser.ts.
@@ -781,6 +789,7 @@ function InvoicesPageContent() {
             )}
             client={data.clients.find((c) => c.id === printInvoice.clientId)}
             invoice={printInvoice}
+            remainingHours={printRemainingHours}
           />
         ) : (
           <InvoiceDocument
@@ -791,6 +800,7 @@ function InvoicesPageContent() {
             )}
             client={data.clients.find((c) => c.id === printInvoice.clientId)}
             invoice={printInvoice}
+            remainingHours={printRemainingHours}
           />
         )
       ) : null}
