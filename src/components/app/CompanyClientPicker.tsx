@@ -46,6 +46,7 @@ export function CompanyClientPicker({
   clientId,
   onCompanyChange,
   onClientChange,
+  showNameFilter = false,
   className,
 }: {
   clients: Client[];
@@ -54,6 +55,8 @@ export function CompanyClientPicker({
   clientId: string;
   onCompanyChange: (companyKey: string) => void;
   onClientChange: (clientId: string) => void;
+  /** Adds a third dropdown to pick the client by its contact/client NAME (same selection as above). */
+  showNameFilter?: boolean;
   className?: string;
 }) {
   // Only offer companies that actually have a client, plus "No company" when
@@ -75,6 +78,29 @@ export function CompanyClientPicker({
       ),
     [clients, companyKey],
   );
+
+  // Same clients, listed by client name (the person/contact) instead of company.
+  const nameOptions = useMemo(() => {
+    const list = [...clientsInCompany(clients, companyKey)].sort((a, b) =>
+      (a.name || a.company).localeCompare(b.name || b.company),
+    );
+    const count = new Map<string, number>();
+    for (const c of list) {
+      const k = (c.name || c.company).trim().toLowerCase();
+      count.set(k, (count.get(k) ?? 0) + 1);
+    }
+    return list.map((c) => {
+      const base = c.name || c.company;
+      const dup = (count.get(base.trim().toLowerCase()) ?? 0) > 1 && c.company && c.company !== base;
+      return {
+        id: c.id,
+        label:
+          base +
+          (dup ? ` — ${c.company}` : "") +
+          (c.status !== "active" ? ` (${STATUS_LABEL[c.status]})` : ""),
+      };
+    });
+  }, [clients, companyKey]);
 
   const handleCompany = (key: string) => {
     onCompanyChange(key);
@@ -113,6 +139,20 @@ export function CompanyClientPicker({
           ))}
         </SelectContent>
       </Select>
+      {showNameFilter ? (
+        <Select value={clientId} onValueChange={onClientChange}>
+          <SelectTrigger className="h-8 w-full text-[13px] sm:w-64" aria-label="Client name">
+            <SelectValue placeholder="Client name" />
+          </SelectTrigger>
+          <SelectContent>
+            {nameOptions.map((o) => (
+              <SelectItem key={o.id} value={o.id}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
     </div>
   );
 }

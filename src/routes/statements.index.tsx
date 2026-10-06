@@ -415,6 +415,7 @@ function StatementsPageContent() {
               companies={data.companies}
               companyKey={companyKey}
               clientId={client.id}
+              showNameFilter
               onCompanyChange={setCompanyKey}
               onClientChange={(id) => {
                 setSelectedId(id);
