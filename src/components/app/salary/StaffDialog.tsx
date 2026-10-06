@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Field } from "@/components/app/Field";
-import { addStaff, updateStaff } from "@/lib/actions/salary";
+import { addStaff, checkStaffNi, updateStaff } from "@/lib/actions/salary";
 import { isValidNi } from "@/lib/payroll/calc";
 import {
   GENDER_OPTIONS,
@@ -252,6 +252,21 @@ export function StaffDialog({
         role: t(form.role),
         serviceType: t(form.serviceType),
       };
+      // Warning only (never blocks): this NI number may already be on another staff record.
+      let niWarning = "";
+      if (values.ni) {
+        try {
+          const hits = await checkStaffNi({
+            data: { ni: values.ni, ...(staff ? { exceptId: staff.id } : {}) },
+          });
+          if (hits.length > 0)
+            niWarning = hits
+              .map((h) => `${h.name}${h.companies.length ? ` (${h.companies.join(", ")})` : ""}`)
+              .join("; ");
+        } catch {
+          /* the warning is optional */
+        }
+      }
       let saved: Staff | undefined;
       if (staff)
         saved = await updateStaff({
@@ -261,6 +276,10 @@ export function StaffDialog({
       await onSaved?.(saved, !staff);
       await refresh();
       toast.success(staff ? "Staff updated." : "Staff added.");
+      if (niWarning)
+        toast.warning(`This NI number is already registered for ${niWarning}. Saved anyway.`, {
+          duration: 10000,
+        });
       onOpenChange(false);
     } catch (err) {
       const msg = errorMessage(err, "Could not save.");

@@ -328,7 +328,7 @@ const PRIVATE_STAFF_FIELDS = new Set<string>([
   "siaNumber",
 ]);
 
-/** Rejects a second person with the same RSS ID / ESS ID / NI number. */
+/** Rejects a second person with the same RSS ID / ESS ID (NI is only warned about). */
 async function assertStaffUnique(
   v: { rssId?: string | undefined; essId?: string | undefined; ni?: string | undefined },
   exceptId?: string,
@@ -340,10 +340,34 @@ async function assertStaffUnique(
       throw new Error(`RSS ID ${v.rssId} already belongs to ${s.name}.`);
     if (v.essId && s.essId === v.essId)
       throw new Error(`ESS ID ${v.essId} already belongs to ${s.name}.`);
-    if (v.ni && normNi(s.ni) === normNi(v.ni))
-      throw new Error(`NI number already belongs to ${s.name}.`);
+    // NI duplicates are allowed (same person in several companies); the Staff
+    // dialog shows a warning via checkStaffNi instead of blocking the save.
   }
 }
+
+/** Warning only: staff records that already carry this NI number, with their payroll companies. */
+export const checkStaffNi = createServerFn({ method: "POST" })
+  .validator(z.object({ ni: z.string().max(60), exceptId: z.string().optional() }))
+  .handler(async ({ data }) => {
+    await requirePermission("staff", "view");
+    const ni = normNi(data.ni);
+    if (!ni) return [] as { name: string; companies: string[] }[];
+    const all = await db.select().from(payrollStaff);
+    const hits = all.filter((s) => s.id !== data.exceptId && normNi(s.ni) === ni);
+    const out: { name: string; companies: string[] }[] = [];
+    for (const h of hits) {
+      const r = await db.execute(sql`
+        SELECT c.name AS name FROM payroll_company_staff cs
+        JOIN payroll_companies c ON c.id = cs.company_id
+        WHERE cs.staff_id = ${h.id} ORDER BY c.order_index, c.name`);
+      const rows = ((r as unknown as { rows?: Record<string, unknown>[] }).rows ?? []) as Record<
+        string,
+        unknown
+      >[];
+      out.push({ name: h.name, companies: rows.map((x) => String(x["name"])) });
+    }
+    return out;
+  });
 
 export const listStaff = createServerFn({ method: "POST" }).handler(async () => {
   await requirePermission("staff", "view");
