@@ -15,6 +15,7 @@ import {
   History,
   IdCard,
   LayoutDashboard,
+  ListChecks,
   LogOut,
   Menu,
   Receipt,
@@ -55,6 +56,7 @@ type NavPath =
   | "/salary"
   | "/payroll"
   | "/staff"
+  | "/timesheets"
   | "/credit-notes"
   | "/statements"
   | "/reports"
@@ -100,6 +102,7 @@ const NAV_GROUPS: { heading: string; items: NavItem[] }[] = [
       { to: "/salary", label: "Salary Sheet", icon: Banknote, module: "salary" },
       { to: "/payroll", label: "Payroll Sheet", icon: FileSpreadsheet, module: "payroll" },
       { to: "/staff", label: "Staff", icon: IdCard, module: "staff" },
+      { to: "/timesheets", label: "Timesheet Check", icon: ListChecks, module: null },
       { to: "/expenses", label: "Expenses", icon: ReceiptText, module: "expenses" },
     ],
   },
