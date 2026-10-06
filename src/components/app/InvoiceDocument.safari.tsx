@@ -24,7 +24,6 @@ export function InvoiceDocumentSafari({
   settings,
   client,
   invoice,
-  remainingHours = 0,
 }: {
   settings: Settings;
   client: Client | undefined;
@@ -297,7 +296,6 @@ export function InvoiceDocumentSafari({
               </section>
 
               <section className="id-terms">
-                <p>Remaining hours: {remainingHours}</p>
                 {invoice.paymentTerms ? <p>Payment terms: {invoice.paymentTerms}</p> : null}
                 {invoice.notes ? <p className="id-lines">{invoice.notes}</p> : null}
               </section>
