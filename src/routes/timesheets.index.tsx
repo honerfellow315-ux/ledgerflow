@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
-import { Info, ListChecks, Search, Upload } from "@/lib/icons";
+import { Download, Info, ListChecks, Search, Upload } from "@/lib/icons";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
@@ -18,10 +17,8 @@ import {
 } from "@/components/ui/select";
 import { Pill, SheetStatusBadge } from "@/components/app/timesheets/badges";
 import { SheetCheckPanel } from "@/components/app/timesheets/SheetCheckPanel";
-import {
-  EmailPreviewDialog,
-  UploadTimesheetDialog,
-} from "@/components/app/timesheets/TimesheetDialogs";
+import { UploadTimesheetDialog } from "@/components/app/timesheets/TimesheetDialogs";
+import { downloadTimesheetReport } from "@/lib/timesheets/reportExport";
 import {
   FORMAT_LABEL,
   MOCK_SHEETS,
@@ -60,12 +57,11 @@ const ALL = "all";
 
 function TimesheetsPageContent() {
   const { isAdmin, ready } = usePermissions();
-  const [sheets, setSheets] = useState<TimesheetSheet[]>(MOCK_SHEETS);
+  const sheets: TimesheetSheet[] = MOCK_SHEETS;
   const [openId, setOpenId] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>(ALL);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [mail, setMail] = useState<{ id: string; kind: "confirm" | "query" } | null>(null);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -89,36 +85,13 @@ function TimesheetsPageContent() {
   }
 
   const open = sheets.find((s) => s.id === openId) ?? null;
-  const mailSheet = mail ? (sheets.find((s) => s.id === mail.id) ?? null) : null;
-
-  const emailDialog = (
-    <EmailPreviewDialog
-      sheet={mailSheet}
-      kind={mail?.kind ?? null}
-      onClose={() => setMail(null)}
-      onSent={(kind) => {
-        if (!mail) return;
-        setSheets((prev) =>
-          prev.map((s) =>
-            s.id === mail.id ? { ...s, status: kind === "confirm" ? "confirmed" : "disputed" } : s,
-          ),
-        );
-        setMail(null);
-        toast.success("Preview only: no email was sent.");
-      }}
-    />
-  );
-
   if (open) {
     return (
-      <>
-        <SheetCheckPanel
-          sheet={open}
-          onBack={() => setOpenId(null)}
-          onEmail={(kind) => setMail({ id: open.id, kind })}
-        />
-        {emailDialog}
-      </>
+      <SheetCheckPanel
+        sheet={open}
+        onBack={() => setOpenId(null)}
+        onDownload={() => void downloadTimesheetReport([open])}
+      />
     );
   }
 
@@ -133,9 +106,14 @@ function TimesheetsPageContent() {
             Upload the hours your staff sent and see where they differ from your own records.
           </p>
         </div>
-        <Button onClick={() => setUploadOpen(true)}>
-          <Upload className="size-4" /> Upload timesheets
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => void downloadTimesheetReport(rows)}>
+            <Download className="size-4" /> Download report
+          </Button>
+          <Button onClick={() => setUploadOpen(true)}>
+            <Upload className="size-4" /> Upload timesheets
+          </Button>
+        </div>
       </div>
 
       <div
@@ -143,26 +121,26 @@ function TimesheetsPageContent() {
         className="flex items-start gap-2.5 rounded-lg border border-border bg-surface-muted/60 px-4 py-3 text-[13px] text-foreground"
       >
         <Info className="mt-0.5 size-4 text-primary" aria-hidden="true" />
-        <p>This is a preview with sample people and hours. Nothing here is saved or sent yet.</p>
+        <p>This is a preview with sample people and hours. Nothing here is saved yet.</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Sheets this month" value={String(sheets.length)} icon={ListChecks} />
         <SummaryCard
           label="All matching"
-          value={String(count("ready", "confirmed"))}
+          value={String(count("ready"))}
           tone="success"
         />
         <SummaryCard
           label="Need a look"
-          value={String(count("needs_review", "staff_not_found"))}
-          tone={count("needs_review", "staff_not_found") ? "warning" : "success"}
+          value={String(count("needs_review"))}
+          tone={count("needs_review") ? "warning" : "success"}
         />
         <SummaryCard
-          label="Queried"
-          value={String(count("disputed"))}
-          sublabel="Waiting for the staff member"
-          tone={count("disputed") ? "danger" : "success"}
+          label="Staff not found"
+          value={String(count("staff_not_found"))}
+          sublabel="Add them to Staff first"
+          tone={count("staff_not_found") ? "danger" : "success"}
         />
       </div>
 
@@ -190,8 +168,6 @@ function TimesheetsPageContent() {
                   <SelectItem value="ready">All matching</SelectItem>
                   <SelectItem value="needs_review">Needs a look</SelectItem>
                   <SelectItem value="staff_not_found">Staff not found</SelectItem>
-                  <SelectItem value="confirmed">Confirmed</SelectItem>
-                  <SelectItem value="disputed">Queried</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -255,7 +231,6 @@ function TimesheetsPageContent() {
       </Panel>
 
       <UploadTimesheetDialog open={uploadOpen} onOpenChange={setUploadOpen} />
-      {emailDialog}
     </div>
   );
 }

@@ -36,8 +36,6 @@ export function Pill({
 const SHEET_STATUS: Record<SheetStatus, { label: string; tone: Tone }> = {
   ready: { label: "All matching", tone: "good" },
   needs_review: { label: "Needs a look", tone: "warn" },
-  confirmed: { label: "Confirmed", tone: "good" },
-  disputed: { label: "Queried", tone: "bad" },
   staff_not_found: { label: "Staff not found", tone: "bad" },
 };
 

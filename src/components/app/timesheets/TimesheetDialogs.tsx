@@ -10,11 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Pill, type Tone } from "@/components/app/timesheets/badges";
-import { fmtDate, fmtHours, sheetTotals, type TimesheetSheet } from "@/lib/timesheets/data";
 
 /* ---------------------------------------------------------------- upload */
 
@@ -134,120 +130,6 @@ export function UploadTimesheetDialog({
             Check {supported.length > 0 ? `${supported.length} sheet${supported.length > 1 ? "s" : ""}` : "sheets"}
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/* ----------------------------------------------------------------- email */
-
-function buildEmail(sheet: TimesheetSheet, kind: "confirm" | "query") {
-  const first = sheet.staffName.split(" ")[0];
-  const t = sheetTotals(sheet);
-  if (kind === "confirm") {
-    return {
-      subject: `Your ${sheet.monthLabel} timesheet is confirmed`,
-      body: `Hi ${first},\n\nWe checked your ${sheet.monthLabel} timesheet (${fmtHours(t.sheetHours)}) against our records and everything matches.\n\nYou don't need to do anything else.\n\nThank you.`,
-    };
-  }
-  const lines = sheet.rows
-    .filter((row) => row.result !== "match")
-    .map((row) => {
-      const when = `${fmtDate(row.date)}, ${row.site}`;
-      switch (row.result) {
-        case "hours_over":
-        case "hours_under":
-          return `- ${when}: you wrote ${fmtHours(row.sheetHours)}, our record shows ${fmtHours(row.recordHours ?? 0)}.`;
-        case "not_in_records":
-          return `- ${when}: we have no shift in our records on this date.`;
-        case "not_on_sheet":
-          return `- ${when}: this shift is in our records but not on your sheet.`;
-        default:
-          return `- ${when}: we couldn't read this row clearly. Please confirm the hours.`;
-      }
-    });
-  if (t.statedMismatch) {
-    lines.push(
-      `- Total: your sheet says ${fmtHours(sheet.statedHours)}, but the rows add up to ${fmtHours(t.sheetHours)}.`,
-    );
-  }
-  return {
-    subject: `Please check your ${sheet.monthLabel} timesheet`,
-    body: `Hi ${first},\n\nWe checked your ${sheet.monthLabel} timesheet and need you to look at these entries:\n\n${lines.join("\n")}\n\nPlease reply with the correct details.\n\nThank you.`,
-  };
-}
-
-function EmailForm({
-  sheet,
-  kind,
-  onClose,
-  onSent,
-}: {
-  sheet: TimesheetSheet;
-  kind: "confirm" | "query";
-  onClose: () => void;
-  onSent: (kind: "confirm" | "query") => void;
-}) {
-  const draft = buildEmail(sheet, kind);
-  const [subject, setSubject] = useState(draft.subject);
-  const [body, setBody] = useState(draft.body);
-
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{kind === "confirm" ? "Confirm this sheet" : "Query these rows"}</DialogTitle>
-        <DialogDescription>
-          Check the email below. You can change the wording before it goes out.
-        </DialogDescription>
-      </DialogHeader>
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="ts-mail-to">To</Label>
-          <Input id="ts-mail-to" value={sheet.email || "No email address on file"} readOnly />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ts-mail-subject">Subject</Label>
-          <Input id="ts-mail-subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ts-mail-body">Message</Label>
-          <Textarea
-            id="ts-mail-body"
-            rows={10}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
-        </div>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button disabled={!sheet.email} onClick={() => onSent(kind)}>
-          {kind === "confirm" ? "Send confirmation" : "Send query"}
-        </Button>
-      </DialogFooter>
-    </>
-  );
-}
-
-export function EmailPreviewDialog({
-  sheet,
-  kind,
-  onClose,
-  onSent,
-}: {
-  sheet: TimesheetSheet | null;
-  kind: "confirm" | "query" | null;
-  onClose: () => void;
-  onSent: (kind: "confirm" | "query") => void;
-}) {
-  return (
-    <Dialog open={Boolean(sheet && kind)} onOpenChange={(o) => (o ? undefined : onClose())}>
-      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
-        {sheet && kind ? (
-          <EmailForm key={`${sheet.id}-${kind}`} sheet={sheet} kind={kind} onClose={onClose} onSent={onSent} />
-        ) : null}
       </DialogContent>
     </Dialog>
   );

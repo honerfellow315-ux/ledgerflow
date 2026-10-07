@@ -4,7 +4,7 @@
  * MOCK_SHEETS with real data; the types and helpers stay.
  */
 export type SheetFormat = "excel" | "pdf" | "photo";
-export type SheetStatus = "ready" | "needs_review" | "confirmed" | "disputed" | "staff_not_found";
+export type SheetStatus = "ready" | "needs_review" | "staff_not_found";
 export type RowResult =
   | "match"
   | "hours_over"
@@ -211,7 +211,7 @@ export const MOCK_SHEETS: TimesheetSheet[] = [
     uploadedAt: "2026-10-01T16:30:00",
     monthLabel: M,
     statedHours: 40,
-    status: "confirmed",
+    status: "ready",
     rows: [
       r("e1", "2026-09-07", "Mill Road Depot", "08:00", "16:00", 8, 8, 10.5, "match"),
       r("e2", "2026-09-08", "Mill Road Depot", "08:00", "16:00", 8, 8, 10.5, "match"),
@@ -231,7 +231,7 @@ export const MOCK_SHEETS: TimesheetSheet[] = [
     uploadedAt: "2026-10-01T11:08:00",
     monthLabel: M,
     statedHours: 66,
-    status: "disputed",
+    status: "needs_review",
     rows: [
       r("f1", "2026-09-02", "Docklands Site", "07:00", "19:00", 12, 12, 10.5, "match"),
       r("f2", "2026-09-03", "Docklands Site", "07:00", "19:00", 12, 12, 10.5, "match"),

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowLeft, Info } from "@/lib/icons";
+import { AlertTriangle, ArrowLeft, Download, Info } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
@@ -38,19 +38,17 @@ function Notice({ tone, children }: { tone: "warn" | "info"; children: ReactNode
 export function SheetCheckPanel({
   sheet,
   onBack,
-  onEmail,
+  onDownload,
 }: {
   sheet: TimesheetSheet;
   onBack: () => void;
-  onEmail: (kind: "confirm" | "query") => void;
+  onDownload: () => void;
 }) {
   const [onlyIssues, setOnlyIssues] = useState(false);
   const t = useMemo(() => sheetTotals(sheet), [sheet]);
   const rows = onlyIssues ? sheet.rows.filter((row) => row.result !== "match") : sheet.rows;
   const notFound = sheet.status === "staff_not_found";
-  const done = sheet.status === "confirmed" || sheet.status === "disputed";
   const allMatch = t.issues === 0 && !t.statedMismatch && !notFound;
-  const hasIssues = t.issues > 0 || t.statedMismatch;
 
   return (
     <div className="space-y-5">
@@ -182,28 +180,15 @@ export function SheetCheckPanel({
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-muted/50 px-4 py-3">
         <p className="text-[13px] text-muted-foreground">
-          {sheet.status === "confirmed"
-            ? "This sheet was confirmed."
-            : sheet.status === "disputed"
-              ? "A query about this sheet was sent."
-              : notFound
-                ? "Add this person to Staff first."
-                : allMatch
-                  ? "Everything matches. You can confirm this sheet."
-                  : "Review the marked rows, then query them or confirm."}
+          {notFound
+            ? "Add this person to Staff first, then check the sheet again."
+            : allMatch
+              ? "Everything matches. The receipt will show this sheet as all correct."
+              : "The receipt lists every row marked above so you can send it to the staff member."}
         </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            disabled={done || notFound || !hasIssues}
-            onClick={() => onEmail("query")}
-          >
-            Query these rows by email
-          </Button>
-          <Button disabled={done || !allMatch} onClick={() => onEmail("confirm")}>
-            Confirm sheet
-          </Button>
-        </div>
+        <Button onClick={onDownload}>
+          <Download className="size-4" /> Download receipt
+        </Button>
       </div>
     </div>
   );
