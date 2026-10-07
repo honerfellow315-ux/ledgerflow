@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../server/db";
@@ -11,15 +11,17 @@ import {
   payrollStaff,
   salaryEntries,
   salaryPeriods,
+  salaryShifts,
 } from "../../../drizzle/schema";
-import { requirePermission } from "../server/auth";
+import { requireAdmin, requirePermission } from "../server/auth";
+import { moveStaffToTrash } from "../server/staffTrash";
 import { hasPermission } from "../permissions";
 import { uid } from "../server/id";
 import { recordActivity, changedFieldsSummary } from "../server/activity";
 import { formatMonthLabel, formatNi, normName, normNi, round2 } from "../payroll/calc";
 import { lineTotals } from "../payroll/sheetCalc";
 import { STAFF_DETAIL_FIELDS } from "../payroll/types";
-import type { PeriodStatus, Staff, StaffDetailField, StaffDetails } from "../payroll/types";
+import type { ContractStatus, PeriodStatus, Staff, StaffDetailField, StaffDetails } from "../payroll/types";
 import { cleanDetail } from "../payroll/sheetImport";
 import type { PayrollImportResult, PayrollImportRowResult } from "../payroll/sheetImport";
 import type {
@@ -66,7 +68,25 @@ const toLink = (r: typeof payrollCompanyStaff.$inferSelect): CompanyStaffLink =>
   rate: r.rate,
   ...(r.startDate ? { startDate: r.startDate } : {}),
   ...(r.endDate ? { endDate: r.endDate } : {}),
+  ...(r.contractStatus ? { contractStatus: r.contractStatus } : {}),
 });
+
+/**
+ * Contract status and end date belong to a person's place in ONE company (someone can be on a P45
+ * in company A and still working in company B). The sheet therefore shows this company's own values
+ * and falls back to the staff record only when the company has none.
+ */
+function withCompanyStatus(
+  s: Staff,
+  link: typeof payrollCompanyStaff.$inferSelect | undefined,
+  full: boolean,
+): Staff {
+  if (!link) return s;
+  const out: Staff = { ...s };
+  if (link.contractStatus) out.contractStatus = link.contractStatus as ContractStatus;
+  if (full && link.endDate) out.employmentEndDate = link.endDate;
+  return out;
+}
 
 const toCompany = (
   r: typeof payrollCompanies.$inferSelect,
@@ -369,9 +389,27 @@ export const createPayrollSheet = createServerFn({ method: "POST" })
             eq(payrollStaff.active, true),
           ),
         );
+      // Fixed-pay staff (no hours, a typed monthly amount) keep their amount into the new month.
+      const fixedByStaff = new Map<string, number>();
+      const [prev] = await db
+        .select()
+        .from(payrollSheets)
+        .where(and(eq(payrollSheets.companyId, data.companyId), lt(payrollSheets.month, data.month)))
+        .orderBy(desc(payrollSheets.month))
+        .limit(1);
+      if (prev) {
+        const prevLines = await db
+          .select()
+          .from(payrollLines)
+          .where(eq(payrollLines.sheetId, prev.id));
+        for (const l of prevLines) {
+          if (l.fixedAmount != null && lineTotals(l).totalHours === 0)
+            fixedByStaff.set(l.staffId, l.fixedAmount);
+        }
+      }
       const eligible = members.filter(
         ({ link, staff }) =>
-          staff.contractStatus !== "P45" &&
+          (link.contractStatus ?? staff.contractStatus) !== "P45" &&
           !(link.endDate && link.endDate.slice(0, 7) < data.month),
       );
       for (const part of chunk(eligible, 500)) {
@@ -383,6 +421,7 @@ export const createPayrollSheet = createServerFn({ method: "POST" })
               sheetId: sheet.id,
               staffId: staff.id,
               rate: link.rate ?? company.defaultRate,
+              fixedAmount: fixedByStaff.get(staff.id) ?? null,
             })),
           )
           .onConflictDoNothing();
@@ -424,27 +463,93 @@ export const getPayrollSheet = createServerFn({ method: "POST" })
       sheet: toSheetInfo(sheet),
       company: toCompany(company, counts.get(company.id) ?? 0),
       lines: lines.map(toLine),
-      staff: staffRows.map((r) => toPayrollStaff(r, full)),
+      staff: staffRows.map((r) =>
+        withCompanyStatus(
+          toPayrollStaff(r, full),
+          links.find((l) => l.staffId === r.id),
+          full,
+        ),
+      ),
       links: links.map(toLink),
       canSeeStaffDetails: full,
     };
   });
 
-export const deletePayrollSheet = createServerFn({ method: "POST" })
+/**
+ * People who exist ONLY on this sheet: on no other payroll sheet, in no other company, and with no
+ * Salary Sheet line or shift. These are the ones a mistaken import leaves behind.
+ */
+async function staffOnlyOnSheet(sheetId: string, companyId: string): Promise<{ id: string; name: string }[]> {
+  const lines = await db
+    .select({ staffId: payrollLines.staffId })
+    .from(payrollLines)
+    .where(eq(payrollLines.sheetId, sheetId));
+  const ids = [...new Set(lines.map((l) => l.staffId))];
+  const out: { id: string; name: string }[] = [];
+  for (const part of chunk(ids, 300)) {
+    const [elsewhere, entries, shifts, links, rows] = await Promise.all([
+      db
+        .select({ id: payrollLines.staffId })
+        .from(payrollLines)
+        .where(and(inArray(payrollLines.staffId, part), ne(payrollLines.sheetId, sheetId))),
+      db.select({ id: salaryEntries.staffId }).from(salaryEntries).where(inArray(salaryEntries.staffId, part)),
+      db.select({ id: salaryShifts.staffId }).from(salaryShifts).where(inArray(salaryShifts.staffId, part)),
+      db
+        .select({ id: payrollCompanyStaff.staffId })
+        .from(payrollCompanyStaff)
+        .where(and(inArray(payrollCompanyStaff.staffId, part), ne(payrollCompanyStaff.companyId, companyId))),
+      db.select({ id: payrollStaff.id, name: payrollStaff.name }).from(payrollStaff).where(inArray(payrollStaff.id, part)),
+    ]);
+    const used = new Set([...elsewhere, ...entries, ...shifts, ...links].map((r) => r.id));
+    for (const r of rows) if (!used.has(r.id)) out.push(r);
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Read-only: the people the delete dialog offers to remove together with the sheet. */
+export const previewSheetStaffCleanup = createServerFn({ method: "POST" })
   .validator(z.object({ sheetId: z.string() }))
+  .handler(async ({ data }) => {
+    const user = await requirePermission("payroll", "delete");
+    const sheet = await getSheetOrThrow(data.sheetId);
+    return {
+      people: await staffOnlyOnSheet(sheet.id, sheet.companyId),
+      canRemove: user.role === "admin",
+    };
+  });
+
+export const deletePayrollSheet = createServerFn({ method: "POST" })
+  .validator(
+    z.object({ sheetId: z.string(), alsoRemoveStaffIds: z.array(z.string()).max(5000).optional() }),
+  )
   .handler(async ({ data }) => {
     const actor = await requirePermission("payroll", "delete");
     const sheet = await assertOpen(data.sheetId);
     const label = await sheetLabel(sheet);
+
+    // Removing people is admin-only (same as the Staff screen) and re-checked here, so a stale
+    // list can never delete someone who has since been used elsewhere.
+    let toRemove: string[] = [];
+    if (data.alsoRemoveStaffIds?.length) {
+      await requireAdmin();
+      const allowed = new Set((await staffOnlyOnSheet(sheet.id, sheet.companyId)).map((p) => p.id));
+      toRemove = data.alsoRemoveStaffIds.filter((id) => allowed.has(id));
+    }
+
     await db.delete(payrollSheets).where(eq(payrollSheets.id, sheet.id));
+    let removed = 0;
+    if (toRemove.length > 0) {
+      removed = (await moveStaffToTrash(toRemove, actor.username)).deleted;
+    }
     await recordActivity({
       actor,
       action: "deleted",
       module: "payroll",
       entityId: sheet.id,
       label,
+      ...(removed > 0 ? { details: `${removed} staff only on this sheet moved to the Recycle Bin` } : {}),
     });
-    return { ok: true };
+    return { ok: true, removedStaff: removed };
   });
 
 const NEXT_OK: Record<PeriodStatus, PeriodStatus[]> = {
@@ -686,6 +791,7 @@ export const updateCompanyStaff = createServerFn({ method: "POST" })
             .string()
             .regex(/^\d{4}-\d{2}-\d{2}$/)
             .nullable(),
+          contractStatus: z.enum(["Active", "Need P45", "P45"]).nullable(),
         })
         .partial(),
       applyToSheetId: z.string().optional(),
@@ -694,6 +800,8 @@ export const updateCompanyStaff = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const actor = await requirePermission("payroll", "edit");
+    // contract status sits with the sensitive staff data, so it needs the same access as before
+    if (data.patch.contractStatus !== undefined) await requirePermission("staff", "edit");
     const company = await getCompanyOrThrow(data.companyId);
     const [staff] = await db
       .select()

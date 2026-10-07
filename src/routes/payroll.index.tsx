@@ -55,6 +55,7 @@ import {
   createPayrollSheet,
   deletePayrollLine,
   deletePayrollSheet,
+  previewSheetStaffCleanup,
   pushToSalarySheet,
   setPayrollSheetStatus,
   updatePayrollLine,
@@ -77,6 +78,17 @@ import {
 } from "@/lib/payroll/sheetCalc";
 import { exportPayrollWorkbook } from "@/lib/payroll/sheetExport";
 import { PAYROLL_COMMENTS } from "@/lib/payroll/sheetTypes";
+import { HOLIDAY_PAY_RATE } from "@/lib/payroll/sheetImport";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { CompanyStaffLink, PayrollLine, PayrollSheetStaff } from "@/lib/payroll/sheetTypes";
 import { ageFromDob, displayDate, shareCodeState } from "@/lib/payroll/staffFields";
 import { normNi } from "@/lib/payroll/calc";
@@ -119,6 +131,137 @@ const NEXT: Record<PeriodStatus, { to: PeriodStatus; label: string; approve: boo
 /* ------------------------------ small cells ------------------------------ */
 
 const fmtNum = (n: number) => (Number.isInteger(n) ? String(n) : String(n));
+
+/** Like NumCell, but an empty box means "not set" (null) instead of 0. */
+function OptionalNumCell({
+  value,
+  disabled,
+  onCommit,
+  label,
+  placeholder,
+}: {
+  value: number | null;
+  disabled: boolean;
+  onCommit: (n: number | null) => void;
+  label: string;
+  placeholder?: string;
+}) {
+  const show = (v: number | null) => (v === null ? "" : fmtNum(v));
+  const [text, setText] = useState(show(value));
+  useEffect(() => setText(show(value)), [value]);
+  function commit() {
+    const t = text.trim();
+    const n = t === "" ? null : Number(t);
+    if (n !== null && (!Number.isFinite(n) || n < 0)) {
+      setText(show(value));
+      toast.error("Enter a number (0 or more), or leave it empty.");
+      return;
+    }
+    if (n !== value) onCommit(n);
+    else setText(show(value));
+  }
+  return (
+    <Input
+      aria-label={label}
+      inputMode="decimal"
+      disabled={disabled}
+      value={text}
+      placeholder={placeholder ?? ""}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") {
+          setText(show(value));
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      className="num h-8 w-[4.5rem] px-2 text-right text-[12px]"
+    />
+  );
+}
+
+/** Delete-sheet confirmation that also offers to remove people who exist only on this sheet. */
+function DeleteSheetDialog({
+  open,
+  onOpenChange,
+  sheetId,
+  title,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  sheetId: string;
+  title: string;
+  onConfirm: (removeStaffIds: string[]) => void;
+}) {
+  const [people, setPeople] = useState<{ id: string; name: string }[]>([]);
+  const [canRemove, setCanRemove] = useState(false);
+  const [alsoRemove, setAlsoRemove] = useState(true);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setPeople([]);
+    setAlsoRemove(true);
+    previewSheetStaffCleanup({ data: { sheetId } })
+      .then((r) => {
+        if (!alive) return;
+        setPeople(r.people);
+        setCanRemove(r.canRemove);
+      })
+      .catch(() => {
+        if (alive) setPeople([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, sheetId]);
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-base">Delete this sheet?</AlertDialogTitle>
+          <AlertDialogDescription className="text-[13px]">
+            This removes {title} and all its lines.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {people.length > 0 ? (
+          <div className="space-y-2 rounded-md border border-border bg-surface-muted/50 px-3 py-2.5 text-[12px]">
+            <p className="font-medium text-foreground">
+              {people.length} {people.length === 1 ? "person exists" : "people exist"} only on this
+              sheet
+            </p>
+            <p className="max-h-24 overflow-y-auto text-muted-foreground">
+              {people.map((p) => p.name).join(", ")}
+            </p>
+            {canRemove ? (
+              <label className="flex items-start gap-2 text-foreground">
+                <Checkbox checked={alsoRemove} onCheckedChange={(v) => setAlsoRemove(v === true)} />
+                <span>
+                  Also delete these staff records. They can be restored from the Recycle Bin.
+                </span>
+              </label>
+            ) : (
+              <p className="text-muted-foreground">
+                Only an administrator can delete staff records. They will stay in Staff.
+              </p>
+            )}
+          </div>
+        ) : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => onConfirm(canRemove && alsoRemove ? people.map((p) => p.id) : [])}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Delete sheet
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
 
 function NumCell({
   value,
@@ -314,7 +457,7 @@ interface Row {
 }
 
 function PayrollPageContent() {
-  const { can } = usePermissions();
+  const { can, isAdmin } = usePermissions();
   const refresh = useRefreshPayroll();
 
   const companiesQ = useSheetCompanies();
@@ -777,7 +920,7 @@ function PayrollPageContent() {
                     <tr className="text-[10px] font-bold uppercase tracking-wide">
                       <th className="sticky left-0 z-20 bg-surface-muted" />
                       <th
-                        colSpan={7}
+                        colSpan={9}
                         className="border-l border-border bg-info-soft px-3 py-1 text-center text-primary"
                       >
                         Employment
@@ -803,6 +946,8 @@ function PayrollPageContent() {
                       <TH align="right">Total hours</TH>
                       <TH>Comment</TH>
                       <TH align="right">Rate</TH>
+                      <TH align="right">Holiday rate</TH>
+                      <TH align="right">Fixed amount</TH>
                       <TH align="right">Amount</TH>
                       {visibleGroups.flatMap((g) =>
                         g.cols.map((c) => (
@@ -863,7 +1008,15 @@ function PayrollPageContent() {
                               label={`Holiday entitlement for ${r.staff.name}`}
                               value={r.line.holidayEntitlement}
                               disabled={!canEdit}
-                              onCommit={(n) => saveLine(r.line.id, { holidayEntitlement: n })}
+                              onCommit={(n) =>
+                                saveLine(r.line.id, {
+                                  holidayEntitlement: n,
+                                  // holiday hours are only paid when a holiday rate is set
+                                  ...(n > 0 && r.line.holidayRate == null && r.line.fixedAmount == null
+                                    ? { holidayRate: HOLIDAY_PAY_RATE }
+                                    : {}),
+                                })
+                              }
                             />
                           </TD>
                           <TD align="right" mono className="font-semibold">
@@ -882,6 +1035,23 @@ function PayrollPageContent() {
                               value={r.line.rate}
                               disabled={!canEdit}
                               onCommit={(n) => saveLine(r.line.id, { rate: n })}
+                            />
+                          </TD>
+                          <TD align="right">
+                            <OptionalNumCell
+                              label={`Holiday rate for ${r.staff.name}`}
+                              value={r.line.holidayRate}
+                              disabled={!canEdit}
+                              onCommit={(n) => saveLine(r.line.id, { holidayRate: n })}
+                            />
+                          </TD>
+                          <TD align="right">
+                            <OptionalNumCell
+                              label={`Fixed amount for ${r.staff.name}`}
+                              value={r.line.fixedAmount}
+                              disabled={!canEdit}
+                              placeholder="none"
+                              onCommit={(n) => saveLine(r.line.id, { fixedAmount: n })}
                             />
                           </TD>
                           <TD align="right" mono className="font-semibold">
@@ -1051,17 +1221,22 @@ function PayrollPageContent() {
               );
             }}
           />
-          <ConfirmDialog
+          <DeleteSheetDialog
             open={confirm === "delete"}
             onOpenChange={(v) => !v && setConfirm(null)}
-            title="Delete this sheet?"
-            description={`This removes ${data.company.name} — ${formatMonthLabel(data.sheet.month)} and all its lines. Staff records are not touched.`}
-            confirmLabel="Delete sheet"
-            onConfirm={() => {
+            sheetId={data.sheet.id}
+            title={`${data.company.name} — ${formatMonthLabel(data.sheet.month)}`}
+            onConfirm={(removeIds) => {
               setConfirm(null);
               void run(
-                () => deletePayrollSheet({ data: { sheetId: data.sheet.id } }),
-                "Sheet deleted.",
+                () =>
+                  deletePayrollSheet({
+                    data: {
+                      sheetId: data.sheet.id,
+                      ...(removeIds.length ? { alsoRemoveStaffIds: removeIds } : {}),
+                    },
+                  }),
+                removeIds.length ? `Sheet and ${removeIds.length} staff deleted.` : "Sheet deleted.",
               ).then(() => setSheetId(null));
             }}
           />

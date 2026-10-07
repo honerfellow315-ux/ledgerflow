@@ -493,6 +493,8 @@ export const payrollCompanyStaff = pgTable(
     rate: numeric("rate", { precision: 10, scale: 2, mode: "number" }),
     startDate: text("start_date"),
     endDate: text("end_date"),
+    // Active | Need P45 | P45 for THIS company only. NULL = use the staff record's own status.
+    contractStatus: text("contract_status"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

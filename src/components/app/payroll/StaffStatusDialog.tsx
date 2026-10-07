@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/select";
 import { Field } from "@/components/app/Field";
 import { updateCompanyStaff, updatePayrollLine } from "@/lib/actions/payroll";
-import { updateStaff } from "@/lib/actions/salary";
 import { errorMessage } from "@/lib/payroll/queries";
 import { useRefreshPayroll } from "@/lib/payroll/sheetQueries";
 import { lineTotals } from "@/lib/payroll/sheetCalc";
@@ -99,20 +98,13 @@ export function StaffStatusDialog({
     setBusy(true);
     try {
       let comment: string | undefined;
-      if (
+      // Contract status and end date are saved for THIS company only, so reinstating or ending
+      // someone here never changes their status in another company.
+      const statusChanged =
         canEditStaff &&
-        status &&
-        (status !== prevStatus || endDate !== (staff.employmentEndDate ?? ""))
-      ) {
-        await updateStaff({
-          data: {
-            id: staff.id,
-            patch: {
-              contractStatus: status,
-              employmentEndDate: status === "Active" ? "" : endDate,
-            },
-          },
-        });
+        Boolean(status) &&
+        (status !== prevStatus || endDate !== (staff.employmentEndDate ?? ""));
+      if (statusChanged) {
         if (status === "Need P45" && prevStatus !== "Need P45") comment = "Request for P45";
         if (status === "Active" && prevStatus !== "Active") comment = "Reinstate";
       }
@@ -120,7 +112,7 @@ export function StaffStatusDialog({
       const leaving = !activeHere && (link?.active ?? true);
       const rateChanged = (link?.rate ?? null) !== rateNum;
       const activeChanged = (link?.active ?? true) !== activeHere;
-      if (link && (rateChanged || activeChanged || (status === "P45" && endDate))) {
+      if (link && (rateChanged || activeChanged || statusChanged)) {
         await updateCompanyStaff({
           data: {
             companyId: company.id,
@@ -128,8 +120,12 @@ export function StaffStatusDialog({
             patch: {
               ...(activeChanged ? { active: activeHere } : {}),
               ...(rateChanged ? { rate: rateNum } : {}),
-              ...(status === "P45" && endDate ? { endDate } : {}),
-              ...(status === "Active" && link.endDate ? { endDate: null } : {}),
+              ...(statusChanged
+                ? {
+                    contractStatus: status as ContractStatus,
+                    endDate: status === "Active" ? null : endDate || null,
+                  }
+                : {}),
             },
             ...(rateChanged && applyRate && !locked ? { applyToSheetId: sheetId } : {}),
             ...(leaving && dropLine && !locked ? { removeFromSheetId: sheetId } : {}),
@@ -163,7 +159,7 @@ export function StaffStatusDialog({
         <div className="space-y-4">
           {canEditStaff ? (
             <>
-              <Field label="Contract status">
+              <Field label="Contract status" hint={`Applies to ${company.name} only.`}>
                 <Select
                   value={status || "Active"}
                   onValueChange={(v) => {

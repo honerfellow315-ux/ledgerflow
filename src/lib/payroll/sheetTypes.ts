@@ -29,6 +29,8 @@ export interface CompanyStaffLink {
   rate: number | null;
   startDate?: string;
   endDate?: string;
+  /** Contract status in THIS company (undefined = the staff record's own status). */
+  contractStatus?: string;
 }
 
 export interface PayrollSheetInfo {
