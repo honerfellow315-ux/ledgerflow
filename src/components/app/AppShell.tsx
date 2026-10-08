@@ -58,6 +58,7 @@ type NavPath =
   | "/payroll"
   | "/staff"
   | "/timesheets"
+  | "/tasks"
   | "/credit-notes"
   | "/statements"
   | "/reports"
@@ -104,6 +105,7 @@ const NAV_GROUPS: { heading: string; items: NavItem[] }[] = [
       { to: "/payroll", label: "Payroll Sheet", icon: FileSpreadsheet, module: "payroll" },
       { to: "/staff", label: "Staff", icon: IdCard, module: "staff" },
       { to: "/timesheets", label: "Timesheet Check", icon: ListChecks, module: null },
+      { to: "/tasks", label: "Tasks", icon: ClipboardList, module: null },
       { to: "/expenses", label: "Expenses", icon: ReceiptText, module: "expenses" },
     ],
   },
