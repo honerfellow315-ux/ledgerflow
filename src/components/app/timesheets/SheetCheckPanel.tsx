@@ -97,7 +97,7 @@ export function SheetCheckPanel({
           label="Difference"
           value={fmtDiff(t.diff)}
           tone={t.diff === 0 ? "success" : t.diff > 0 ? "danger" : "warning"}
-          sublabel={t.diff > 0 ? "Sheet is higher" : t.diff < 0 ? "Sheet is lower" : undefined}
+          {...(t.diff !== 0 ? { sublabel: t.diff > 0 ? "Sheet is higher" : "Sheet is lower" } : {})}
         />
         <SummaryCard
           label="Rows to look at"

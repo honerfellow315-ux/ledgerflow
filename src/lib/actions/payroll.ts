@@ -127,6 +127,7 @@ function toPayrollStaff(r: typeof payrollStaff.$inferSelect, full: boolean): Sta
     base.tag = r.tag;
     base.accountDetail = r.accountDetail;
     base.area = r.area;
+    if (r.notes) base.notes = r.notes;
     for (const k of STAFF_DETAIL_FIELDS) {
       const v = r[k];
       if (v) details[k] = v;
@@ -734,6 +735,7 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
         companyId: company.id,
         staffId: staff.id,
         rate: data.rate ?? null,
+        contractStatus: "Active",
         startDate: staff.employmentStartDate ?? null,
       })
       .onConflictDoUpdate({
@@ -741,6 +743,7 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
         set: {
           active: true,
           endDate: null,
+          contractStatus: "Active",
           ...(data.rate !== undefined ? { rate: data.rate } : {}),
         },
       })
@@ -1144,6 +1147,7 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
       const fills: Partial<Record<StaffDetailField, string>> = {};
       if (person && canFill) {
         for (const f of STAFF_DETAIL_FIELDS) {
+          if (f === "contractStatus" || f === "employmentEndDate") continue; // per company
           const value = cleanDetail(f, row[f]);
           if (value && !person[f]) fills[f] = value;
         }
@@ -1182,6 +1186,7 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
       if (!staff) {
         const details: Record<string, string> = {};
         for (const f of STAFF_DETAIL_FIELDS) {
+          if (f === "contractStatus" || f === "employmentEndDate") continue; // stored on the company link
           const value = cleanDetail(f, row[f]);
           if (value) details[f] = value;
         }
@@ -1202,7 +1207,9 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
       }
 
       if (!linkByStaff.has(staff.id)) {
-        const ended = row.contractStatus === "P45" || staff.contractStatus === "P45";
+        const rowStatus = cleanDetail("contractStatus", row.contractStatus);
+        const linkStatus = (rowStatus || "Active") as ContractStatus;
+        const ended = linkStatus === "P45";
         const endDate = cleanDetail("employmentEndDate", row.employmentEndDate ?? staff.employmentEndDate ?? "");
         const [newLink] = await db
           .insert(payrollCompanyStaff)
@@ -1212,8 +1219,9 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
             staffId: staff.id,
             active: !ended,
             rate: null,
+            contractStatus: linkStatus,
             startDate: staff.employmentStartDate || cleanDetail("employmentStartDate", row.employmentStartDate) || null,
-            endDate: endDate || null,
+            endDate: linkStatus === "Active" ? null : endDate || null,
           })
           .onConflictDoNothing()
           .returning();

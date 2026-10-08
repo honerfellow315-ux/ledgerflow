@@ -27,6 +27,7 @@ import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as StaffIndexRouteImport } from './routes/staff.index'
 import { Route as StatementsIndexRouteImport } from './routes/statements.index'
 import { Route as SubcontractingIndexRouteImport } from './routes/subcontracting.index'
+import { Route as TimesheetsIndexRouteImport } from './routes/timesheets.index'
 import { Route as UsersIndexRouteImport } from './routes/users.index'
 
 const IndexRoute = IndexRouteImport.update({
@@ -119,6 +120,11 @@ const SubcontractingIndexRoute = SubcontractingIndexRouteImport.update({
   path: '/subcontracting/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TimesheetsIndexRoute = TimesheetsIndexRouteImport.update({
+  id: '/timesheets/',
+  path: '/timesheets/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UsersIndexRoute = UsersIndexRouteImport.update({
   id: '/users/',
   path: '/users/',
@@ -144,6 +150,7 @@ export interface FileRoutesByFullPath {
   '/staff/': typeof StaffIndexRoute
   '/statements/': typeof StatementsIndexRoute
   '/subcontracting/': typeof SubcontractingIndexRoute
+  '/timesheets/': typeof TimesheetsIndexRoute
   '/users/': typeof UsersIndexRoute
 }
 export interface FileRoutesByTo {
@@ -165,6 +172,7 @@ export interface FileRoutesByTo {
   '/staff': typeof StaffIndexRoute
   '/statements': typeof StatementsIndexRoute
   '/subcontracting': typeof SubcontractingIndexRoute
+  '/timesheets': typeof TimesheetsIndexRoute
   '/users': typeof UsersIndexRoute
 }
 export interface FileRoutesById {
@@ -187,6 +195,7 @@ export interface FileRoutesById {
   '/staff/': typeof StaffIndexRoute
   '/statements/': typeof StatementsIndexRoute
   '/subcontracting/': typeof SubcontractingIndexRoute
+  '/timesheets/': typeof TimesheetsIndexRoute
   '/users/': typeof UsersIndexRoute
 }
 export interface FileRouteTypes {
@@ -210,6 +219,7 @@ export interface FileRouteTypes {
     | '/staff/'
     | '/statements/'
     | '/subcontracting/'
+    | '/timesheets/'
     | '/users/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -231,6 +241,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/statements'
     | '/subcontracting'
+    | '/timesheets'
     | '/users'
   id:
     | '__root__'
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | '/staff/'
     | '/statements/'
     | '/subcontracting/'
+    | '/timesheets/'
     | '/users/'
   fileRoutesById: FileRoutesById
 }
@@ -274,6 +286,7 @@ export interface RootRouteChildren {
   StaffIndexRoute: typeof StaffIndexRoute
   StatementsIndexRoute: typeof StatementsIndexRoute
   SubcontractingIndexRoute: typeof SubcontractingIndexRoute
+  TimesheetsIndexRoute: typeof TimesheetsIndexRoute
   UsersIndexRoute: typeof UsersIndexRoute
 }
 
@@ -405,6 +418,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SubcontractingIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/timesheets/': {
+      id: '/timesheets/'
+      path: '/timesheets'
+      fullPath: '/timesheets/'
+      preLoaderRoute: typeof TimesheetsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/users/': {
       id: '/users/'
       path: '/users'
@@ -434,6 +454,7 @@ const rootRouteChildren: RootRouteChildren = {
   StaffIndexRoute: StaffIndexRoute,
   StatementsIndexRoute: StatementsIndexRoute,
   SubcontractingIndexRoute: SubcontractingIndexRoute,
+  TimesheetsIndexRoute: TimesheetsIndexRoute,
   UsersIndexRoute: UsersIndexRoute,
 }
 export const routeTree = rootRouteImport

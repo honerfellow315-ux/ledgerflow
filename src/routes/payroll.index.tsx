@@ -1190,6 +1190,7 @@ function PayrollPageContent() {
             onOpenChange={(v) => !v && setEditStaffId(null)}
             staff={editStaff}
             canEdit={can("staff", "edit")}
+            companyScoped
             onSaved={() => refresh()}
           />
           <ConfirmDialog

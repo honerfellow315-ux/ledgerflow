@@ -184,6 +184,7 @@ export function StaffDialog({
   staff,
   canEdit,
   onSaved,
+  companyScoped = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -192,6 +193,12 @@ export function StaffDialog({
   canEdit: boolean;
   /** Called after a successful save with the saved record (used by the payroll sheet to attach a new person). */
   onSaved?: (saved: Staff | undefined, isNew: boolean) => void | Promise<void>;
+  /**
+   * true when opened from a payroll company sheet. There the staff's Status / End date are THAT
+   * company's own values (set from the status dialog), so this form must never write them back
+   * to the shared staff record.
+   */
+  companyScoped?: boolean;
 }) {
   const refresh = useRefreshSalary();
   const [form, setForm] = useState<FormState>(blank);
@@ -268,10 +275,16 @@ export function StaffDialog({
         }
       }
       let saved: Staff | undefined;
-      if (staff)
+      if (staff) {
+        // From a company sheet these two hold that company's value, not the shared record's.
+        const { contractStatus: _cs, employmentEndDate: _ed, ...shared } = values;
         saved = await updateStaff({
-          data: { id: staff.id, patch: { ...values, notes: form.notes.trim() } },
+          data: {
+            id: staff.id,
+            patch: { ...(companyScoped ? shared : values), notes: form.notes.trim() },
+          },
         });
+      }
       else saved = await addStaff({ data: values });
       await onSaved?.(saved, !staff);
       await refresh();
@@ -475,14 +488,17 @@ export function StaffDialog({
                 type="date"
                 value={form.employmentEndDate}
                 onChange={text("employmentEndDate")}
-                disabled={!canEdit}
+                disabled={!canEdit || (companyScoped && !!staff)}
               />
             </Field>
-            <Field label="Status">
+            <Field
+              label="Status"
+              hint={companyScoped && staff ? "Change it from the Status button on the row (per company)." : undefined}
+            >
               <Select
                 value={form.contractStatus || NONE}
                 onValueChange={(v) => set("contractStatus", v === NONE ? "" : v)}
-                disabled={!canEdit}
+                disabled={!canEdit || (companyScoped && !!staff)}
               >
                 <SelectTrigger>
                   <SelectValue />

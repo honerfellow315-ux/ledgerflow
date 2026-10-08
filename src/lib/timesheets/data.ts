@@ -102,7 +102,18 @@ const r = (
   rate: number,
   result: RowResult,
   note?: string,
-): SheetRow => ({ id, date, site, start, end, sheetHours, recordHours, rate, result, note });
+): SheetRow => ({
+  id,
+  date,
+  site,
+  start,
+  end,
+  sheetHours,
+  recordHours,
+  rate,
+  result,
+  ...(note !== undefined ? { note } : {}),
+});
 
 const M = "September 2026";
 
