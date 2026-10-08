@@ -185,6 +185,8 @@ export async function buildPayrollWorkbook(
         row.getCell(25).value = staff.email ?? null;
         row.getCell(26).value = staff.immigrationStatus ?? null;
         row.getCell(28).value = staff.siaNumber ?? null;
+        row.getCell(31).value = staff.notes || null;
+        row.getCell(31).alignment = { wrapText: true, vertical: "top" };
       }
       row.getCell(24).value = staff.contractStatus ?? null;
       row.getCell(27).value = staff.hoursAllowed ?? null;
@@ -247,7 +249,7 @@ export async function buildPayrollWorkbook(
       28: 18,
       29: 15,
       30: 18,
-      31: 18,
+      31: 32,
     };
     for (const [c, w] of Object.entries(widths)) ws.getColumn(Number(c)).width = w;
     ws.autoFilter = { from: { row: 8, column: 1 }, to: { row: 8, column: HEAD.length } };

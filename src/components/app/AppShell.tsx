@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   Banknote,
@@ -35,6 +35,7 @@ import { signOutAndReload } from "@/components/app/LoginGate";
 import { formatMoney } from "@/lib/ledger/calc";
 import type { Module } from "@/lib/permissions";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -132,10 +133,34 @@ function titleFor(pathname: string) {
   return match?.label ?? "LedgerFlow";
 }
 
+const COLLAPSE_KEY = "lf-nav-collapsed";
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const { can, isAdmin } = usePermissions();
+
+  // Remember the collapsed/expanded choice between visits (UI preference only).
+  useEffect(() => {
+    try {
+      setCollapsed(window.localStorage.getItem(COLLAPSE_KEY) === "1");
+    } catch {
+      /* storage unavailable — default to expanded */
+    }
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   const visibleGroups = NAV_GROUPS.map((group) => ({
     ...group,
@@ -143,95 +168,107 @@ export function AppShell({ children }: { children: ReactNode }) {
   })).filter((group) => group.items.length > 0);
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <aside
-        className={cn(
-          "sidebar-shell fixed inset-y-0 left-0 z-40 flex w-60 flex-col text-sidebar-foreground transition-transform lg:translate-x-0",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-        )}
-      >
-        <div className="flex h-16 items-center gap-3 border-b border-sidebar-border/80 px-4">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-mark to-primary text-xs font-bold text-brand-mark-foreground ring-1 ring-white/10">
-            LF
-          </span>
-          <div className="min-w-0 leading-tight">
-            <p className="truncate text-[14px] font-semibold tracking-tight text-sidebar-accent-foreground">
-              LedgerFlow
-            </p>
-            <p className="truncate text-[9.5px] font-medium uppercase tracking-[0.16em] text-sidebar-foreground/50">
-              Receivables Suite
-            </p>
-          </div>
-          <button
-            className="ml-auto shrink-0 lg:hidden"
-            onClick={() => setMobileOpen(false)}
-            aria-label="Close navigation"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
-          {visibleGroups.map((group) => (
-            <div key={group.heading} className="space-y-0.5">
-              <p className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/45">
-                {group.heading}
-              </p>
-              {group.items.map((item) => {
-                const active = item.exact ? pathname === item.to : pathname.startsWith(item.to);
-                return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    onClick={() => setMobileOpen(false)}
-                    className={cn(
-                      "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors duration-150",
-                      active
-                        ? "nav-active text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground/90 hover:bg-white/[0.06] hover:text-sidebar-accent-foreground",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "flex size-6.5 shrink-0 items-center justify-center rounded-md transition-colors duration-150",
-                        active
-                          ? "bg-brand-mark/20 text-brand-mark"
-                          : "bg-white/[0.04] text-sidebar-foreground/70 group-hover:bg-white/10 group-hover:text-sidebar-accent-foreground",
-                      )}
-                    >
-                      <item.icon className="size-3.5 shrink-0" />
-                    </span>
-                    {item.label}
-                    {active ? <ChevronRight className="ml-auto size-3.5 opacity-50" /> : null}
-                  </Link>
-                );
-              })}
+    <TooltipProvider delayDuration={80}>
+      <div className="lf-shell" data-collapsed={collapsed ? "true" : "false"}>
+        <aside
+          data-collapsed={collapsed ? "true" : "false"}
+          data-open={mobileOpen ? "true" : "false"}
+          className="sidebar-shell lf-sidebar text-sidebar-foreground"
+        >
+          {/* Brand + collapse toggle */}
+          <div className="lf-brand">
+            <span className="lf-logo">LF</span>
+            <div className="lf-brand-text">
+              <p className="lf-brand-name">LedgerFlow</p>
+              <p className="lf-brand-sub">Receivables Suite</p>
             </div>
-          ))}
-        </nav>
-
-        <div className="border-t border-sidebar-border/60 p-3">
-          <div className="flex items-center gap-2 rounded-lg px-1.5 py-1">
-            <span className="flex size-1.5 shrink-0 rounded-full bg-brand-mark" />
-            <p className="truncate text-[10px] font-medium tracking-wide text-sidebar-foreground/50">
-              LedgerFlow · Receivables Suite
-            </p>
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+              aria-expanded={!collapsed}
+              className="lf-toggle"
+            >
+              <ChevronDown />
+            </button>
+            <button
+              type="button"
+              className="lf-close"
+              onClick={() => setMobileOpen(false)}
+              aria-label="Close navigation"
+            >
+              <X className="size-4" />
+            </button>
           </div>
+
+          {/* Navigation */}
+          <nav className="lf-nav">
+            {visibleGroups.map((group, gi) => (
+              <div key={group.heading}>
+                {group.heading !== "Overview" ? (
+                  <>
+                    <p className="lf-group-title">{group.heading}</p>
+                    {gi > 0 ? <div className="lf-sep" /> : null}
+                  </>
+                ) : null}
+                {group.items.map((item) => {
+                  const active = item.exact ? pathname === item.to : pathname.startsWith(item.to);
+                  const link = (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      onClick={() => setMobileOpen(false)}
+                      aria-label={item.label}
+                      className={cn("lf-item", active && "nav-active")}
+                    >
+                      <span className="lf-item-icon">
+                        <item.icon />
+                      </span>
+                      <span className="lf-item-label">{item.label}</span>
+                      <ChevronRight className="lf-chev" />
+                    </Link>
+                  );
+                  return collapsed ? (
+                    <Tooltip key={item.to}>
+                      <TooltipTrigger asChild>{link}</TooltipTrigger>
+                      <TooltipContent
+                        side="right"
+                        sideOffset={14}
+                        className="rounded-xl border border-white/10 bg-popover px-3 py-1.5 text-[12px] font-medium text-popover-foreground shadow-menu"
+                      >
+                        {item.label}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    link
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+
+          {/* Footer card */}
+          <div className="lf-footer">
+            <div className="lf-footer-card">
+              <span className="lf-dot" />
+              <div className="lf-footer-text">
+                <b>LedgerFlow</b>
+                <span>Receivables Suite</span>
+                <span>v2.4.0</span>
+              </div>
+              <ChevronRight className="lf-chev" style={{ marginLeft: "auto" }} />
+            </div>
+          </div>
+        </aside>
+
+        {mobileOpen ? <div className="lf-scrim" onClick={() => setMobileOpen(false)} /> : null}
+
+        <div className="app-content lf-content">
+          <AppHeader title={titleFor(pathname)} onMenu={() => setMobileOpen(true)} />
+          <main className="lf-main">{children}</main>
         </div>
-      </aside>
-
-      {mobileOpen ? (
-        <div
-          className="fixed inset-0 z-30 bg-foreground/40 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
-      ) : null}
-
-      <div className="app-content flex min-w-0 flex-1 flex-col lg:pl-60">
-        <AppHeader title={titleFor(pathname)} onMenu={() => setMobileOpen(true)} />
-        <main className="flex-1 p-4 lg:p-6">{children}</main>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }
 
@@ -272,28 +309,23 @@ function AppHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
   const showResults = query.trim().length >= 2;
 
   return (
-    <header
-      role="banner"
-      className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-surface/95 px-4 backdrop-blur-sm lg:px-6"
-    >
-      <button className="lg:hidden" onClick={onMenu} aria-label="Open navigation">
+    <header role="banner" className="lf-header">
+      <button className="lf-menu-btn" onClick={onMenu} aria-label="Open navigation">
         <Menu className="size-5" />
       </button>
-      <div className="flex items-center gap-2">
-        <h1 className="text-base font-semibold tracking-tight text-foreground">{title}</h1>
-      </div>
+      {title !== "Dashboard" ? <h1>{title}</h1> : null}
 
-      <div className="relative ml-auto hidden w-80 md:block lg:w-[26rem]">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="lf-search">
+        <Search />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search clients or invoices…"
+          placeholder="Search clients, companies, invoices…"
           aria-label="Search clients or invoices"
-          className="h-10 w-full rounded-xl border border-border bg-surface-muted/70 pl-9 pr-3 text-[13px] outline-none transition-all duration-150 placeholder:text-muted-foreground focus:border-ring focus:bg-surface focus:shadow-[0_0_0_3px_oklch(0.51_0.09_190/0.14)]"
         />
+        <kbd className="lf-kbd">⌘ K</kbd>
         {showResults ? (
-          <div className="absolute left-0 right-0 top-12 z-30 max-h-80 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-lg">
+          <div className="absolute left-0 right-0 top-12 z-30 max-h-80 overflow-y-auto rounded-2xl border border-white/10 bg-popover/95 p-1.5 shadow-menu backdrop-blur-xl">
             {results.clients.length === 0 && results.invoices.length === 0 ? (
               <p className="px-2 py-3 text-xs text-muted-foreground">No matches found.</p>
             ) : null}
@@ -329,16 +361,9 @@ function AppHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
 
       <Popover>
         <PopoverTrigger asChild>
-          <button
-            className="relative ml-auto flex size-10 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:border-primary/30 hover:bg-accent hover:text-accent-foreground md:ml-0"
-            aria-label="Notifications"
-          >
-            <Bell className="size-4" />
-            {overdueInvoices > 0 ? (
-              <span className="absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
-                {overdueInvoices}
-              </span>
-            ) : null}
+          <button className="lf-icon-btn" aria-label="Notifications">
+            <Bell />
+            {overdueInvoices > 0 ? <span className="lf-badge">{overdueInvoices}</span> : null}
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-72 p-0">
@@ -362,15 +387,9 @@ function AppHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="flex h-10 items-center gap-2 rounded-full border border-border pl-1 pr-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:border-primary/30 hover:bg-accent"
-            aria-label="Account menu"
-          >
-            <span className="flex size-8 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
-              {initials}
-            </span>
-            <span className="hidden max-w-32 truncate sm:inline">{displayName}</span>
+          <button type="button" className="lf-user" aria-label="Account menu">
+            <span className="lf-avatar">{initials}</span>
+            <span className="lf-user-name">{displayName}</span>
             <ChevronDown className="size-3.5 text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
