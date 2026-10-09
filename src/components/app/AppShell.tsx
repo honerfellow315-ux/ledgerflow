@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Clock,
   FileMinus,
+  FilePlus,
   FileText,
   HardHat,
   History,
@@ -60,6 +61,7 @@ type NavPath =
   | "/timesheets"
   | "/tasks"
   | "/payslips"
+  | "/invoice-drafts"
   | "/credit-notes"
   | "/statements"
   | "/reports"
@@ -108,6 +110,7 @@ const NAV_GROUPS: { heading: string; items: NavItem[] }[] = [
       { to: "/timesheets", label: "Timesheet Check", icon: ListChecks, module: null },
       { to: "/tasks", label: "Tasks", icon: ClipboardList, module: null },
       { to: "/payslips", label: "Payslips", icon: Banknote, module: null },
+      { to: "/invoice-drafts", label: "Invoice Drafts", icon: FilePlus, module: null },
       { to: "/expenses", label: "Expenses", icon: ReceiptText, module: "expenses" },
     ],
   },
