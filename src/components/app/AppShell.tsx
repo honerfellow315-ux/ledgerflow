@@ -25,6 +25,7 @@ import {
   Search,
   Settings as SettingsIcon,
   ShieldCheck,
+  Upload,
   Users,
   Wallet,
   X,
@@ -62,6 +63,7 @@ type NavPath =
   | "/tasks"
   | "/payslips"
   | "/invoice-drafts"
+  | "/bank-match"
   | "/credit-notes"
   | "/statements"
   | "/reports"
@@ -111,6 +113,7 @@ const NAV_GROUPS: { heading: string; items: NavItem[] }[] = [
       { to: "/tasks", label: "Tasks", icon: ClipboardList, module: null },
       { to: "/payslips", label: "Payslips", icon: Banknote, module: null },
       { to: "/invoice-drafts", label: "Invoice Drafts", icon: FilePlus, module: null },
+      { to: "/bank-match", label: "Bank Match", icon: Upload, module: null },
       { to: "/expenses", label: "Expenses", icon: ReceiptText, module: "expenses" },
     ],
   },
