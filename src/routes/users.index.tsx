@@ -90,6 +90,8 @@ const MODULE_ICONS: Record<Module, typeof LayoutDashboard> = {
   reports: Receipt,
   payroll: FileSpreadsheet,
   settings: SettingsIcon,
+  tasks: ClipboardList,
+  followUps: ClipboardList,
 };
 
 function UsersPage() {

@@ -15,8 +15,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pill } from "@/components/app/timesheets/badges";
+import type { TaskPerson } from "@/lib/actions/tasks";
 import {
-  PEOPLE,
   STATUS_META,
   dayIso,
   dayLabel,
@@ -38,19 +38,21 @@ export function TaskActions({
   task,
   canVerify,
   onMove,
+  disabled = false,
 }: {
   task: Task;
   canVerify: boolean;
   onMove: Move;
+  disabled?: boolean;
 }) {
   const go = (to: TaskStatus, text: string) => onMove(task.id, to, text);
   if (task.status === "todo")
     return (
       <div className="flex justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={() => go("in_progress", "Started the task")}>
+        <Button size="sm" variant="outline" disabled={disabled} onClick={() => go("in_progress", "Started the task")}>
           Start
         </Button>
-        <Button size="sm" onClick={() => go("completed", "Marked the task as done")}>
+        <Button size="sm" disabled={disabled} onClick={() => go("completed", "Marked the task as done")}>
           Mark done
         </Button>
       </div>
@@ -58,7 +60,7 @@ export function TaskActions({
   if (task.status === "in_progress")
     return (
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => go("completed", "Marked the task as done")}>
+        <Button size="sm" disabled={disabled} onClick={() => go("completed", "Marked the task as done")}>
           Mark done
         </Button>
       </div>
@@ -66,10 +68,10 @@ export function TaskActions({
   if (task.status === "completed")
     return canVerify ? (
       <div className="flex justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={() => go("in_progress", "Sent back for more work")}>
+        <Button size="sm" variant="outline" disabled={disabled} onClick={() => go("in_progress", "Sent back for more work")}>
           Send back
         </Button>
-        <Button size="sm" onClick={() => go("verified", "Verified as correct")}>
+        <Button size="sm" disabled={disabled} onClick={() => go("verified", "Verified as correct")}>
           <Check className="size-3.5" /> Verify
         </Button>
       </div>
@@ -86,11 +88,16 @@ export function TaskDetailDialog({
   canVerify,
   onClose,
   onMove,
+  onDelete,
+  busy = false,
 }: {
   task: Task | null;
   canVerify: boolean;
   onClose: () => void;
   onMove: Move;
+  /** Admin only. */
+  onDelete?: (task: Task) => void;
+  busy?: boolean;
 }) {
   return (
     <Dialog open={Boolean(task)} onOpenChange={(o) => (o ? undefined : onClose())}>
@@ -112,7 +119,14 @@ export function TaskDetailDialog({
                 {task.notes}
               </p>
             ) : null}
-            <TaskActions task={task} canVerify={canVerify} onMove={onMove} />
+            <TaskActions task={task} canVerify={canVerify} onMove={onMove} disabled={busy} />
+            {onDelete ? (
+              <div>
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => onDelete(task)}>
+                  Delete this task
+                </Button>
+              </div>
+            ) : null}
             <div>
               <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Activity
@@ -139,25 +153,30 @@ export function TaskDetailDialog({
 export interface NewTaskInput {
   text: string;
   notes: string;
-  assignee: string;
+  /** User id of the person the task is for (only used when an admin picks someone). */
+  assigneeId: string;
   date: string;
   alreadyDone: boolean;
 }
 
 function NewTaskForm({
-  actor,
+  meId,
+  people,
   canAssign,
+  busy,
   onCancel,
   onCreate,
 }: {
-  actor: string;
+  meId: string;
+  people: TaskPerson[];
   canAssign: boolean;
+  busy: boolean;
   onCancel: () => void;
   onCreate: (input: NewTaskInput) => void;
 }) {
   const [text, setText] = useState("");
   const [notes, setNotes] = useState("");
-  const [assignee, setAssignee] = useState(actor);
+  const [assignee, setAssignee] = useState(meId);
   const [date, setDate] = useState(dayIso(0));
   const [alreadyDone, setAlreadyDone] = useState(false);
 
@@ -188,9 +207,9 @@ function NewTaskForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PEOPLE.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p === actor ? `${p} (me)` : p}
+                {people.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.id === meId ? `${p.name} (me)` : p.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -234,8 +253,8 @@ function NewTaskForm({
           Cancel
         </Button>
         <Button
-          disabled={text.trim().length === 0 || !date}
-          onClick={() => onCreate({ text: text.trim(), notes: notes.trim(), assignee, date, alreadyDone })}
+          disabled={busy || text.trim().length === 0 || !date}
+          onClick={() => onCreate({ text: text.trim(), notes: notes.trim(), assigneeId: assignee, date, alreadyDone })}
         >
           Add task
         </Button>
@@ -247,14 +266,18 @@ function NewTaskForm({
 export function NewTaskDialog({
   open,
   onOpenChange,
-  actor,
+  meId,
+  people,
   canAssign,
+  busy = false,
   onCreate,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  actor: string;
+  meId: string;
+  people: TaskPerson[];
   canAssign: boolean;
+  busy?: boolean;
   onCreate: (input: NewTaskInput) => void;
 }) {
   return (
@@ -262,8 +285,10 @@ export function NewTaskDialog({
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         {open ? (
           <NewTaskForm
-            actor={actor}
+            meId={meId}
+            people={people}
             canAssign={canAssign}
+            busy={busy}
             onCancel={() => onOpenChange(false)}
             onCreate={onCreate}
           />

@@ -1,9 +1,9 @@
-import { toast } from "sonner";
 import { ArrowLeft, ArrowRight, Download } from "@/lib/icons";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "@/lib/ledger/calc";
 import { formatMonthLabel } from "@/lib/payroll/calc";
+import { maskNi } from "@/lib/timesheets/data";
 import { earningLines, payslipTotals, type PayslipRow } from "@/lib/payslips/data";
 
 const hrs = (n: number) => `${Number(n.toFixed(2))}`;
@@ -13,11 +13,15 @@ export function PayslipPreviewDialog({
   index,
   onIndex,
   onClose,
+  onDownload,
+  busy = false,
 }: {
   rows: PayslipRow[];
   index: number | null;
   onIndex: (i: number) => void;
   onClose: () => void;
+  onDownload: (row: PayslipRow) => void;
+  busy?: boolean;
 }) {
   const p = index === null ? null : (rows[index] ?? null);
   return (
@@ -28,7 +32,7 @@ export function PayslipPreviewDialog({
             <DialogHeader>
               <DialogTitle>Payslip preview</DialogTitle>
               <DialogDescription>
-                {index + 1} of {rows.length}. Use the arrows to flip through the staff.
+                {index + 1} of {rows.length} on this page. The printed payslip shows the full NI number.
               </DialogDescription>
             </DialogHeader>
 
@@ -54,7 +58,7 @@ export function PayslipPreviewDialog({
                 </div>
                 <div>
                   <dt className="text-slate-500">NI number</dt>
-                  <dd className="num font-medium">{p.ni || "Not recorded"}</dd>
+                  <dd className="num font-medium">{p.ni.trim() ? maskNi(p.ni) : "Not recorded"}</dd>
                 </div>
               </dl>
 
@@ -107,7 +111,7 @@ export function PayslipPreviewDialog({
                   <ArrowRight className="size-4" />
                 </Button>
               </div>
-              <Button onClick={() => toast.info("Preview only: the PDF download is connected in the next phase.")}>
+              <Button disabled={busy} onClick={() => onDownload(p)}>
                 <Download className="size-4" /> Download PDF
               </Button>
             </div>

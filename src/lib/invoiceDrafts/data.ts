@@ -1,9 +1,13 @@
 /**
- * Invoice drafts — UI only (sample clients and shifts, nothing is saved).
- * The money uses the same hoursInvoiceAmount() as the real Hours x Rate invoice, so a draft
- * can never disagree with the invoice it turns into. Phase B swaps buildDrafts() for real shifts.
+ * Invoice drafts: types and rules shared by the screen and the server.
+ *
+ * The money here uses the very same functions as the real invoice screen
+ * (hoursInvoiceAmount, vatAmount, amountIncVat from lib/ledger/calc), and the server
+ * recalculates everything from the database when it creates an invoice. So a draft can
+ * never disagree with the invoice it turns into, whatever the browser sends.
  */
-import { hoursInvoiceAmount, round2 } from "@/lib/ledger/calc";
+import { amountIncVat, hoursInvoiceAmount, round2, vatAmount } from "@/lib/ledger/calc";
+import type { Invoice } from "@/lib/ledger/types";
 
 export interface SiteHours {
   site: string;
@@ -12,93 +16,132 @@ export interface SiteHours {
 }
 
 export interface Draft {
+  /** The client's id (one draft per client per month). */
   id: string;
+  clientId: string;
   client: string;
   month: string;
-  sites: SiteHours[];
+  /** The client names exactly as they appear in the shift export (one client can have several). */
+  shiftNames: string[];
+  shifts: number;
+  hours: number;
+  /** Hours paid through payroll, from the Hours screen entry (0 = none). */
   payrollHours: number;
   rate: number | null;
   payrollRate: number | null;
   vatRate: number;
-  /** Hours already typed into the Hours screen for this client and month (null = none). */
+  /** Hours typed into the Hours screen for this client and month (null = nothing entered). */
   hoursEntry: number | null;
-  invoiced: boolean;
+  clientStatus: string;
+  duplicateShifts: number;
+  outsideMonthShifts: number;
+  /** The invoice this month already became (null = not invoiced yet). */
+  invoiceId: string | null;
+  invoiceNumber: string | null;
 }
 
 export type DraftState = "ready" | "check" | "done";
 
-export function draftMonths(count = 4): string[] {
-  const out: string[] = [];
-  const d = new Date();
-  d.setDate(1);
-  for (let i = 0; i < count; i++) {
-    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-    d.setMonth(d.getMonth() - 1);
-  }
-  return out;
+export interface DraftIssue {
+  text: string;
+  /** hard = the invoice cannot be created until it is fixed; soft = can be created after a deliberate OK. */
+  kind: "hard" | "soft";
 }
 
-export function draftTotals(d: Draft) {
-  const hours = round2(d.sites.reduce((a, s) => a + s.hours, 0));
-  const payrollHours = Math.min(d.payrollHours, hours);
-  const exVat = hoursInvoiceAmount({
-    hours,
-    rate: d.rate ?? 0,
-    payrollHours,
-    payrollRate: d.payrollRate ?? 0,
-  });
-  const vat = round2(exVat * (d.vatRate / 100));
+/** Normalises a client name for matching: lower case, letters and digits only. */
+export function nameKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const h2 = (n: number) => Number(n.toFixed(2));
+
+export function draftTotals(
+  d: Pick<Draft, "hours" | "payrollHours" | "rate" | "payrollRate" | "vatRate" | "shifts">,
+) {
+  const hours = round2(d.hours);
+  const rate = d.rate ?? 0;
+  const payrollRate = d.payrollRate ?? 0;
+  const split = d.payrollHours > 0 && payrollRate > 0;
+  const payrollHours = split ? Math.min(round2(d.payrollHours), hours) : 0;
+  const exVat = hoursInvoiceAmount({ hours, rate, payrollHours, payrollRate });
+  const payrollValue = split ? round2(payrollHours * payrollRate) : 0;
+  // Same rule as the invoice screen's payroll split: payroll hours carry no VAT.
+  const asInvoice = {
+    amountExVat: exVat,
+    vatIncluded: true,
+    vatRate: d.vatRate,
+    vatMode: split ? "remaining" : "full",
+    vatPaidBefore: split ? payrollValue : undefined,
+  } as Invoice;
   return {
     hours,
     payrollHours,
     normalHours: round2(hours - payrollHours),
     exVat,
-    vat,
-    total: round2(exVat + vat),
-    shifts: d.sites.reduce((a, s) => a + s.shifts, 0),
+    payrollValue,
+    /** Rounded so the two lines always add up to the ex-VAT total to the penny. */
+    normalValue: round2(exVat - payrollValue),
+    vat: vatAmount(asInvoice),
+    total: amountIncVat(asInvoice),
+    vatMode: (split ? "remaining" : "full") as "full" | "remaining",
+    shifts: d.shifts,
   };
 }
 
-export function draftState(d: Draft): { state: DraftState; text: string } {
-  const t = draftTotals(d);
-  if (d.invoiced) return { state: "done", text: "Already invoiced" };
-  if (d.rate === null || d.rate <= 0) return { state: "check", text: "No rate set" };
-  if (d.payrollHours > t.hours) return { state: "check", text: "Payroll hours are more than shift hours" };
-  if (d.hoursEntry !== null && Math.abs(d.hoursEntry - t.hours) > 0.001) {
-    const diff = round2(t.hours - d.hoursEntry);
-    return { state: "check", text: `Differs from Hours screen by ${diff > 0 ? "+" : ""}${diff} h` };
+export function draftIssues(d: Draft): DraftIssue[] {
+  const out: DraftIssue[] = [];
+  if (d.rate === null || d.rate <= 0) out.push({ kind: "hard", text: "No rate set for this client" });
+  if (d.hours <= 0) out.push({ kind: "hard", text: "No hours this month" });
+  if (d.payrollHours > 0 && (d.payrollRate ?? 0) <= 0) {
+    out.push({ kind: "hard", text: "Payroll hours have no payroll rate (set it on the Hours screen)" });
   }
-  return { state: "ready", text: "Ready" };
+  if (d.payrollHours > d.hours + 0.001) out.push({ kind: "hard", text: "Payroll hours are more than shift hours" });
+  if (d.hoursEntry !== null && Math.abs(d.hoursEntry - d.hours) > 0.001) {
+    const diff = round2(d.hours - d.hoursEntry);
+    out.push({ kind: "soft", text: `Shifts differ from the Hours screen by ${diff > 0 ? "+" : ""}${h2(diff)} h` });
+  }
+  if (d.duplicateShifts > 0) {
+    out.push({
+      kind: "soft",
+      text: `${d.duplicateShifts} shift${d.duplicateShifts === 1 ? "" : "s"} look like exact duplicates`,
+    });
+  }
+  if (d.outsideMonthShifts > 0) {
+    out.push({
+      kind: "soft",
+      text: `${d.outsideMonthShifts} shift${d.outsideMonthShifts === 1 ? " is" : "s are"} dated outside this month`,
+    });
+  }
+  if (d.clientStatus !== "active") out.push({ kind: "soft", text: `Client is ${d.clientStatus}` });
+  return out;
 }
 
-const site = (name: string, shifts: number, hours: number): SiteHours => ({ site: name, shifts, hours });
+export function draftState(d: Draft): { state: DraftState; text: string; issues: DraftIssue[] } {
+  if (d.invoiceId) {
+    return {
+      state: "done",
+      text: d.invoiceNumber ? `Invoiced (${d.invoiceNumber})` : "Already invoiced",
+      issues: [],
+    };
+  }
+  const issues = draftIssues(d);
+  if (issues.length === 0) return { state: "ready", text: "Ready", issues };
+  return { state: "check", text: issues[0]?.text ?? "Needs a look", issues };
+}
 
-export function buildDrafts(month: string): Draft[] {
-  const bump = (Number(month.slice(-2)) % 3) * 8;
-  const mk = (
-    i: number,
-    client: string,
-    sites: SiteHours[],
-    rest: Omit<Draft, "id" | "client" | "month" | "sites">,
-  ): Draft => ({ id: `${month}-${i}`, client, month, sites, ...rest });
-  return [
-    mk(1, "Northgate Retail Ltd", [site("Northgate Retail Park", 24, 288 + bump), site("Canal Street Depot", 12, 144)], {
-      payrollHours: 96, rate: 14.5, payrollRate: 12.45, vatRate: 20, hoursEntry: 432 + bump, invoiced: false,
-    }),
-    mk(2, "Marsh Lane Stores", [site("Marsh Lane Store", 22, 176)], {
-      payrollHours: 0, rate: 13.75, payrollRate: null, vatRate: 20, hoursEntry: 176, invoiced: false,
-    }),
-    mk(3, "Docklands Logistics", [site("Docklands Site", 18, 216), site("Harbour Warehouse", 10, 80)], {
-      payrollHours: 0, rate: 14, payrollRate: null, vatRate: 20, hoursEntry: 296, invoiced: true,
-    }),
-    mk(4, "Riverside Offices", [site("Riverside Offices", 21, 178.5)], {
-      payrollHours: 40, rate: 15.2, payrollRate: 12.45, vatRate: 20, hoursEntry: 170, invoiced: false,
-    }),
-    mk(5, "Harbour Warehousing", [site("Harbour Warehouse", 16, 128 + bump)], {
-      payrollHours: 0, rate: null, payrollRate: null, vatRate: 20, hoursEntry: null, invoiced: false,
-    }),
-    mk(6, "Crest Events", [site("Station Yard", 6, 72), site("Arena Gate B", 8, 96)], {
-      payrollHours: 0, rate: 16, payrollRate: null, vatRate: 20, hoursEntry: null, invoiced: false,
-    }),
-  ];
+/** Only drafts with no hard problem can be created, and soft ones only on a deliberate OK. */
+export const canCreateDraft = (issues: DraftIssue[]) => issues.every((i) => i.kind === "soft");
+
+/** The description the invoice gets (it can be edited afterwards on the Invoices screen). */
+export function draftDescription(monthLabel: string): string {
+  return `Security services, ${monthLabel}`;
+}
+
+/** A shift-export client name that could not be matched to exactly one client. */
+export interface UnmatchedName {
+  name: string;
+  shifts: number;
+  hours: number;
+  /** none = no client has this name; several = more than one client has it. */
+  reason: "none" | "several";
 }

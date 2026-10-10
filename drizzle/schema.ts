@@ -662,3 +662,160 @@ export const staffTrash = pgTable(
   },
   (t) => [index("staff_trash_staff_idx").on(t.staffId)],
 );
+
+// Timesheet Check: sheets that staff send, and the comparison of each row with our own
+// shift records. Created by schema/timesheets-migration.sql (run it BEFORE deploying).
+export const timesheetSheets = pgTable(
+  "timesheet_sheets",
+  {
+    id: text("id").primaryKey(),
+    month: text("month").notNull(), // yyyy-mm
+    fileName: text("file_name").notNull(),
+    sheetLabel: text("sheet_label").notNull().default(""),
+    fileHash: text("file_hash").notNull(),
+    format: text("format").notNull().default("excel"), // excel | pdf | photo
+    uploadedBy: text("uploaded_by").notNull().default(""),
+    uploadedByName: text("uploaded_by_name").notNull().default(""),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+    staffId: text("staff_id").references(() => payrollStaff.id, { onDelete: "set null" }),
+    matchedBy: text("matched_by").notNull().default("none"), // ni | name | none
+    staffConfirmedAt: timestamp("staff_confirmed_at", { withTimezone: true }),
+    personName: text("person_name").notNull().default(""),
+    personNi: text("person_ni").notNull().default(""),
+    personKey: text("person_key").notNull(),
+    statedHours: numeric("stated_hours", { precision: 10, scale: 2, mode: "number" }),
+    sheetHours: numeric("sheet_hours", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
+    recordHours: numeric("record_hours", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
+    rowCount: integer("row_count").notNull().default(0),
+    issueCount: integer("issue_count").notNull().default(0),
+    status: text("status").notNull().default("needs_review"), // ready | needs_review | staff_not_found
+    readNote: text("read_note"),
+    comparedAt: timestamp("compared_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("timesheet_sheets_person_month_uq").on(t.personKey, t.month),
+    uniqueIndex("timesheet_sheets_file_uq").on(t.fileHash, t.sheetLabel),
+    index("timesheet_sheets_month_idx").on(t.month, t.uploadedAt),
+    index("timesheet_sheets_staff_idx").on(t.staffId),
+  ],
+);
+
+export const timesheetRows = pgTable(
+  "timesheet_rows",
+  {
+    id: text("id").primaryKey(),
+    sheetId: text("sheet_id")
+      .notNull()
+      .references(() => timesheetSheets.id, { onDelete: "cascade" }),
+    lineNo: integer("line_no").notNull().default(0),
+    /** true = a shift from OUR records that is missing on the sheet. */
+    fromRecords: boolean("from_records").notNull().default(false),
+    date: text("date").notNull().default(""),
+    site: text("site").notNull().default(""),
+    siteAlt: text("site_alt").notNull().default(""),
+    startTime: text("start_time").notNull().default(""),
+    endTime: text("end_time").notNull().default(""),
+    sheetHours: numeric("sheet_hours", { precision: 10, scale: 2, mode: "number" }),
+    rate: money("rate"),
+    amount: money("amount"),
+    expense: money("expense"),
+    uncertain: boolean("uncertain").notNull().default(false),
+    parseNote: text("parse_note").notNull().default(""),
+    recordHours: numeric("record_hours", { precision: 10, scale: 2, mode: "number" }),
+    result: text("result").notNull().default("check_reading"),
+    note: text("note").notNull().default(""),
+  },
+  (t) => [index("timesheet_rows_sheet_idx").on(t.sheetId, t.lineNo)],
+);
+
+
+// Tasks: free-text tasks that an admin gives out (or anyone logs for themselves), with an
+// activity history per task. Created by schema/tasks-migration.sql (run it BEFORE deploying).
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: text("id").primaryKey(),
+    text: text("text").notNull(),
+    notes: text("notes").notNull().default(""),
+    assigneeId: text("assignee_id").references(() => users.id, { onDelete: "set null" }),
+    assigneeName: text("assignee_name").notNull().default(""),
+    createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    date: text("date").notNull(), // yyyy-mm-dd, the day the task is for
+    status: text("status").notNull().default("todo"), // todo | in_progress | completed | verified
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("tasks_assignee_idx").on(t.assigneeId, t.status, t.date),
+    index("tasks_date_idx").on(t.date),
+    index("tasks_status_idx").on(t.status, t.date),
+  ],
+);
+
+export const taskEvents = pgTable(
+  "task_events",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    byName: text("by_name").notNull().default(""),
+    text: text("text").notNull(),
+  },
+  (t) => [index("task_events_task_idx").on(t.taskId, t.at)],
+);
+
+// Invoice Drafts: links a client name from the shift export to a client, and records which
+// client + month already became an invoice. Created by schema/invoice-drafts-migration.sql
+// (run it BEFORE deploying).
+export const invoiceDraftAliases = pgTable("invoice_draft_aliases", {
+  nameKey: text("name_key").primaryKey(),
+  shiftName: text("shift_name").notNull(),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => clients.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const invoiceDraftRuns = pgTable(
+  "invoice_draft_runs",
+  {
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    month: text("month").notNull(), // yyyy-mm
+    invoiceId: text("invoice_id").references(() => invoices.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("invoice_draft_runs_pk").on(t.clientId, t.month)],
+);
+
+// Follow-ups: every chase of an overdue client, and where each client stands (next chase,
+// promised date). Created by schema/follow-ups-migration.sql (run it BEFORE deploying).
+export const followUpContacts = pgTable(
+  "follow_up_contacts",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    method: text("method").notNull(),
+    note: text("note").notNull(),
+    byId: text("by_id").references(() => users.id, { onDelete: "set null" }),
+    byName: text("by_name").notNull().default(""),
+  },
+  (t) => [index("follow_up_contacts_client_idx").on(t.clientId, t.at)],
+);
+
+export const followUpState = pgTable("follow_up_state", {
+  clientId: text("client_id")
+    .primaryKey()
+    .references(() => clients.id, { onDelete: "cascade" }),
+  nextFollowUp: text("next_follow_up"),
+  promisedDate: text("promised_date"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

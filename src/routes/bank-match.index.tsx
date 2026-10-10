@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Check, CheckCircle2, Info, Search, Upload } from "@/lib/icons";
+import { AlertTriangle, Check, CheckCircle2, ChevronLeft, ChevronRight, Search, Trash2, Upload } from "@/lib/icons";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
@@ -9,10 +10,25 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { SummaryCard } from "@/components/app/SummaryCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Pill } from "@/components/app/timesheets/badges";
 import { MatchDialog } from "@/components/app/bankMatch/MatchDialog";
+import { ConfirmDialog } from "@/components/app/ConfirmDialog";
+import {
+  confirmLine,
+  confirmMatched,
+  deleteBankStatement,
+  ignoreBankLine,
+  listBank,
+  undoBankLine,
+  uploadStatement,
+  type BankFilter,
+} from "@/lib/actions/bankMatch";
 import { formatDate, formatMoney } from "@/lib/ledger/calc";
-import { buildLines, invoiceById, type BankLine, type LineStatus } from "@/lib/bankMatch/data";
+import { errorMessage } from "@/lib/payroll/queries";
+import { unwrap } from "@/lib/unwrap";
+import { parseBankFile } from "@/lib/bankMatch/parse";
+import type { BankLine, LineStatus } from "@/lib/bankMatch/data";
 
 export const Route = createFileRoute("/bank-match/")({
   head: () => ({
@@ -25,61 +41,150 @@ export const Route = createFileRoute("/bank-match/")({
 });
 
 function BankMatchPage() {
-  // Admin-only while this is a preview, same pattern as the other new screens.
   return (
-    <RequireView module="dashboard">
+    <RequireView module="payments">
       <BankMatchContent />
     </RequireView>
   );
 }
 
-const ORIGINAL = buildLines();
+const PAGE_SIZE = 50;
 
 const STATUS: Record<LineStatus, { label: string; tone: "good" | "warn" | "bad" | "mute" }> = {
   matched: { label: "Matched", tone: "good" },
   review: { label: "Needs a look", tone: "warn" },
   none: { label: "No match", tone: "bad" },
-  confirmed: { label: "Confirmed", tone: "good" },
+  confirmed: { label: "Recorded", tone: "good" },
   ignored: { label: "Ignored", tone: "mute" },
 };
 
-const PENDING_FIRST: Record<LineStatus, number> = { review: 0, none: 1, matched: 2, confirmed: 3, ignored: 4 };
-
 function BankMatchContent() {
-  const { isAdmin, ready } = usePermissions();
-  const [lines, setLines] = useState<BankLine[]>(() => buildLines());
-  const [status, setStatus] = useState<LineStatus | null>(null);
-  const [q, setQ] = useState("");
-  const [choosing, setChoosing] = useState<BankLine | null>(null);
+  const { can, ready } = usePermissions();
+  const allowed = can("payments", "view") && can("invoices", "view");
+  const canWrite = can("payments", "create");
+  const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return lines
-      .filter((l) => (status ? l.status === status : true))
-      .filter((l) => (needle ? l.description.toLowerCase().includes(needle) : true))
-      .sort((a, b) => PENDING_FIRST[a.status] - PENDING_FIRST[b.status] || b.date.localeCompare(a.date));
-  }, [lines, status, q]);
+  const [filter, setFilter] = useState<BankFilter>("all");
+  const [q, setQ] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [choosing, setChoosing] = useState<BankLine | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problems, setProblems] = useState<{ file: string; list: string[] } | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(q.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const listQ = useQuery({
+    queryKey: ["bankMatch", "list", filter, search, page],
+    queryFn: () => unwrap(listBank({ data: { filter, search, page, pageSize: PAGE_SIZE } })),
+    enabled: ready && allowed,
+    placeholderData: keepPreviousData,
+  });
+  const data = listQ.data;
+  const rows = data?.rows ?? [];
+  const counts = data?.counts;
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const refresh = () => qc.invalidateQueries({ queryKey: ["bankMatch"] });
+  // Recording a payment also changes invoices, payments, statements and follow-ups.
+  const refreshAll = async () => {
+    await Promise.all([
+      refresh(),
+      qc.invalidateQueries({ queryKey: ["followUps"] }),
+      qc.invalidateQueries({ queryKey: ["invoices"] }),
+      qc.invalidateQueries({ queryKey: ["payments"] }),
+    ]);
+  };
 
   if (!ready) return null;
-  if (!isAdmin) {
+  if (!allowed) {
     return (
       <Panel>
-        <EmptyState title="You don't have access to this" description="Only administrators can open Bank Match for now." />
+        <EmptyState
+          title="You don't have access to this"
+          description="Bank Match shows invoice amounts and records payments, so you need Payments and Invoices access."
+        />
       </Panel>
     );
   }
 
-  const set = (id: string, patch: Partial<BankLine>) =>
-    setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
-  const undo = (id: string) => {
-    const o = ORIGINAL.find((l) => l.id === id);
-    if (!o) return;
-    set(id, o.status === "confirmed" || o.status === "ignored" ? { status: "none", invoiceId: null, reason: "No match yet." } : { ...o });
+  async function run<T>(fn: () => Promise<T>, fallback: string): Promise<T | null> {
+    if (busy) return null;
+    setBusy(true);
+    try {
+      return await fn();
+    } catch (err) {
+      toast.error(errorMessage(err, fallback));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onFile(file: File) {
+    await run(async () => {
+      const parsed = await parseBankFile(file);
+      if (parsed.problems.length > 0) {
+        setProblems({ file: file.name, list: parsed.problems.slice(0, 8) });
+        return;
+      }
+      if (parsed.lines.length === 0) {
+        setProblems({ file: file.name, list: ["No money-in payments were found in this file."] });
+        return;
+      }
+      const res = await unwrap(
+        uploadStatement({ data: { fileName: parsed.fileName, fileHash: parsed.fileHash, skippedOut: parsed.skippedOut, lines: parsed.lines } }),
+      );
+      toast.success(
+        `${res.added} new payment${res.added === 1 ? "" : "s"} added${res.alreadyThere ? `, ${res.alreadyThere} already uploaded before` : ""}. Money going out (${parsed.skippedOut}) was skipped.`,
+      );
+      setFilter("all");
+      setPage(1);
+      await refresh();
+    }, "The statement could not be uploaded.");
+  }
+
+  async function confirm(line: BankLine, invoiceId: string, recordAnyway: boolean) {
+    await run(async () => {
+      const r = await unwrap(confirmLine({ data: { lineId: line.id, invoiceId, recordAnyway } }));
+      if (!r.ok) {
+        toast.error(r.reason);
+        if (!r.needsTick) await refresh();
+        return;
+      }
+      toast.success("Payment recorded.");
+      setChoosing(null);
+      await refreshAll();
+    }, "The payment could not be recorded.");
+  }
+
+  async function confirmAll() {
+    setBulkOpen(false);
+    await run(async () => {
+      const ids = (await unwrap(listBank({ data: { filter: "matched", search: "", page: 1, pageSize: 100 } }))).rows.map((r) => r.id);
+      if (ids.length === 0) return;
+      const res = await unwrap(confirmMatched({ data: { lineIds: ids } }));
+      if (res.skipped.length > 0) {
+        toast.warning(`${res.confirmed} recorded. ${res.skipped.length} left for you to check: ${res.skipped[0]!.reason}`);
+      } else toast.success(`${res.confirmed} payment${res.confirmed === 1 ? "" : "s"} recorded.`);
+      await refreshAll();
+    }, "The payments could not be recorded.");
+  }
+
+  const matchedN = counts?.matched ?? 0;
+  const pick = (s: BankFilter) => {
+    setFilter(filter === s ? "all" : s);
+    setPage(1);
   };
-  const count = (s: LineStatus) => lines.filter((l) => l.status === s).length;
-  const total = lines.reduce((a, l) => a + l.amount, 0);
-  const autoCount = count("matched");
 
   return (
     <div className="space-y-5">
@@ -87,95 +192,93 @@ function BankMatchContent() {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Bank Match</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Upload your bank statement and match the payments you received to your invoices.
+            Upload your bank statement (CSV or Excel). Payments you received are matched to your open invoices, and recorded as a payment only when you confirm.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            disabled={autoCount === 0}
-            onClick={() => {
-              setLines((prev) => prev.map((l) => (l.status === "matched" ? { ...l, status: "confirmed" } : l)));
-              toast.success("Preview only: nothing was recorded as a payment.");
-            }}
-          >
-            <Check className="size-4" /> Confirm all matched{autoCount ? ` (${autoCount})` : ""}
-          </Button>
-          <Button onClick={() => fileRef.current?.click()}>
-            <Upload className="size-4" /> Upload bank statement
-          </Button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            className="sr-only"
-            aria-label="Choose a bank statement file"
-            onChange={(e) => {
-              if (e.target.files?.length) toast.info("Preview only: reading the statement is connected in the next phase.");
-              e.target.value = "";
-            }}
-          />
-        </div>
-      </div>
-
-      <div
-        role="note"
-        className="flex items-start gap-2.5 rounded-lg border border-border bg-surface-muted/60 px-4 py-3 text-[13px] text-foreground"
-      >
-        <Info className="mt-0.5 size-4 text-primary" aria-hidden="true" />
-        <p>This is a preview with sample bank lines and invoices. Nothing here is saved or recorded.</p>
+        {canWrite ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" disabled={busy || matchedN === 0} onClick={() => setBulkOpen(true)}>
+              <Check className="size-4" /> Confirm all matched{matchedN ? ` (${matchedN})` : ""}
+            </Button>
+            <Button disabled={busy} onClick={() => fileRef.current?.click()}>
+              <Upload className="size-4" /> Upload bank statement
+            </Button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,.xlsx"
+              className="sr-only"
+              aria-label="Choose a bank statement file"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) void onFile(f);
+              }}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard label="Payments in" value={formatMoney(total)} sublabel={`${lines.length} lines`} />
+        <SummaryCard label="Payments waiting" value={formatMoney(data?.waitingTotal ?? 0)} sublabel="Not yet recorded or ignored" />
         <SummaryCard
           label="Matched"
-          value={String(autoCount)}
+          value={String(matchedN)}
           sublabel="Ready to confirm"
           icon={CheckCircle2}
           tone="success"
-          active={status === "matched"}
-          onClick={() => setStatus(status === "matched" ? null : "matched")}
+          active={filter === "matched"}
+          onClick={() => pick("matched")}
         />
         <SummaryCard
           label="Need a look"
-          value={String(count("review"))}
+          value={String(counts?.review ?? 0)}
           sublabel="Pick the right invoice"
           icon={AlertTriangle}
-          tone={count("review") ? "warning" : "success"}
-          active={status === "review"}
-          onClick={() => setStatus(status === "review" ? null : "review")}
+          tone={counts?.review ? "warning" : "success"}
+          active={filter === "review"}
+          onClick={() => pick("review")}
         />
         <SummaryCard
           label="No match"
-          value={String(count("none"))}
+          value={String(counts?.none ?? 0)}
           sublabel="Choose or ignore"
-          tone={count("none") ? "danger" : "success"}
-          active={status === "none"}
-          onClick={() => setStatus(status === "none" ? null : "none")}
+          tone={counts?.none ? "danger" : "success"}
+          active={filter === "none"}
+          onClick={() => pick("none")}
         />
       </div>
 
       <Panel>
         <PanelHeader
           title="Bank lines"
-          description={`${rows.length} of ${lines.length} shown`}
+          description={`${total} shown. Recorded ${counts?.confirmed ?? 0}, ignored ${counts?.ignored ?? 0}.`}
           actions={
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
                 <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the bank text" className="h-9 w-52 pl-8" />
               </div>
-              {status || q ? (
-                <Button size="sm" variant="outline" onClick={() => { setStatus(null); setQ(""); }}>
+              {(["confirmed", "ignored"] as const).map((s) => (
+                <Button key={s} size="sm" variant={filter === s ? "default" : "outline"} onClick={() => pick(s)}>
+                  {STATUS[s].label}
+                </Button>
+              ))}
+              {filter !== "all" || q ? (
+                <Button size="sm" variant="outline" onClick={() => { setFilter("all"); setQ(""); setPage(1); }}>
                   Clear
                 </Button>
               ) : null}
             </div>
           }
         />
-        {rows.length === 0 ? (
-          <EmptyState title="No bank lines here" description="Change the filter or upload a statement." />
+        {listQ.isError ? (
+          <EmptyState title="The bank lines could not be loaded" description={errorMessage(listQ.error, "Try again in a moment.")} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            title={listQ.isLoading ? "Loading..." : "No bank lines here"}
+            description={listQ.isLoading ? "" : "Change the filter or upload a statement."}
+          />
         ) : (
           <TableWrap>
             <Table className="min-w-[980px]">
@@ -191,7 +294,7 @@ function BankMatchContent() {
               </THead>
               <TBody>
                 {rows.map((l) => {
-                  const inv = invoiceById(l.invoiceId);
+                  const inv = l.invoiceId ? data?.labels[l.invoiceId] : undefined;
                   const s = STATUS[l.status];
                   return (
                     <TR key={l.id}>
@@ -218,38 +321,61 @@ function BankMatchContent() {
                         <Pill tone={s.tone}>{s.label}</Pill>
                       </TD>
                       <TD align="right">
-                        <div className="flex justify-end gap-2">
-                          {l.status === "matched" ? (
-                            <>
-                              <Button size="sm" variant="outline" onClick={() => setChoosing(l)}>
-                                Change
-                              </Button>
-                              <Button size="sm" onClick={() => set(l.id, { status: "confirmed" })}>
-                                Confirm
-                              </Button>
-                            </>
-                          ) : null}
-                          {l.status === "review" ? (
-                            <Button size="sm" onClick={() => setChoosing(l)}>
-                              Choose invoice
-                            </Button>
-                          ) : null}
-                          {l.status === "none" ? (
-                            <>
-                              <Button size="sm" variant="outline" onClick={() => set(l.id, { status: "ignored", reason: "Ignored by you." })}>
-                                Ignore
-                              </Button>
-                              <Button size="sm" onClick={() => setChoosing(l)}>
+                        {canWrite ? (
+                          <div className="flex justify-end gap-2">
+                            {l.status === "matched" ? (
+                              <>
+                                <Button size="sm" variant="outline" disabled={busy} onClick={() => setChoosing(l)}>
+                                  Change
+                                </Button>
+                                <Button size="sm" disabled={busy || !l.invoiceId} onClick={() => confirm(l, l.invoiceId!, false)}>
+                                  Confirm
+                                </Button>
+                              </>
+                            ) : null}
+                            {l.status === "review" ? (
+                              <Button size="sm" disabled={busy} onClick={() => setChoosing(l)}>
                                 Choose invoice
                               </Button>
-                            </>
-                          ) : null}
-                          {l.status === "confirmed" || l.status === "ignored" ? (
-                            <Button size="sm" variant="outline" onClick={() => undo(l.id)}>
-                              Undo
-                            </Button>
-                          ) : null}
-                        </div>
+                            ) : null}
+                            {l.status === "none" ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    run(async () => {
+                                      await unwrap(ignoreBankLine({ data: { lineId: l.id } }));
+                                      await refresh();
+                                    }, "The line could not be ignored.")
+                                  }
+                                >
+                                  Ignore
+                                </Button>
+                                <Button size="sm" disabled={busy} onClick={() => setChoosing(l)}>
+                                  Choose invoice
+                                </Button>
+                              </>
+                            ) : null}
+                            {l.status === "confirmed" || l.status === "ignored" ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={busy}
+                                onClick={() =>
+                                  run(async () => {
+                                    await unwrap(undoBankLine({ data: { lineId: l.id } }));
+                                    toast.success(l.status === "confirmed" ? "Payment removed. The line is waiting again." : "The line is waiting again.");
+                                    await refreshAll();
+                                  }, "This could not be undone.")
+                                }
+                              >
+                                Undo
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </TD>
                     </TR>
                   );
@@ -258,14 +384,122 @@ function BankMatchContent() {
             </Table>
           </TableWrap>
         )}
+        {total > PAGE_SIZE ? (
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-[13px] text-muted-foreground">
+            <span>
+              Page {page} of {pages}
+            </span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+                <ChevronLeft className="size-4" /> Previous
+              </Button>
+              <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage(page + 1)}>
+                Next <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Panel>
 
-      <MatchDialog
-        line={choosing}
-        onClose={() => setChoosing(null)}
-        onChoose={(id, invoiceId) => {
-          set(id, { status: "confirmed", invoiceId, reason: "Matched by you." });
-          setChoosing(null);
+      {data && data.statements.length > 0 ? (
+        <Panel>
+          <PanelHeader title="Uploaded statements" description="The latest 30 uploads" />
+          <TableWrap>
+            <Table className="min-w-[720px]">
+              <THead>
+                <TR>
+                  <TH>File</TH>
+                  <TH>Uploaded</TH>
+                  <TH align="right">Payments in</TH>
+                  <TH align="right">Recorded</TH>
+                  <TH align="right">Action</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {data.statements.map((s) => (
+                  <TR key={s.id}>
+                    <TD className="font-medium">{s.fileName}</TD>
+                    <TD>
+                      {formatDate(s.uploadedAt.slice(0, 10))}, {s.uploadedBy}
+                    </TD>
+                    <TD align="right" mono>
+                      {s.lineCount}
+                    </TD>
+                    <TD align="right" mono>
+                      {s.confirmed}
+                    </TD>
+                    <TD align="right">
+                      {canWrite ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy || s.confirmed > 0}
+                          title={s.confirmed > 0 ? "Undo the recorded payments first" : "Delete this upload"}
+                          onClick={() => setDeleting({ id: s.id, name: s.fileName })}
+                        >
+                          <Trash2 className="size-4" /> Delete
+                        </Button>
+                      ) : null}
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </TableWrap>
+        </Panel>
+      ) : null}
+
+      <MatchDialog line={choosing} busy={busy} onClose={() => setChoosing(null)} onChoose={(id, inv, any) => choosing && confirm(choosing, inv, any)} />
+
+      <Dialog open={problems !== null} onOpenChange={(o) => (o ? undefined : setProblems(null))}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>This statement was not uploaded</DialogTitle>
+            <DialogDescription>{problems?.file}. Nothing was added, so no payment can go missing. Fix the file and upload it again.</DialogDescription>
+          </DialogHeader>
+          <ul className="list-disc space-y-1 pl-5 text-[13px] text-foreground">
+            {problems?.list.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+          <DialogFooter>
+            <Button onClick={() => setProblems(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record {matchedN} matched payment{matchedN === 1 ? "" : "s"}?</DialogTitle>
+            <DialogDescription>
+              Each one becomes a Bank Transfer payment on its invoice. The server checks every line again first, and leaves out any that is no longer a sure match.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmAll}>Record payments</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(o) => (o ? undefined : setDeleting(null))}
+        title="Delete this upload?"
+        description={`${deleting?.name ?? ""}: its waiting and ignored lines are removed. You can upload the file again later.`}
+        confirmLabel="Delete"
+        onConfirm={() => {
+          const d = deleting;
+          setDeleting(null);
+          if (!d) return;
+          void run(async () => {
+            await unwrap(deleteBankStatement({ data: { id: d.id } }));
+            toast.success("Upload deleted.");
+            await refresh();
+          }, "The upload could not be deleted.");
         }}
       />
     </div>

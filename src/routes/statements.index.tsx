@@ -44,6 +44,10 @@ import { cn } from "@/lib/utils";
 import type { Client, Settings } from "@/lib/ledger/types";
 
 export const Route = createFileRoute("/statements/")({
+  validateSearch: (search: Record<string, unknown>): { client?: string } => {
+    const client = search["client"];
+    return typeof client === "string" ? { client } : {};
+  },
   head: () => ({
     meta: [
       { title: "Statements — LedgerFlow" },
@@ -134,7 +138,7 @@ function StatementsPage() {
 
 function StatementsPageContent() {
   const { data, invoiceViews } = useLedger();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(Route.useSearch().client ?? null);
   // Billing company filter for the client list. ALL_COMPANIES = everyone
   // (the behaviour before this filter existed).
   const [companyKey, setCompanyKey] = useState<string>(ALL_COMPANIES);

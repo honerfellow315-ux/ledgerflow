@@ -35,6 +35,8 @@ export const MODULES = [
   "staff",
   "reports",
   "settings",
+  "tasks",
+  "followUps",
 ] as const;
 
 export type Module = (typeof MODULES)[number];
@@ -68,6 +70,10 @@ export const MODULE_ACTIONS: Record<Module, readonly Action[]> = {
   staff: ["view", "create", "edit"],
   reports: ["view"],
   settings: ["view", "edit"],
+  // a user sees and works on their OWN tasks only; assigning, verifying and deleting are admin-only
+  tasks: ["view", "create"],
+  // overdue follow-ups: view the overdue list (also needs Invoices view); create = log a chase
+  followUps: ["view", "create"],
 };
 
 export const MODULE_LABELS: Record<Module, string> = {
@@ -86,6 +92,8 @@ export const MODULE_LABELS: Record<Module, string> = {
   staff: "Staff (NI & bank details)",
   reports: "Reports",
   settings: "Settings",
+  tasks: "Tasks (own tasks only)",
+  followUps: "Overdue Follow-ups",
 };
 
 export const ACTION_LABELS: Record<Action, string> = {

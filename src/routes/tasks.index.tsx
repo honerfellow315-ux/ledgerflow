@@ -1,14 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ClipboardList, Clock, Info, Plus, Search } from "@/lib/icons";
-import { usePermissions } from "@/lib/ledger/permissions";
+import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Clock, Plus, Search } from "@/lib/icons";
 import { RequireView } from "@/components/app/RequireView";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { SummaryCard } from "@/components/app/SummaryCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pill } from "@/components/app/timesheets/badges";
 import {
@@ -18,17 +28,10 @@ import {
   TaskStatusBadge,
   type NewTaskInput,
 } from "@/components/app/tasks/TaskDialogs";
-import {
-  ADMIN,
-  MEMBER,
-  PEOPLE,
-  buildMockTasks,
-  dayIso,
-  dayLabel,
-  isOverdue,
-  type Task,
-  type TaskStatus,
-} from "@/lib/tasks/data";
+import { createTask, deleteTask, listTasks, moveTask } from "@/lib/actions/tasks";
+import { errorMessage } from "@/lib/payroll/queries";
+import { unwrap } from "@/lib/unwrap";
+import { dayIso, dayLabel, isOverdue, type Task, type TaskStatus } from "@/lib/tasks/data";
 
 export const Route = createFileRoute("/tasks/")({
   head: () => ({
@@ -41,105 +44,124 @@ export const Route = createFileRoute("/tasks/")({
 });
 
 function TasksPage() {
-  // Admin-only while this is a preview, same pattern as Timesheet Check.
   return (
-    <RequireView module="dashboard">
+    <RequireView module="tasks">
       <TasksContent />
     </RequireView>
   );
 }
 
 const ALL = "all";
+const PAGE_SIZE = 50;
+
+/** The day range the "Any day / Today / ..." filter means, worked out in the browser. */
+function dayRange(when: string): { dateFrom: string | null; dateTo: string | null } {
+  if (when === "today") return { dateFrom: dayIso(0), dateTo: dayIso(0) };
+  if (when === "yesterday") return { dateFrom: dayIso(-1), dateTo: dayIso(-1) };
+  if (when === "earlier") return { dateFrom: null, dateTo: dayIso(-2) };
+  if (when === "later") return { dateFrom: dayIso(1), dateTo: null };
+  return { dateFrom: null, dateTo: null };
+}
 
 function TasksContent() {
-  const { isAdmin, ready } = usePermissions();
-  const [tasks, setTasks] = useState<Task[]>(() => buildMockTasks());
-  const [adminView, setAdminView] = useState(true);
+  const qc = useQueryClient();
   const [q, setQ] = useState("");
+  const [search, setSearch] = useState("");
   const [who, setWho] = useState(ALL);
   const [when, setWhen] = useState(ALL);
   const [status, setStatus] = useState<TaskStatus | null>(null);
+  const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [toDelete, setToDelete] = useState<Task | null>(null);
 
-  const actor = adminView ? ADMIN : MEMBER;
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(q.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
 
-  const mine = useMemo(
-    () => (adminView ? tasks : tasks.filter((t) => t.assignee === MEMBER)),
-    [tasks, adminView],
-  );
+  const range = dayRange(when);
+  const filter = {
+    search,
+    status,
+    assigneeId: who === ALL ? null : who,
+    ...range,
+  };
+  const listQ = useQuery({
+    queryKey: ["tasks", filter, page],
+    queryFn: () => unwrap(listTasks({ data: { ...filter, page, pageSize: PAGE_SIZE } })),
+    placeholderData: keepPreviousData,
+  });
+  const data = listQ.data;
+  const rows = data?.tasks ?? [];
+  const isAdmin = data?.isAdmin ?? false;
+  const counts = data?.counts ?? { todo: 0, in_progress: 0, completed: 0, verified: 0 };
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const allCount = counts.todo + counts.in_progress + counts.completed + counts.verified;
 
-  const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const today = dayIso(0);
-    return mine
-      .filter((t) => (status ? t.status === status : true))
-      .filter((t) => (who === ALL ? true : t.assignee === who))
-      .filter((t) => {
-        if (when === "today") return t.date === today;
-        if (when === "yesterday") return t.date === dayIso(-1);
-        if (when === "earlier") return t.date < dayIso(-1);
-        if (when === "later") return t.date > today;
-        return true;
-      })
-      .filter((t) => (needle ? t.text.toLowerCase().includes(needle) : true))
-      .sort((a, b) => {
-        const av = a.status === "verified" ? 1 : 0;
-        const bv = b.status === "verified" ? 1 : 0;
-        return av - bv || a.date.localeCompare(b.date);
-      });
-  }, [mine, status, who, when, q]);
+  async function run(fn: () => Promise<void>, fallback: string) {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (err) {
+      toast.error(errorMessage(err, fallback));
+      await qc.invalidateQueries({ queryKey: ["tasks"] });
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  if (!ready) return null;
-  if (!isAdmin) {
+  const move = (id: string, to: TaskStatus) =>
+    void run(async () => {
+      await unwrap(moveTask({ data: { id, to } }));
+      await qc.invalidateQueries({ queryKey: ["tasks"] });
+    }, "The task could not be changed.");
+
+  const create = (input: NewTaskInput) =>
+    void run(async () => {
+      await unwrap(
+        createTask({
+          data: {
+            text: input.text,
+            notes: input.notes,
+            assigneeId: isAdmin ? input.assigneeId : null,
+            date: input.date,
+            alreadyDone: input.alreadyDone,
+          },
+        }),
+      );
+      setNewOpen(false);
+      await qc.invalidateQueries({ queryKey: ["tasks"] });
+      toast.success("Task added.");
+    }, "The task could not be added.");
+
+  const remove = (t: Task) =>
+    void run(async () => {
+      await unwrap(deleteTask({ data: { id: t.id } }));
+      setToDelete(null);
+      setOpenId(null);
+      await qc.invalidateQueries({ queryKey: ["tasks"] });
+      toast.success("Task deleted.");
+    }, "The task could not be deleted.");
+
+  const openTask = rows.find((t) => t.id === openId) ?? null;
+  const filtered = status !== null || who !== ALL || when !== ALL || q !== "";
+
+  if (listQ.isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (listQ.isError || !data) {
     return (
       <Panel>
-        <EmptyState
-          title="You don't have access to this"
-          description="Only administrators can open Tasks for now."
-        />
+        <EmptyState title="Tasks could not be loaded" description={errorMessage(listQ.error, "Please try again.")} />
       </Panel>
     );
   }
-
-  const move = (id: string, to: TaskStatus, text: string) =>
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              status: to,
-              events: [...t.events, { id: `n${Date.now()}`, at: new Date().toISOString(), by: actor, text }],
-            }
-          : t,
-      ),
-    );
-
-  const create = (input: NewTaskInput) => {
-    const now = new Date().toISOString();
-    const events = [{ id: `c${Date.now()}`, at: now, by: actor, text: "Created the task" }];
-    if (input.alreadyDone)
-      events.push({ id: `d${Date.now()}`, at: now, by: actor, text: "Marked the task as done" });
-    setTasks((prev) => [
-      {
-        id: `t${Date.now()}`,
-        text: input.text,
-        notes: input.notes,
-        assignee: adminView ? input.assignee : actor,
-        createdBy: actor,
-        date: input.date,
-        status: input.alreadyDone ? "completed" : "todo",
-        events,
-      },
-      ...prev,
-    ]);
-    setNewOpen(false);
-    toast.success("Task added. This is a preview, so it is not saved.");
-  };
-
-  const count = (s: TaskStatus) => mine.filter((t) => t.status === s).length;
-  const openTask = tasks.find((t) => t.id === openId) ?? null;
-  const filtered = status !== null || who !== ALL || when !== ALL || q !== "";
+  const people = data.people;
+  const me = data.me;
 
   return (
     <div className="space-y-5">
@@ -147,7 +169,7 @@ function TasksContent() {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Tasks</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {adminView
+            {isAdmin
               ? "Give tasks to your team, log your own, and check the ones that are finished."
               : "Your tasks. Start them, mark them done, and the admin will check them."}
           </p>
@@ -157,66 +179,59 @@ function TasksContent() {
         </Button>
       </div>
 
-      <div
-        role="note"
-        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-muted/60 px-4 py-3 text-[13px] text-foreground"
-      >
-        <span className="flex items-start gap-2.5">
-          <Info className="mt-0.5 size-4 text-primary" aria-hidden="true" />
-          Preview with sample people. Nothing here is saved yet.
-        </span>
-        <span className="flex items-center gap-2">
-          <span className="text-muted-foreground">See it as</span>
-          <Button size="sm" variant={adminView ? "default" : "outline"} onClick={() => setAdminView(true)}>
-            Admin
-          </Button>
-          <Button size="sm" variant={adminView ? "outline" : "default"} onClick={() => setAdminView(false)}>
-            Team member
-          </Button>
-        </span>
-      </div>
-
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
           label="To do"
-          value={String(count("todo"))}
+          value={String(counts.todo)}
           sublabel="Not started"
           icon={ClipboardList}
           active={status === "todo"}
-          onClick={() => setStatus(status === "todo" ? null : "todo")}
+          onClick={() => {
+            setStatus(status === "todo" ? null : "todo");
+            setPage(1);
+          }}
         />
         <SummaryCard
           label="In progress"
-          value={String(count("in_progress"))}
+          value={String(counts.in_progress)}
           sublabel="Being worked on"
           icon={Clock}
           active={status === "in_progress"}
-          onClick={() => setStatus(status === "in_progress" ? null : "in_progress")}
+          onClick={() => {
+            setStatus(status === "in_progress" ? null : "in_progress");
+            setPage(1);
+          }}
         />
         <SummaryCard
           label="Waiting for check"
-          value={String(count("completed"))}
+          value={String(counts.completed)}
           sublabel="Done, not yet verified"
           icon={CheckCircle2}
-          tone={count("completed") ? "warning" : "default"}
+          tone={counts.completed ? "warning" : "default"}
           active={status === "completed"}
-          onClick={() => setStatus(status === "completed" ? null : "completed")}
+          onClick={() => {
+            setStatus(status === "completed" ? null : "completed");
+            setPage(1);
+          }}
         />
         <SummaryCard
           label="Verified"
-          value={String(count("verified"))}
+          value={String(counts.verified)}
           sublabel="Checked and correct"
           icon={CheckCircle2}
           tone="success"
           active={status === "verified"}
-          onClick={() => setStatus(status === "verified" ? null : "verified")}
+          onClick={() => {
+            setStatus(status === "verified" ? null : "verified");
+            setPage(1);
+          }}
         />
       </div>
 
       <Panel>
         <PanelHeader
           title="All tasks"
-          description={`${rows.length} of ${mine.length} shown`}
+          description={`${total} of ${allCount} shown`}
           actions={
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
@@ -228,22 +243,34 @@ function TasksContent() {
                   className="h-9 w-44 pl-8"
                 />
               </div>
-              {adminView ? (
-                <Select value={who} onValueChange={setWho}>
+              {isAdmin ? (
+                <Select
+                  value={who}
+                  onValueChange={(v) => {
+                    setWho(v);
+                    setPage(1);
+                  }}
+                >
                   <SelectTrigger className="h-9 w-40">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL}>Everyone</SelectItem>
-                    {PEOPLE.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {p}
+                    {people.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               ) : null}
-              <Select value={when} onValueChange={setWhen}>
+              <Select
+                value={when}
+                onValueChange={(v) => {
+                  setWhen(v);
+                  setPage(1);
+                }}
+              >
                 <SelectTrigger className="h-9 w-36">
                   <SelectValue />
                 </SelectTrigger>
@@ -264,6 +291,7 @@ function TasksContent() {
                     setWho(ALL);
                     setWhen(ALL);
                     setStatus(null);
+                    setPage(1);
                   }}
                 >
                   Clear
@@ -306,7 +334,7 @@ function TasksContent() {
                     <TD className="text-muted-foreground">{t.createdBy}</TD>
                     <TD align="right">
                       <div onClick={(e) => e.stopPropagation()}>
-                        <TaskActions task={t} canVerify={adminView} onMove={move} />
+                        <TaskActions task={t} canVerify={isAdmin} onMove={move} disabled={busy} />
                       </div>
                     </TD>
                   </TR>
@@ -315,21 +343,52 @@ function TasksContent() {
             </Table>
           </TableWrap>
         )}
+        {pages > 1 ? (
+          <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-[13px] text-muted-foreground">
+            <span>
+              Page {page} of {pages}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                <ChevronLeft className="size-4" /> Previous
+              </Button>
+              <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))}>
+                Next <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Panel>
 
       <NewTaskDialog
         open={newOpen}
         onOpenChange={setNewOpen}
-        actor={actor}
-        canAssign={adminView}
+        meId={me.id}
+        people={people}
+        canAssign={isAdmin}
+        busy={busy}
         onCreate={create}
       />
       <TaskDetailDialog
         task={openTask}
-        canVerify={adminView}
+        canVerify={isAdmin}
+        busy={busy}
         onClose={() => setOpenId(null)}
-        onMove={move}
+        onMove={(id, to) => move(id, to)}
+        {...(isAdmin ? { onDelete: (t: Task) => setToDelete(t) } : {})}
       />
+      <AlertDialog open={toDelete !== null} onOpenChange={(o) => (o ? undefined : setToDelete(null))}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this task?</AlertDialogTitle>
+            <AlertDialogDescription>The task and its activity history are removed for good.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction onClick={() => toDelete && remove(toDelete)}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

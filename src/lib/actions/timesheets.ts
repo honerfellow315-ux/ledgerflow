@@ -1,0 +1,353 @@
+/**
+ * Timesheet Check server functions. Admin-only for this phase (requireAdmin at the top of
+ * every handler, the real security boundary). When the feature gets its own permission
+ * module later, swap requireAdmin() for requirePermission("timesheets", ...) here.
+ * The work itself lives in src/lib/server/timesheetCheck.ts.
+ */
+import { createServerFn } from "@tanstack/react-start";
+import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { z } from "zod";
+import { db } from "../server/db";
+import { payrollStaff, timesheetRows, timesheetSheets } from "../../../drizzle/schema";
+import { requireAdmin } from "../server/auth";
+import { recordActivity } from "../server/activity";
+import { formatMonthLabel } from "../payroll/calc";
+import {
+  confirmNameMatch,
+  recheckSheet,
+  saveParsedSheet,
+  toListItem,
+  toTimesheetSheet,
+  type SheetWithStaff,
+} from "../server/timesheetCheck";
+import { MAX_ROWS_PER_SHEET, MAX_SHEETS_PER_FILE } from "../timesheets/parsed";
+import type { SheetListPage, UploadOutcome } from "../timesheets/listTypes";
+import type { TimesheetSheet } from "../timesheets/data";
+
+/* ------------------------------ input checks ------------------------------ */
+
+const money = z.number().finite().min(0).max(1_000_000).nullable();
+
+const parsedRow = z.object({
+  date: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/),
+  site: z.string().max(200),
+  siteAlt: z.string().max(200),
+  start: z.string().regex(/^(\d{2}:\d{2})?$/),
+  end: z.string().regex(/^(\d{2}:\d{2})?$/),
+  hours: z.number().finite().min(0).max(100).nullable(),
+  rate: money,
+  amount: money,
+  expense: money,
+  uncertain: z.boolean(),
+  note: z.string().max(500),
+});
+
+const parsedSheet = z.object({
+  format: z.enum(["excel", "pdf", "photo"]),
+  sheetLabel: z.string().max(100),
+  personName: z.string().max(120),
+  personNi: z.string().max(20),
+  statedHours: z.number().finite().min(0).max(5000).nullable(),
+  rows: z.array(parsedRow).min(1).max(MAX_ROWS_PER_SHEET),
+  warnings: z.array(z.string().max(300)).max(20),
+});
+
+const month = z.string().regex(/^\d{4}-\d{2}$/);
+const status = z.enum(["ready", "needs_review", "staff_not_found"]);
+
+const listFilter = z.object({
+  /** yyyy-mm, or "all". */
+  month: z.union([month, z.literal("all")]),
+  search: z.string().trim().max(80).default(""),
+  status: z.union([status, z.literal("all")]).default("all"),
+});
+
+const actorName = (u: { displayName: string; username: string }) => u.displayName || u.username;
+
+/* ------------------------------ shared query pieces ------------------------------ */
+
+/** Escapes % and _ so a search for "50%" is not a wildcard. */
+const likeOf = (s: string) => `%${s.replace(/[\\%_]/g, "\\$&")}%`;
+
+function whereOf(f: z.infer<typeof listFilter>): SQL | undefined {
+  const parts: SQL[] = [];
+  if (f.month !== "all") parts.push(eq(timesheetSheets.month, f.month));
+  if (f.status === "staff_not_found") parts.push(isNull(timesheetSheets.staffId));
+  else if (f.status !== "all") {
+    parts.push(isNotNull(timesheetSheets.staffId), eq(timesheetSheets.status, f.status));
+  }
+  if (f.search) {
+    const like = likeOf(f.search);
+    const term = or(
+      ilike(timesheetSheets.personName, like),
+      ilike(timesheetSheets.fileName, like),
+      ilike(payrollStaff.name, like),
+    );
+    if (term) parts.push(term);
+  }
+  return parts.length > 0 ? and(...parts) : undefined;
+}
+
+const sheetColumns = {
+  sheet: timesheetSheets,
+  staffName: payrollStaff.name,
+  staffNi: payrollStaff.ni,
+  staffEmail: payrollStaff.email,
+};
+
+/* ------------------------------ upload ------------------------------ */
+
+/**
+ * Saves the timesheets that were read from ONE file (the browser reads the file, like the
+ * shift import) and compares each one with our records. One call per file keeps every
+ * request small however many files are uploaded.
+ */
+export const uploadTimesheetFile = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      fileName: z.string().trim().min(1).max(255),
+      fileHash: z.string().regex(/^[0-9a-f]{64}$/),
+      sheets: z.array(parsedSheet).min(1).max(MAX_SHEETS_PER_FILE),
+    }),
+  )
+  .handler(async ({ data }): Promise<UploadOutcome[]> => {
+    const actor = await requireAdmin();
+    const outcomes: UploadOutcome[] = [];
+    for (const sheet of data.sheets) {
+      const out = await saveParsedSheet(db, {
+        actor: { id: actor.id, name: actorName(actor) },
+        fileName: data.fileName,
+        fileHash: data.fileHash,
+        sheet,
+      });
+      outcomes.push(out);
+      if (out.outcome === "saved" && out.sheetId) {
+        await recordActivity({
+          actor,
+          action: "created",
+          module: "timesheets",
+          entityId: out.sheetId,
+          label: `Timesheet — ${out.staffName || data.fileName} ${formatMonthLabel(out.month)}`,
+          details: `Uploaded ${data.fileName}: ${sheet.rows.length} rows, ${out.issues} to look at`,
+        });
+      }
+    }
+    return outcomes;
+  });
+
+/* ------------------------------ reading ------------------------------ */
+
+export const listTimesheetMonths = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const res = await db.execute(sql`
+    SELECT month, count(*)::int AS sheets FROM timesheet_sheets
+    GROUP BY month ORDER BY month DESC LIMIT 48`);
+  return (res.rows as { month: string; sheets: number }[]).map((r) => ({
+    month: r.month,
+    label: formatMonthLabel(r.month),
+    sheets: Number(r.sheets),
+  }));
+});
+
+export const listTimesheetSheets = createServerFn({ method: "GET" })
+  .validator(
+    listFilter.extend({
+      page: z.number().int().min(1).max(10000).default(1),
+      pageSize: z.number().int().min(5).max(100).default(25),
+    }),
+  )
+  .handler(async ({ data }): Promise<SheetListPage> => {
+    await requireAdmin();
+    const where = whereOf(data);
+    const rows = await db
+      .select(sheetColumns)
+      .from(timesheetSheets)
+      .leftJoin(payrollStaff, eq(timesheetSheets.staffId, payrollStaff.id))
+      .where(where)
+      .orderBy(desc(timesheetSheets.uploadedAt), desc(timesheetSheets.id))
+      .limit(data.pageSize)
+      .offset((data.page - 1) * data.pageSize);
+
+    const [count] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(timesheetSheets)
+      .leftJoin(payrollStaff, eq(timesheetSheets.staffId, payrollStaff.id))
+      .where(where);
+
+    const monthWhere = data.month === "all" ? sql`TRUE` : sql`month = ${data.month}`;
+    const sum = await db.execute(sql`
+      SELECT count(*)::int AS total,
+             count(*) FILTER (WHERE staff_id IS NOT NULL AND status = 'ready')::int AS ready,
+             count(*) FILTER (WHERE staff_id IS NOT NULL AND status <> 'ready')::int AS needs_review,
+             count(*) FILTER (WHERE staff_id IS NULL)::int AS not_found
+      FROM timesheet_sheets WHERE ${monthWhere}`);
+    const s = (sum.rows[0] ?? {}) as Record<string, number | undefined>;
+
+    return {
+      items: rows.map(toListItem),
+      total: count?.n ?? 0,
+      page: data.page,
+      pageSize: data.pageSize,
+      summary: {
+        total: Number(s["total"] ?? 0),
+        ready: Number(s["ready"] ?? 0),
+        needsReview: Number(s["needs_review"] ?? 0),
+        notFound: Number(s["not_found"] ?? 0),
+      },
+    };
+  });
+
+async function loadWithRows(rows: SheetWithStaff[]): Promise<TimesheetSheet[]> {
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.sheet.id);
+  const all = await db
+    .select()
+    .from(timesheetRows)
+    .where(inArray(timesheetRows.sheetId, ids))
+    .orderBy(
+      asc(sql`CASE WHEN ${timesheetRows.date} = '' THEN 1 ELSE 0 END`),
+      asc(timesheetRows.date),
+      asc(timesheetRows.fromRecords),
+      asc(timesheetRows.lineNo),
+    );
+  const bySheet = new Map<string, (typeof all)[number][]>();
+  for (const r of all) {
+    const list = bySheet.get(r.sheetId);
+    if (list) list.push(r);
+    else bySheet.set(r.sheetId, [r]);
+  }
+  return rows.map((x) => toTimesheetSheet(x, bySheet.get(x.sheet.id) ?? []));
+}
+
+export const getTimesheetSheet = createServerFn({ method: "GET" })
+  .validator(z.object({ id: z.string().min(1).max(100) }))
+  .handler(async ({ data }): Promise<TimesheetSheet | null> => {
+    await requireAdmin();
+    const found = await db
+      .select(sheetColumns)
+      .from(timesheetSheets)
+      .leftJoin(payrollStaff, eq(timesheetSheets.staffId, payrollStaff.id))
+      .where(eq(timesheetSheets.id, data.id))
+      .limit(1);
+    const [one] = await loadWithRows(found);
+    return one ?? null;
+  });
+
+/** Sheets WITH their rows, a page at a time, for the Excel receipt / report download. */
+export const getTimesheetReportPage = createServerFn({ method: "GET" })
+  .validator(listFilter.extend({ offset: z.number().int().min(0).max(100000), limit: z.number().int().min(1).max(50) }))
+  .handler(async ({ data }): Promise<TimesheetSheet[]> => {
+    await requireAdmin();
+    const found = await db
+      .select(sheetColumns)
+      .from(timesheetSheets)
+      .leftJoin(payrollStaff, eq(timesheetSheets.staffId, payrollStaff.id))
+      .where(whereOf(data))
+      .orderBy(asc(timesheetSheets.personName), asc(timesheetSheets.id))
+      .limit(data.limit)
+      .offset(data.offset);
+    return loadWithRows(found);
+  });
+
+/* ------------------------------ changing ------------------------------ */
+
+export const recheckTimesheetSheet = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string().min(1).max(100) }))
+  .handler(async ({ data }) => {
+    const actor = await requireAdmin();
+    const res = await recheckSheet(db, data.id);
+    if (!res) throw new Error("That sheet no longer exists.");
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "timesheets",
+      entityId: data.id,
+      label: "Timesheet checked again",
+      details: `Result: ${res.status}, ${res.issues} to look at`,
+    });
+    return res;
+  });
+
+/**
+ * Re-checks a month in small steps: call it again with `nextCursor` until it is null.
+ * (A month can hold thousands of sheets, so one call only does a few.)
+ */
+export const recheckTimesheetBatch = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      month,
+      cursor: z.string().max(100).nullable(),
+      limit: z.number().int().min(1).max(15).default(10),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requireAdmin();
+    const ids = await db
+      .select({ id: timesheetSheets.id })
+      .from(timesheetSheets)
+      .where(
+        data.cursor
+          ? and(eq(timesheetSheets.month, data.month), gt(timesheetSheets.id, data.cursor))
+          : eq(timesheetSheets.month, data.month),
+      )
+      .orderBy(asc(timesheetSheets.id))
+      .limit(data.limit);
+    let changed = 0;
+    for (const { id } of ids) {
+      const res = await recheckSheet(db, id);
+      if (res && res.status !== res.previousStatus) changed++;
+    }
+    const last = ids.at(-1)?.id ?? null;
+    if (ids.length > 0) {
+      await recordActivity({
+        actor,
+        action: "updated",
+        module: "timesheets",
+        label: `Timesheets checked again — ${formatMonthLabel(data.month)}`,
+        details: `${ids.length} sheets, ${changed} changed status`,
+      });
+    }
+    return { processed: ids.length, changed, nextCursor: ids.length === data.limit ? last : null };
+  });
+
+export const confirmTimesheetStaff = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string().min(1).max(100) }))
+  .handler(async ({ data }) => {
+    const actor = await requireAdmin();
+    const ok = await confirmNameMatch(db, data.id);
+    if (!ok) throw new Error("There is nothing to confirm on this sheet.");
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "timesheets",
+      entityId: data.id,
+      label: "Timesheet — name match confirmed",
+    });
+    return { ok: true };
+  });
+
+export const deleteTimesheetSheet = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string().min(1).max(100) }))
+  .handler(async ({ data }) => {
+    const actor = await requireAdmin();
+    const [row] = await db
+      .select({
+        id: timesheetSheets.id,
+        month: timesheetSheets.month,
+        name: timesheetSheets.personName,
+        file: timesheetSheets.fileName,
+      })
+      .from(timesheetSheets)
+      .where(eq(timesheetSheets.id, data.id))
+      .limit(1);
+    if (!row) return { ok: true };
+    await db.delete(timesheetSheets).where(eq(timesheetSheets.id, data.id)); // rows cascade
+    await recordActivity({
+      actor,
+      action: "deleted",
+      module: "timesheets",
+      entityId: row.id,
+      label: `Timesheet — ${row.name || row.file} ${formatMonthLabel(row.month)}`,
+    });
+    return { ok: true };
+  });

@@ -1,7 +1,8 @@
 /**
- * Payslips — UI only (sample people, nothing is saved or sent).
+ * Payslips: types and arithmetic for the screens and the printed payslip.
  * The money comes from the same lineTotals() the Payroll sheet uses, so the
- * payslip can never disagree with the sheet. Phase B swaps buildRun() for real lines.
+ * payslip can never disagree with the sheet. The real lines come from
+ * src/lib/actions/payslips.ts.
  */
 import { lineTotals } from "@/lib/payroll/sheetCalc";
 
@@ -10,6 +11,8 @@ export interface PayslipRow {
   name: string;
   ni: string;
   company: string;
+  /** The company's address for the payslip header ("" when none is set). */
+  companyAddress: string;
   month: string;
   unitsHours: number;
   bankHolidayHours: number;
@@ -26,19 +29,6 @@ export interface EarningLine {
   amount: number;
 }
 
-export const COMPANIES = ["Alpha Security Ltd", "Beacon Facilities Ltd", "Crest Event Staffing"];
-
-export function monthOptions(count = 4): string[] {
-  const out: string[] = [];
-  const d = new Date();
-  d.setDate(1);
-  for (let i = 0; i < count; i++) {
-    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-    d.setMonth(d.getMonth() - 1);
-  }
-  return out;
-}
-
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 export function payslipTotals(p: PayslipRow) {
@@ -52,18 +42,36 @@ export function payslipTotals(p: PayslipRow) {
   });
 }
 
-/** The lines printed on the payslip. They add up to the same total as the sheet. */
+/**
+ * The lines printed on the payslip. They add up to EXACTLY the same total as the sheet:
+ * each amount is taken from a rounded running total, so two separately rounded lines can
+ * never end up a penny away from the sheet's figure.
+ */
 export function earningLines(p: PayslipRow): EarningLine[] {
   if (p.fixedAmount !== null) {
     return [{ label: "Fixed monthly pay", hours: null, rate: null, amount: r2(p.fixedAmount) }];
   }
   const out: EarningLine[] = [];
-  if (p.unitsHours > 0)
-    out.push({ label: "Hours worked", hours: p.unitsHours, rate: p.rate, amount: r2(p.unitsHours * p.rate) });
+  const workedPay = r2(p.unitsHours * p.rate);
+  // Same order as the sheet: round the total hours first, then multiply by the rate.
+  const withBankHoliday = r2(payslipTotals(p).totalHours * p.rate);
+  if (p.unitsHours > 0) out.push({ label: "Hours worked", hours: p.unitsHours, rate: p.rate, amount: workedPay });
   if (p.bankHolidayHours > 0)
-    out.push({ label: "Bank holiday hours", hours: p.bankHolidayHours, rate: p.rate, amount: r2(p.bankHolidayHours * p.rate) });
-  if (p.holidayRate !== null && p.holidayEntitlement > 0)
-    out.push({ label: "Holiday pay", hours: p.holidayEntitlement, rate: p.holidayRate, amount: r2(p.holidayEntitlement * p.holidayRate) });
+    out.push({
+      label: "Bank holiday hours",
+      hours: p.bankHolidayHours,
+      rate: p.rate,
+      amount: r2(withBankHoliday - workedPay),
+    });
+  if (p.holidayRate !== null && p.holidayEntitlement > 0) {
+    const total = payslipTotals(p).amount;
+    out.push({
+      label: "Holiday pay",
+      hours: p.holidayEntitlement,
+      rate: p.holidayRate,
+      amount: r2(total - withBankHoliday),
+    });
+  }
   return out;
 }
 
@@ -71,46 +79,6 @@ export function earningLines(p: PayslipRow): EarningLine[] {
 export function payslipIssue(p: PayslipRow): string | null {
   if (!p.ni.trim()) return "No NI number";
   if (payslipTotals(p).amount === 0) return "No pay this month";
+  if (p.fixedAmount === null && p.rate <= 0 && payslipTotals(p).totalHours > 0) return "Rate is 0";
   return null;
-}
-
-interface Base {
-  name: string;
-  ni: string;
-  companies: string[];
-  hours: number;
-  bh: number;
-  hol: number;
-  rate: number;
-  holidayRate?: number;
-  fixed?: number;
-}
-
-const BASE: Base[] = [
-  { name: "Daniel Okafor", ni: "QQ123456A", companies: [COMPANIES[0]!, COMPANIES[1]!], hours: 138, bh: 8, hol: 12, rate: 10.5, holidayRate: 12.71 },
-  { name: "Priya Nair", ni: "QQ234567B", companies: [COMPANIES[0]!], hours: 96, bh: 0, hol: 0, rate: 10 },
-  { name: "Marcus Bell", ni: "QQ345678C", companies: [COMPANIES[0]!, COMPANIES[2]!], hours: 84, bh: 8, hol: 6, rate: 10.5, holidayRate: 12.71 },
-  { name: "Hannah Clarke", ni: "QQ456789D", companies: [COMPANIES[1]!], hours: 160, bh: 0, hol: 0, rate: 10.5 },
-  { name: "Tom Reilly", ni: "QQ567890A", companies: [COMPANIES[1]!, COMPANIES[2]!], hours: 66, bh: 0, hol: 0, rate: 10.5 },
-  { name: "Aisha Rahman", ni: "QQ678901B", companies: [COMPANIES[2]!], hours: 0, bh: 0, hol: 0, rate: 0, fixed: 1850 },
-  { name: "Sam Doyle", ni: "QQ789012C", companies: [COMPANIES[0]!, COMPANIES[1]!], hours: 0, bh: 0, hol: 0, rate: 10 },
-  { name: "Tara Quinn", ni: "", companies: [COMPANIES[2]!], hours: 72, bh: 0, hol: 0, rate: 10 },
-  { name: "Lewis Grant", ni: "QQ890123D", companies: [COMPANIES[0]!], hours: 120, bh: 8, hol: 0, rate: 11 },
-];
-
-export function buildRun(company: string, month: string): PayslipRow[] {
-  const bump = (Number(month.slice(-2)) % 3) * 4;
-  return BASE.filter((b) => b.companies.includes(company)).map((b, i) => ({
-    id: `${company}-${month}-${i}`,
-    name: b.name,
-    ni: b.ni,
-    company,
-    month,
-    unitsHours: b.hours > 0 ? b.hours + bump : 0,
-    bankHolidayHours: b.bh,
-    holidayEntitlement: b.hol,
-    rate: b.rate,
-    holidayRate: b.holidayRate ?? null,
-    fixedAmount: b.fixed ?? null,
-  }));
 }

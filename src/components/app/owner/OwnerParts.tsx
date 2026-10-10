@@ -4,8 +4,14 @@ import { marginTone } from "@/lib/owner/data";
 const money0 = (n: number) => formatMoney(n).replace(/\.00$/, "");
 
 /** Billed vs received, a few months. Plain CSS bars so it stays light and readable. */
-export function TrendBars({ data }: { data: { label: string; billed: number; received: number }[] }) {
+export function TrendBars({
+  data,
+}: {
+  data: { label: string; billed: number; received: number }[];
+}) {
   const max = Math.max(1, ...data.flatMap((d) => [d.billed, d.received]));
+  // A month with more credit notes than invoices is negative: draw no bar rather than a broken one.
+  const pct = (n: number) => Math.max(0, Math.round((n / max) * 100));
   return (
     <div>
       <div
@@ -17,12 +23,12 @@ export function TrendBars({ data }: { data: { label: string; billed: number; rec
           <div key={d.label} className="flex h-full flex-1 items-end justify-center gap-1">
             <div
               className="w-full max-w-5 rounded-t bg-primary"
-              style={{ height: `${Math.round((d.billed / max) * 100)}%` }}
+              style={{ height: `${pct(d.billed)}%` }}
               title={`Billed ${money0(d.billed)}`}
             />
             <div
               className="w-full max-w-5 rounded-t bg-success"
-              style={{ height: `${Math.round((d.received / max) * 100)}%` }}
+              style={{ height: `${pct(d.received)}%` }}
               title={`Received ${money0(d.received)}`}
             />
           </div>
@@ -59,7 +65,13 @@ export function AgeingBars({ data }: { data: { label: string; amount: number }[]
           </div>
           <div className="mt-1 h-1.5 rounded-full bg-muted" aria-hidden="true">
             <div
-              className={i === 0 ? "h-1.5 rounded-full bg-primary" : i === 3 ? "h-1.5 rounded-full bg-destructive" : "h-1.5 rounded-full bg-warning"}
+              className={
+                i === 0
+                  ? "h-1.5 rounded-full bg-primary"
+                  : i === 3
+                    ? "h-1.5 rounded-full bg-destructive"
+                    : "h-1.5 rounded-full bg-warning"
+              }
               style={{ width: `${Math.round((d.amount / max) * 100)}%` }}
             />
           </div>
@@ -69,13 +81,19 @@ export function AgeingBars({ data }: { data: { label: string; amount: number }[]
   );
 }
 
-export function MarginBar({ pct }: { pct: number }) {
+export function MarginBar({ pct, empty }: { pct: number | null; empty?: string }) {
+  if (pct === null) {
+    return <span className="text-[13px] text-muted-foreground">{empty ?? "No margin"}</span>;
+  }
   const tone = marginTone(pct);
   const color = tone === "bad" ? "bg-destructive" : tone === "warn" ? "bg-warning" : "bg-success";
   return (
     <div className="flex items-center justify-end gap-2">
       <div className="h-1.5 w-16 rounded-full bg-muted" aria-hidden="true">
-        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, (pct / 40) * 100))}%` }} />
+        <div
+          className={`h-1.5 rounded-full ${color}`}
+          style={{ width: `${Math.max(0, Math.min(100, (pct / 40) * 100))}%` }}
+        />
       </div>
       <span className="num w-12 text-right text-[13px] font-medium">{pct}%</span>
     </div>

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowLeft, Download, Info } from "@/lib/icons";
+import { AlertTriangle, ArrowLeft, Check, Download, Info, RefreshCw, Trash2 } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
@@ -39,10 +39,19 @@ export function SheetCheckPanel({
   sheet,
   onBack,
   onDownload,
+  onConfirm,
+  onRecheck,
+  onDelete,
+  busy = false,
 }: {
   sheet: TimesheetSheet;
   onBack: () => void;
   onDownload: () => void;
+  /** Confirms a name-only match (shown only for those sheets). */
+  onConfirm?: () => void;
+  onRecheck?: () => void;
+  onDelete?: () => void;
+  busy?: boolean;
 }) {
   const [onlyIssues, setOnlyIssues] = useState(false);
   const t = useMemo(() => sheetTotals(sheet), [sheet]);
@@ -67,7 +76,19 @@ export function SheetCheckPanel({
             </p>
           </div>
         </div>
-        <SheetStatusBadge status={sheet.status} />
+        <div className="flex flex-wrap items-center gap-2">
+          {onRecheck ? (
+            <Button variant="outline" size="sm" disabled={busy} onClick={onRecheck}>
+              <RefreshCw className="size-4" /> Check again
+            </Button>
+          ) : null}
+          {onDelete ? (
+            <Button variant="outline" size="sm" disabled={busy} onClick={onDelete}>
+              <Trash2 className="size-4" /> Delete
+            </Button>
+          ) : null}
+          <SheetStatusBadge status={sheet.status} />
+        </div>
       </div>
 
       {notFound ? (
@@ -76,10 +97,19 @@ export function SheetCheckPanel({
           this sheet can be checked.
         </Notice>
       ) : null}
-      {sheet.matchedBy === "name" ? (
+      {sheet.matchedBy === "name" && !sheet.staffConfirmed ? (
         <Notice tone="warn">
-          The sheet has no NI number, so this was matched by name only. Confirm it is the right
-          person.
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              This was matched by name only (the NI number is missing or not in Staff). Confirm it
+              is the right person.
+            </span>
+            {onConfirm ? (
+              <Button size="sm" disabled={busy} onClick={onConfirm}>
+                <Check className="size-4" /> This is the right person
+              </Button>
+            ) : null}
+          </div>
         </Notice>
       ) : null}
       {t.statedMismatch ? (
