@@ -11,15 +11,19 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ActivityLogIndexRouteImport } from './routes/activity-log.index'
+import { Route as BankMatchIndexRouteImport } from './routes/bank-match.index'
 import { Route as ClientsIndexRouteImport } from './routes/clients.index'
 import { Route as ClientsClientIdRouteImport } from './routes/clients.$clientId'
 import { Route as CompaniesIndexRouteImport } from './routes/companies.index'
 import { Route as CreditNotesIndexRouteImport } from './routes/credit-notes.index'
 import { Route as ExpensesIndexRouteImport } from './routes/expenses.index'
+import { Route as FollowUpsIndexRouteImport } from './routes/follow-ups.index'
 import { Route as HoursIndexRouteImport } from './routes/hours.index'
+import { Route as InvoiceDraftsIndexRouteImport } from './routes/invoice-drafts.index'
 import { Route as InvoicesIndexRouteImport } from './routes/invoices.index'
 import { Route as PaymentsIndexRouteImport } from './routes/payments.index'
 import { Route as PayrollIndexRouteImport } from './routes/payroll.index'
+import { Route as PayslipsIndexRouteImport } from './routes/payslips.index'
 import { Route as RecycleBinIndexRouteImport } from './routes/recycle-bin.index'
 import { Route as ReportsIndexRouteImport } from './routes/reports.index'
 import { Route as SalaryIndexRouteImport } from './routes/salary.index'
@@ -27,6 +31,7 @@ import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as StaffIndexRouteImport } from './routes/staff.index'
 import { Route as StatementsIndexRouteImport } from './routes/statements.index'
 import { Route as SubcontractingIndexRouteImport } from './routes/subcontracting.index'
+import { Route as TasksIndexRouteImport } from './routes/tasks.index'
 import { Route as TimesheetsIndexRouteImport } from './routes/timesheets.index'
 import { Route as UsersIndexRouteImport } from './routes/users.index'
 
@@ -38,6 +43,11 @@ const IndexRoute = IndexRouteImport.update({
 const ActivityLogIndexRoute = ActivityLogIndexRouteImport.update({
   id: '/activity-log/',
   path: '/activity-log/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BankMatchIndexRoute = BankMatchIndexRouteImport.update({
+  id: '/bank-match/',
+  path: '/bank-match/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ClientsIndexRoute = ClientsIndexRouteImport.update({
@@ -65,9 +75,19 @@ const ExpensesIndexRoute = ExpensesIndexRouteImport.update({
   path: '/expenses/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FollowUpsIndexRoute = FollowUpsIndexRouteImport.update({
+  id: '/follow-ups/',
+  path: '/follow-ups/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HoursIndexRoute = HoursIndexRouteImport.update({
   id: '/hours/',
   path: '/hours/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvoiceDraftsIndexRoute = InvoiceDraftsIndexRouteImport.update({
+  id: '/invoice-drafts/',
+  path: '/invoice-drafts/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvoicesIndexRoute = InvoicesIndexRouteImport.update({
@@ -83,6 +103,11 @@ const PaymentsIndexRoute = PaymentsIndexRouteImport.update({
 const PayrollIndexRoute = PayrollIndexRouteImport.update({
   id: '/payroll/',
   path: '/payroll/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PayslipsIndexRoute = PayslipsIndexRouteImport.update({
+  id: '/payslips/',
+  path: '/payslips/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RecycleBinIndexRoute = RecycleBinIndexRouteImport.update({
@@ -120,6 +145,11 @@ const SubcontractingIndexRoute = SubcontractingIndexRouteImport.update({
   path: '/subcontracting/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TasksIndexRoute = TasksIndexRouteImport.update({
+  id: '/tasks/',
+  path: '/tasks/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TimesheetsIndexRoute = TimesheetsIndexRouteImport.update({
   id: '/timesheets/',
   path: '/timesheets/',
@@ -135,14 +165,18 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/activity-log/': typeof ActivityLogIndexRoute
+  '/bank-match/': typeof BankMatchIndexRoute
   '/clients/': typeof ClientsIndexRoute
   '/companies/': typeof CompaniesIndexRoute
   '/credit-notes/': typeof CreditNotesIndexRoute
   '/expenses/': typeof ExpensesIndexRoute
+  '/follow-ups/': typeof FollowUpsIndexRoute
   '/hours/': typeof HoursIndexRoute
+  '/invoice-drafts/': typeof InvoiceDraftsIndexRoute
   '/invoices/': typeof InvoicesIndexRoute
   '/payments/': typeof PaymentsIndexRoute
   '/payroll/': typeof PayrollIndexRoute
+  '/payslips/': typeof PayslipsIndexRoute
   '/recycle-bin/': typeof RecycleBinIndexRoute
   '/reports/': typeof ReportsIndexRoute
   '/salary/': typeof SalaryIndexRoute
@@ -150,6 +184,7 @@ export interface FileRoutesByFullPath {
   '/staff/': typeof StaffIndexRoute
   '/statements/': typeof StatementsIndexRoute
   '/subcontracting/': typeof SubcontractingIndexRoute
+  '/tasks/': typeof TasksIndexRoute
   '/timesheets/': typeof TimesheetsIndexRoute
   '/users/': typeof UsersIndexRoute
 }
@@ -157,14 +192,18 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/activity-log': typeof ActivityLogIndexRoute
+  '/bank-match': typeof BankMatchIndexRoute
   '/clients': typeof ClientsIndexRoute
   '/companies': typeof CompaniesIndexRoute
   '/credit-notes': typeof CreditNotesIndexRoute
   '/expenses': typeof ExpensesIndexRoute
+  '/follow-ups': typeof FollowUpsIndexRoute
   '/hours': typeof HoursIndexRoute
+  '/invoice-drafts': typeof InvoiceDraftsIndexRoute
   '/invoices': typeof InvoicesIndexRoute
   '/payments': typeof PaymentsIndexRoute
   '/payroll': typeof PayrollIndexRoute
+  '/payslips': typeof PayslipsIndexRoute
   '/recycle-bin': typeof RecycleBinIndexRoute
   '/reports': typeof ReportsIndexRoute
   '/salary': typeof SalaryIndexRoute
@@ -172,6 +211,7 @@ export interface FileRoutesByTo {
   '/staff': typeof StaffIndexRoute
   '/statements': typeof StatementsIndexRoute
   '/subcontracting': typeof SubcontractingIndexRoute
+  '/tasks': typeof TasksIndexRoute
   '/timesheets': typeof TimesheetsIndexRoute
   '/users': typeof UsersIndexRoute
 }
@@ -180,14 +220,18 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/clients/$clientId': typeof ClientsClientIdRoute
   '/activity-log/': typeof ActivityLogIndexRoute
+  '/bank-match/': typeof BankMatchIndexRoute
   '/clients/': typeof ClientsIndexRoute
   '/companies/': typeof CompaniesIndexRoute
   '/credit-notes/': typeof CreditNotesIndexRoute
   '/expenses/': typeof ExpensesIndexRoute
+  '/follow-ups/': typeof FollowUpsIndexRoute
   '/hours/': typeof HoursIndexRoute
+  '/invoice-drafts/': typeof InvoiceDraftsIndexRoute
   '/invoices/': typeof InvoicesIndexRoute
   '/payments/': typeof PaymentsIndexRoute
   '/payroll/': typeof PayrollIndexRoute
+  '/payslips/': typeof PayslipsIndexRoute
   '/recycle-bin/': typeof RecycleBinIndexRoute
   '/reports/': typeof ReportsIndexRoute
   '/salary/': typeof SalaryIndexRoute
@@ -195,6 +239,7 @@ export interface FileRoutesById {
   '/staff/': typeof StaffIndexRoute
   '/statements/': typeof StatementsIndexRoute
   '/subcontracting/': typeof SubcontractingIndexRoute
+  '/tasks/': typeof TasksIndexRoute
   '/timesheets/': typeof TimesheetsIndexRoute
   '/users/': typeof UsersIndexRoute
 }
@@ -204,14 +249,18 @@ export interface FileRouteTypes {
     | '/'
     | '/clients/$clientId'
     | '/activity-log/'
+    | '/bank-match/'
     | '/clients/'
     | '/companies/'
     | '/credit-notes/'
     | '/expenses/'
+    | '/follow-ups/'
     | '/hours/'
+    | '/invoice-drafts/'
     | '/invoices/'
     | '/payments/'
     | '/payroll/'
+    | '/payslips/'
     | '/recycle-bin/'
     | '/reports/'
     | '/salary/'
@@ -219,6 +268,7 @@ export interface FileRouteTypes {
     | '/staff/'
     | '/statements/'
     | '/subcontracting/'
+    | '/tasks/'
     | '/timesheets/'
     | '/users/'
   fileRoutesByTo: FileRoutesByTo
@@ -226,14 +276,18 @@ export interface FileRouteTypes {
     | '/'
     | '/clients/$clientId'
     | '/activity-log'
+    | '/bank-match'
     | '/clients'
     | '/companies'
     | '/credit-notes'
     | '/expenses'
+    | '/follow-ups'
     | '/hours'
+    | '/invoice-drafts'
     | '/invoices'
     | '/payments'
     | '/payroll'
+    | '/payslips'
     | '/recycle-bin'
     | '/reports'
     | '/salary'
@@ -241,6 +295,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/statements'
     | '/subcontracting'
+    | '/tasks'
     | '/timesheets'
     | '/users'
   id:
@@ -248,14 +303,18 @@ export interface FileRouteTypes {
     | '/'
     | '/clients/$clientId'
     | '/activity-log/'
+    | '/bank-match/'
     | '/clients/'
     | '/companies/'
     | '/credit-notes/'
     | '/expenses/'
+    | '/follow-ups/'
     | '/hours/'
+    | '/invoice-drafts/'
     | '/invoices/'
     | '/payments/'
     | '/payroll/'
+    | '/payslips/'
     | '/recycle-bin/'
     | '/reports/'
     | '/salary/'
@@ -263,6 +322,7 @@ export interface FileRouteTypes {
     | '/staff/'
     | '/statements/'
     | '/subcontracting/'
+    | '/tasks/'
     | '/timesheets/'
     | '/users/'
   fileRoutesById: FileRoutesById
@@ -271,14 +331,18 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ClientsClientIdRoute: typeof ClientsClientIdRoute
   ActivityLogIndexRoute: typeof ActivityLogIndexRoute
+  BankMatchIndexRoute: typeof BankMatchIndexRoute
   ClientsIndexRoute: typeof ClientsIndexRoute
   CompaniesIndexRoute: typeof CompaniesIndexRoute
   CreditNotesIndexRoute: typeof CreditNotesIndexRoute
   ExpensesIndexRoute: typeof ExpensesIndexRoute
+  FollowUpsIndexRoute: typeof FollowUpsIndexRoute
   HoursIndexRoute: typeof HoursIndexRoute
+  InvoiceDraftsIndexRoute: typeof InvoiceDraftsIndexRoute
   InvoicesIndexRoute: typeof InvoicesIndexRoute
   PaymentsIndexRoute: typeof PaymentsIndexRoute
   PayrollIndexRoute: typeof PayrollIndexRoute
+  PayslipsIndexRoute: typeof PayslipsIndexRoute
   RecycleBinIndexRoute: typeof RecycleBinIndexRoute
   ReportsIndexRoute: typeof ReportsIndexRoute
   SalaryIndexRoute: typeof SalaryIndexRoute
@@ -286,6 +350,7 @@ export interface RootRouteChildren {
   StaffIndexRoute: typeof StaffIndexRoute
   StatementsIndexRoute: typeof StatementsIndexRoute
   SubcontractingIndexRoute: typeof SubcontractingIndexRoute
+  TasksIndexRoute: typeof TasksIndexRoute
   TimesheetsIndexRoute: typeof TimesheetsIndexRoute
   UsersIndexRoute: typeof UsersIndexRoute
 }
@@ -304,6 +369,13 @@ declare module '@tanstack/react-router' {
       path: '/activity-log'
       fullPath: '/activity-log/'
       preLoaderRoute: typeof ActivityLogIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bank-match/': {
+      id: '/bank-match/'
+      path: '/bank-match'
+      fullPath: '/bank-match/'
+      preLoaderRoute: typeof BankMatchIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/clients/': {
@@ -341,11 +413,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExpensesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/follow-ups/': {
+      id: '/follow-ups/'
+      path: '/follow-ups'
+      fullPath: '/follow-ups/'
+      preLoaderRoute: typeof FollowUpsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/hours/': {
       id: '/hours/'
       path: '/hours'
       fullPath: '/hours/'
       preLoaderRoute: typeof HoursIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invoice-drafts/': {
+      id: '/invoice-drafts/'
+      path: '/invoice-drafts'
+      fullPath: '/invoice-drafts/'
+      preLoaderRoute: typeof InvoiceDraftsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invoices/': {
@@ -367,6 +453,13 @@ declare module '@tanstack/react-router' {
       path: '/payroll'
       fullPath: '/payroll/'
       preLoaderRoute: typeof PayrollIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/payslips/': {
+      id: '/payslips/'
+      path: '/payslips'
+      fullPath: '/payslips/'
+      preLoaderRoute: typeof PayslipsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/recycle-bin/': {
@@ -418,6 +511,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SubcontractingIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tasks/': {
+      id: '/tasks/'
+      path: '/tasks'
+      fullPath: '/tasks/'
+      preLoaderRoute: typeof TasksIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/timesheets/': {
       id: '/timesheets/'
       path: '/timesheets'
@@ -439,14 +539,18 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ClientsClientIdRoute: ClientsClientIdRoute,
   ActivityLogIndexRoute: ActivityLogIndexRoute,
+  BankMatchIndexRoute: BankMatchIndexRoute,
   ClientsIndexRoute: ClientsIndexRoute,
   CompaniesIndexRoute: CompaniesIndexRoute,
   CreditNotesIndexRoute: CreditNotesIndexRoute,
   ExpensesIndexRoute: ExpensesIndexRoute,
+  FollowUpsIndexRoute: FollowUpsIndexRoute,
   HoursIndexRoute: HoursIndexRoute,
+  InvoiceDraftsIndexRoute: InvoiceDraftsIndexRoute,
   InvoicesIndexRoute: InvoicesIndexRoute,
   PaymentsIndexRoute: PaymentsIndexRoute,
   PayrollIndexRoute: PayrollIndexRoute,
+  PayslipsIndexRoute: PayslipsIndexRoute,
   RecycleBinIndexRoute: RecycleBinIndexRoute,
   ReportsIndexRoute: ReportsIndexRoute,
   SalaryIndexRoute: SalaryIndexRoute,
@@ -454,6 +558,7 @@ const rootRouteChildren: RootRouteChildren = {
   StaffIndexRoute: StaffIndexRoute,
   StatementsIndexRoute: StatementsIndexRoute,
   SubcontractingIndexRoute: SubcontractingIndexRoute,
+  TasksIndexRoute: TasksIndexRoute,
   TimesheetsIndexRoute: TimesheetsIndexRoute,
   UsersIndexRoute: UsersIndexRoute,
 }

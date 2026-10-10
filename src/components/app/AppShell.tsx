@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
+  AlertTriangle,
   Banknote,
   FileSpreadsheet,
   Bell,
@@ -64,6 +65,7 @@ type NavPath =
   | "/payslips"
   | "/invoice-drafts"
   | "/bank-match"
+  | "/follow-ups"
   | "/credit-notes"
   | "/statements"
   | "/reports"
@@ -114,6 +116,7 @@ const NAV_GROUPS: { heading: string; items: NavItem[] }[] = [
       { to: "/payslips", label: "Payslips", icon: Banknote, module: null },
       { to: "/invoice-drafts", label: "Invoice Drafts", icon: FilePlus, module: null },
       { to: "/bank-match", label: "Bank Match", icon: Upload, module: null },
+      { to: "/follow-ups", label: "Follow-ups", icon: AlertTriangle, module: null },
       { to: "/expenses", label: "Expenses", icon: ReceiptText, module: "expenses" },
     ],
   },
