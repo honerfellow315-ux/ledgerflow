@@ -26,6 +26,7 @@ import {
   Search,
   Settings as SettingsIcon,
   ShieldCheck,
+  TrendingUp,
   Upload,
   Users,
   Wallet,
@@ -66,6 +67,7 @@ type NavPath =
   | "/invoice-drafts"
   | "/bank-match"
   | "/follow-ups"
+  | "/owner"
   | "/credit-notes"
   | "/statements"
   | "/reports"
@@ -90,6 +92,7 @@ const NAV_GROUPS: { heading: string; items: NavItem[] }[] = [
     heading: "Overview",
     items: [
       { to: "/", label: "Dashboard", icon: LayoutDashboard, module: "dashboard", exact: true },
+      { to: "/owner", label: "Owner Overview", icon: TrendingUp, module: null },
     ],
   },
   {

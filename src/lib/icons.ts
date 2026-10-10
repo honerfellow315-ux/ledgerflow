@@ -61,6 +61,7 @@ export {
   Settings,
   ShieldCheck,
   Trash2,
+  TrendingUp,
   Users,
   Wallet,
   X,

@@ -42,6 +42,7 @@ Aakhri update: Oct 2026.
 | Invoice Drafts | `/invoice-drafts` | `routes/invoice-drafts.index.tsx`, `lib/invoiceDrafts/`, `components/app/invoiceDrafts/` | Mahine ki shifts se invoice ka draft, check karke banana |
 | Bank Match | `/bank-match` | `routes/bank-match.index.tsx`, `lib/bankMatch/`, `components/app/bankMatch/` | Bank statement ki payments ko invoices se milana |
 | Follow-ups | `/follow-ups` | `routes/follow-ups.index.tsx`, `lib/followUps/`, `components/app/followUps/` | Overdue clients, har chase ka record, promise to pay (email ke baghair) |
+| Owner Overview | `/owner` | `routes/owner.index.tsx`, `lib/owner/`, `components/app/owner/` | Kis client se kitna margin, kitna outstanding, hafte ki summary, 6 mahine ka billed/received |
 
 ### Build ki ghaltian jo theek ho gayin
 - `src/lib/payroll/reportExport.ts` aur `src/lib/ledger/statementExcel.ts` me ghalat file paste hone se Vercel build toota tha. Dono ab sahi hain.
@@ -49,8 +50,7 @@ Aakhri update: Oct 2026.
 
 ## Baqi: UI
 
-1. **Owner dashboard** (kis client se kitna margin, kitna outstanding, is hafte ki summary, download).
-2. **Dark redesign** (client ki image wali). Sab se aakhir me. Styles ke tokens, `AppShell`, `Panel`, `SummaryCard`, `DataTable` aur Dashboard page badlenge, baqi pages khud naye look me aayenge.
+1. **Dark redesign** (client ki image wali). Sab se aakhir me. Styles ke tokens, `AppShell`, `Panel`, `SummaryCard`, `DataTable` aur Dashboard page badlenge, baqi pages khud naye look me aayenge.
 
 ## Baqi: Backend (UI ke baad)
 
@@ -75,7 +75,7 @@ Aakhri update: Oct 2026.
 | Invoice Drafts | Salary Sheet ki asli shifts aur client rate, "Create invoice" se asli invoice banana |
 | Bank Match | Bank file padhna, asli open invoices, Confirm par asli Payment record |
 | Follow-ups | Contact history ka table, overdue invoices asli, Statement download (Statements ki Excel) |
-| Owner dashboard | Asli numbers |
+| Owner Overview | Asli numbers (invoices, payments, payroll), summary download. `LOW_MARGIN` (15%) owner se confirm karna |
 
 Har screen par jorte waqt: "Preview" wala notice hatao, `RequireView module="dashboard"` aur admin-only check ki jagah asli permission module lagao (`lib/permissions.ts` aur Users screen me), aur menu me `module: null` ki jagah wo module.
 
@@ -87,9 +87,10 @@ Har screen par jorte waqt: "Preview" wala notice hatao, `RequireView module="das
 4. Receipt **Excel** me theek hai ya **PDF** chahiye?
 5. Bank statement ka **format** (CSV ya Excel) aur ek sample.
 6. Task ke 4 status theek hain (To do, In progress, Done waiting for check, Verified)?
-7. Guards ke liye **standard timesheet template**: upar Name aur NI number ka box, phir Date, Site, Start, End, Hours, Rate, Amount (break time chahiye ya nahi?).
+7. Owner Overview me **kam margin** ki hadd kitni ho (abhi 15% rakhi hai, 8% se neeche "bohat kam")?
+8. Guards ke liye **standard timesheet template**: upar Name aur NI number ka box, phir Date, Site, Start, End, Hours, Rate, Amount (break time chahiye ya nahi?).
 
 ## Aaj ki halat ek nazar me
 
-- UI: 6 naye screens ban chuke, 2 baqi (Owner dashboard, dark redesign).
+- UI: 7 naye screens ban chuke, 1 baqi (dark redesign).
 - Backend: abhi koi naya screen asli data se nahi juda.
