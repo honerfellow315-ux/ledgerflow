@@ -548,7 +548,7 @@ function TimesheetsPageContent() {
               </Table>
             </TableWrap>
             {pages > 1 ? (
-              <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-[13px] text-muted-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-[13px] text-muted-foreground">
                 <span>
                   Page {page} of {pages}
                 </span>

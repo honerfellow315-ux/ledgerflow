@@ -8,7 +8,7 @@ export function Panel({ children, className }: { children: ReactNode; className?
   // below), which would trap it inside this panel instead of letting it
   // stick to the viewport. Rounded corners are clipped further down
   // instead (PanelHeader's own rounded-t-lg, TableWrap's rounded-b-lg).
-  return <section className={cn("panel rounded-xl", className)}>{children}</section>;
+  return <section className={cn("panel min-w-0 max-w-full rounded-xl", className)}>{children}</section>;
 }
 
 export function PanelHeader({
@@ -21,12 +21,12 @@ export function PanelHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-t-xl border-b border-white/[0.07] bg-white/[0.03] px-4 py-2.5">
+    <header className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-t-xl border-b border-white/[0.07] bg-white/[0.03] px-4 py-2.5">
       <div className="min-w-0">
-        <h2 className="truncate text-[13.5px] font-semibold text-foreground">{title}</h2>
+        <h2 className="break-words text-[13.5px] font-semibold text-foreground">{title}</h2>
         {description ? <p className="mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex min-w-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </header>
   );
 }
@@ -97,7 +97,7 @@ export function TableWrap({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="w-full">
+    <div className="min-w-0 max-w-full w-full">
       <div
         ref={topRef}
         onScroll={onTopScroll}

@@ -241,57 +241,37 @@ function ReportsPageContent() {
         <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
           <label className="text-xs">
             Company
-            <select
-              aria-label="Company"
-              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
-              value={companyId}
-              onChange={(e) => {
-                setCompanyId(e.target.value);
-                setClientId("");
-              }}
-            >
-              <option value="">All companies</option>
-              <option value="default">Default business</option>
-              {data.companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <Select value={companyId || "all"} onValueChange={(value) => { setCompanyId(value === "all" ? "" : value); setClientId(""); }}>
+              <SelectTrigger aria-label="Company" className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All companies</SelectItem>
+                <SelectItem value="default">Default business</SelectItem>
+                {data.companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </label>
           <label className="text-xs">
             Client
-            <select
-              aria-label="Client"
-              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
-              value={clientId}
-              onChange={(e) => {
-                setClientId(e.target.value);
-                if (e.target.value) setStatementClient(e.target.value);
-              }}
-            >
-              <option value="">All clients</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.company} · {c.name}
-                </option>
-              ))}
-            </select>
+            <Select value={clientId || "all"} onValueChange={(value) => { const id = value === "all" ? "" : value; setClientId(id); if (id) setStatementClient(id); }}>
+              <SelectTrigger aria-label="Client" className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All clients</SelectItem>
+                {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.company} · {c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </label>
           <label className="text-xs">
             Invoice status
-            <select
-              aria-label="Invoice status"
-              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              <option value="">All statuses</option>
-              <option value="paid">Paid</option>
-              <option value="partial">Partially paid</option>
-              <option value="unpaid">Unpaid</option>
-              <option value="overdue">Overdue</option>
-            </select>
+            <Select value={status || "all"} onValueChange={(value) => setStatus(value === "all" ? "" : value)}>
+              <SelectTrigger aria-label="Invoice status" className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="partial">Partially paid</SelectItem>
+                <SelectItem value="unpaid">Unpaid</SelectItem>
+                <SelectItem value="overdue">Overdue</SelectItem>
+              </SelectContent>
+            </Select>
           </label>
           <label className="text-xs">
             From

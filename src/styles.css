@@ -1880,3 +1880,18 @@ div.min-h-screen.bg-background:has(> aside.sidebar-shell) {
     .lf-shell .panel, .lf-shell .panel-interactive { background-color: oklch(0.21 0.025 190); }
   }
 }
+
+/* Shared responsive controls: tables scroll inside their own viewport. */
+@media screen {
+  .lf-content, .lf-main, .lf-main > *, [role="dialog"] > * { min-width: 0; }
+  .lf-main input, .lf-main textarea, [role="dialog"] input, [role="dialog"] textarea { max-width: 100%; }
+  [role="dialog"] { overflow-x: hidden; }
+  [role="option"] { overflow-wrap: anywhere; white-space: normal; }
+  @media (max-width: 639px) {
+    .lf-main .panel > header { align-items: start; }
+    .lf-main .panel > header > div:last-child { max-width: 100%; }
+    [role="dialog"] { max-width: calc(100vw - 1.5rem); padding: 1rem; }
+    [role="dialog"] input, [role="dialog"] textarea, [role="listbox"] input { font-size: 16px; }
+    .lf-main .num { overflow-wrap: anywhere; }
+  }
+}

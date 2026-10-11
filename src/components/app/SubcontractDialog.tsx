@@ -426,7 +426,7 @@ export function SubcontractDialog({
           </Field>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Amount ex VAT

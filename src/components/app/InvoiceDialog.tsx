@@ -642,7 +642,7 @@ export function InvoiceDialog({
               ) : null}
             </div>
 
-            <div className="grid grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Amount ex VAT
@@ -1024,7 +1024,7 @@ export function InvoiceDialog({
                           amountIncVat(invoice, dialogPaid),
                         );
                         return (
-                          <div className="grid grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3 sm:col-span-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3 sm:col-span-2">
                             <div>
                               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                                 Total Hours
@@ -1179,7 +1179,7 @@ export function InvoiceDialog({
               </Field>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Amount ex VAT

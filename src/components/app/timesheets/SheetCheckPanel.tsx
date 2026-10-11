@@ -30,7 +30,7 @@ function Notice({ tone, children }: { tone: "warn" | "info"; children: ReactNode
         className={tone === "warn" ? "mt-0.5 size-4 text-warning" : "mt-0.5 size-4 text-primary"}
         aria-hidden="true"
       />
-      <div>{children}</div>
+      <div className="min-w-0 break-words">{children}</div>
     </div>
   );
 }
@@ -69,16 +69,16 @@ export function SheetCheckPanel({
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
+        <div className="flex min-w-0 max-w-full items-start gap-3">
           <Button variant="outline" size="icon" aria-label="Back to all sheets" onClick={onBack}>
             <ArrowLeft className="size-4" />
           </Button>
-          <div>
+          <div className="min-w-0 break-words">
             <h1 className="text-xl font-semibold text-foreground">{sheet.staffName}</h1>
             <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
               <span>{sheet.monthLabel}</span>
               <span className="num">NI {maskNi(sheet.ni)}</span>
-              <span>{sheet.fileName}</span>
+              <span className="min-w-0 break-all">{sheet.fileName}</span>
               <Pill tone="mute">{FORMAT_LABEL[sheet.format]}</Pill>
             </p>
           </div>
@@ -177,7 +177,7 @@ export function SheetCheckPanel({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Hours on the sheet" value={fmtHours(t.sheetHours)} />
-        <SummaryCard label="Hours in our records" value={fmtHours(t.recordHours)} />
+        <SummaryCard label="Hours in our records" value={fmtHours(t.recordHours)} sublabel="Includes shifts not listed on this sheet" />
         <SummaryCard
           label="Difference"
           value={fmtDiff(t.diff)}
@@ -192,6 +192,9 @@ export function SheetCheckPanel({
         />
       </div>
 
+      {sheet.rows.some((row) => /Possible duplicate|more than 24 hours/.test(row.note ?? "")) ? (
+        <Notice tone="warn">Some stored shifts may be duplicated or exceed 24 hours on one date. Review the flagged rows and the source shift imports. No records have been removed or excluded from the total.</Notice>
+      ) : null}
       <Panel>
         <PanelHeader
           title="Shift by shift"

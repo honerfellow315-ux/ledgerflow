@@ -99,6 +99,18 @@ export function compareRows(args: {
     return { answers: args.rows.map((r) => answers.get(r.key)!), missing };
   }
 
+  const recordCounts = new Map<string, number>();
+  const dayMinutes = new Map<string, number>();
+  const recordKey = (r: RecordShift) => JSON.stringify([r.date, normName(r.clientName), normName(r.siteName), minutes(r.hours), r.rate]);
+  for (const rec of args.records) {
+    const key = recordKey(rec);
+    recordCounts.set(key, (recordCounts.get(key) ?? 0) + 1);
+    dayMinutes.set(rec.date, (dayMinutes.get(rec.date) ?? 0) + minutes(rec.hours));
+  }
+  const recordNote = (rec: RecordShift) => [
+    (recordCounts.get(recordKey(rec)) ?? 0) > 1 ? "Possible duplicate in our records: same date, site, client, hours and rate. Review the imported shifts; both records are included." : "",
+    (dayMinutes.get(rec.date) ?? 0) > 1440 ? "Our records total more than 24 hours for this person on this date. Review the imported shifts." : "",
+  ].filter(Boolean).join(" ");
   const recordsByDate = new Map<string, RecordShift[]>();
   for (const rec of args.records) {
     const list = recordsByDate.get(rec.date);
@@ -198,6 +210,12 @@ export function compareRows(args: {
       if (sheetSite.length > 0 && !siteOk(r, rec)) {
         const where = rec.siteName || rec.clientName;
         if (where) note = `${note} The site on the sheet differs from our record (${where}).`.trim();
+        if (result === "match") result = "check_reading";
+      }
+      const diagnostic = recordNote(rec);
+      if (diagnostic) {
+        note = [note, diagnostic].filter(Boolean).join(" ");
+        if (result === "match") result = "check_reading";
       }
       // The sheet contradicts itself: never show a clean "match".
       if (r.uncertain && result === "match") result = "check_reading";
@@ -217,7 +235,7 @@ export function compareRows(args: {
           site: rec.siteName || rec.clientName,
           recordHours: rec.hours,
           rate: rec.rate,
-          note: "Worked per our records, but not listed on the sheet.",
+          note: ["Worked per our records, but not listed on the sheet.", recordNote(rec)].filter(Boolean).join(" "),
         });
       }
     }
@@ -225,14 +243,14 @@ export function compareRows(args: {
 
   // Record dates the sheet has no row for at all.
   for (const [date, recs] of recordsByDate) {
-    if (rowsByDate.has(date) || unreadableDates.has(date) || !date.startsWith(args.month)) continue;
+    if (rowsByDate.has(date) || !date.startsWith(args.month)) continue;
     for (const rec of recs) {
       missing.push({
         date,
         site: rec.siteName || rec.clientName,
         recordHours: rec.hours,
         rate: rec.rate,
-        note: "Worked per our records, but not listed on the sheet.",
+        note: [unreadableDates.has(date) ? "Recorded shift could not be compared because the sheet hours are unreadable." : "Worked per our records, but not listed on the sheet.", recordNote(rec)].filter(Boolean).join(" "),
       });
     }
   }
