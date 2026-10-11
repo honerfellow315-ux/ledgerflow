@@ -270,7 +270,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="lf-footer-text">
                 <b>LedgerFlow</b>
                 <span>Receivables Suite</span>
-                <span>v2.4.0</span>
+                <span>Workspace</span>
               </div>
               <ChevronRight className="lf-chev" style={{ marginLeft: "auto" }} />
             </div>

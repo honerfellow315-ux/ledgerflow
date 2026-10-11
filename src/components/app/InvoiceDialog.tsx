@@ -380,7 +380,15 @@ export function InvoiceDialog({
     let hours: number | undefined;
     let rate: number | undefined;
     let lineItemsPayload:
-      | { description: string; quantity: number; unitPrice: number; orderIndex: number }[]
+      | {
+          id: string;
+          invoiceId: string;
+          amountExVat: number;
+          description: string;
+          quantity: number;
+          unitPrice: number;
+          orderIndex: number;
+        }[]
       | undefined;
 
     if (form.billingType === "hours") {
@@ -398,7 +406,15 @@ export function InvoiceDialog({
       lineItemsPayload = form.lineItems.map((li, i) => {
         const quantity = Number(li.quantity) || 0;
         const unitPrice = Number(li.unitPrice) || 0;
-        return { description: li.description.trim(), quantity, unitPrice, orderIndex: i };
+        return {
+          id: li.key,
+          invoiceId: invoice?.id ?? "",
+          amountExVat: round2(quantity * unitPrice),
+          description: li.description.trim(),
+          quantity,
+          unitPrice,
+          orderIndex: i,
+        };
       });
       if (lineItemsPayload.some((li) => !li.description))
         return fail("Every line item needs a description.");
@@ -967,7 +983,9 @@ export function InvoiceDialog({
                       <p>
                         Payroll: {formatHours(Number(form.payrollHours))} h × £{form.payrollRate} ={" "}
                         <span className="num font-semibold">
-                          {formatMoney(round2(Number(form.payrollHours) * Number(form.payrollRate)))}
+                          {formatMoney(
+                            round2(Number(form.payrollHours) * Number(form.payrollRate)),
+                          )}
                         </span>{" "}
                         (payroll part)
                       </p>
@@ -996,43 +1014,45 @@ export function InvoiceDialog({
                   >
                     <Input readOnly disabled value={formatMoney(computedAmount ?? 0)} />
                   </Field>
-                  {invoice ? (() => {
-                    const dialogPaid = paidForInvoice(invoice.id, data.payments);
-                    const dialogHours = invoiceHoursDisplay(
-                      invoice,
-                      data.subcontracts,
-                      dialogPaid,
-                      amountIncVat(invoice, dialogPaid),
-                    );
-                    return (
-                    <div className="grid grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3 sm:col-span-2">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Total Hours
-                        </p>
-                        <p className="num text-[15px] font-semibold">
-                          {formatHours(invoice.hours ?? 0)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Processed Hours
-                        </p>
-                        <p className="num text-[15px] font-semibold">
-                          {formatHours(dialogHours.processed)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Remaining Hours
-                        </p>
-                        <p className="num text-[15px] font-semibold">
-                          {formatHours(dialogHours.remaining)}
-                        </p>
-                      </div>
-                    </div>
-                    );
-                  })() : null}
+                  {invoice
+                    ? (() => {
+                        const dialogPaid = paidForInvoice(invoice.id, data.payments);
+                        const dialogHours = invoiceHoursDisplay(
+                          invoice,
+                          data.subcontracts,
+                          dialogPaid,
+                          amountIncVat(invoice, dialogPaid),
+                        );
+                        return (
+                          <div className="grid grid-cols-3 gap-3 rounded-sm border border-border bg-surface-muted px-4 py-3 sm:col-span-2">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Total Hours
+                              </p>
+                              <p className="num text-[15px] font-semibold">
+                                {formatHours(invoice.hours ?? 0)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Processed Hours
+                              </p>
+                              <p className="num text-[15px] font-semibold">
+                                {formatHours(dialogHours.processed)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Remaining Hours
+                              </p>
+                              <p className="num text-[15px] font-semibold">
+                                {formatHours(dialogHours.remaining)}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()
+                    : null}
                 </>
               ) : (
                 <Field label="Amount ex VAT (£)" htmlFor="inv-amount">

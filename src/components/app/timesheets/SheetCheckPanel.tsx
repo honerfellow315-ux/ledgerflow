@@ -39,6 +39,7 @@ export function SheetCheckPanel({
   sheet,
   onBack,
   onDownload,
+  onPrint,
   onConfirm,
   onRecheck,
   onDelete,
@@ -48,6 +49,7 @@ export function SheetCheckPanel({
   sheet: TimesheetSheet;
   onBack: () => void;
   onDownload: () => void;
+  onPrint?: () => void;
   /** Confirms a name-only match (shown only for those sheets). */
   onConfirm?: () => void;
   onRecheck?: () => void;
@@ -269,6 +271,11 @@ export function SheetCheckPanel({
               ? "Everything matches. The receipt will show this sheet as all correct."
               : "The receipt lists every row marked above so you can send it to the staff member."}
         </p>
+        {onPrint ? (
+          <Button variant="outline" onClick={onPrint}>
+            Print / Save PDF
+          </Button>
+        ) : null}
         <Button onClick={onDownload}>
           <Download className="size-4" /> Download receipt
         </Button>

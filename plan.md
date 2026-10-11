@@ -245,3 +245,16 @@ Har naye screen par jorte waqt (purani hidayat): "Preview" wala notice hatao, `R
 ### Next separate step
 
 AI photo/scanned-PDF reading with review and an AI key, then remaining business rules/load/parallel-run verification already listed in this plan. This delivery does not claim full production readiness.
+
+## Step 2: remaining pre-AI functional work (11 Oct 2026)
+
+This section supersedes the outstanding type errors/month-lock/browser limitations in Step 1. AI/OCR, user/admin manuals, final readiness documentation and data-security planning remain deferred by request.
+
+- Timesheet identity: when the document has neither name nor NI, explicit timesheet filenames can suggest a person. Unique name matching still requires confirmation; ambiguous names/NI conflicts are not auto-accepted. Existing uploads recover this suggestion on Check again. The screenshot's filename pattern is covered; the actual failing workbook is not available for verification.
+- Timesheet month lock/reopen added with admin actions, database write guards, incomplete/unconfirmed/duplicate-staff checks, and audit records. Rechecking marks comparisons incomplete until finished. Additive `schema/timesheet-locks-migration.sql` must run after the existing timesheets migration, on the separate test database before deploying this overlay. No connected database was changed.
+- Timesheet Print / Save PDF report added for detail/month, with differences, totals and masked NI.
+- Dashboard glass styling, mobile spacing, compact per-user task counts and scrollable task preview improved. Removed placeholder version/promo. Small currency chart values retain their actual amounts.
+- Remaining TypeScript errors fixed. Staff, salary and payroll Excel import/export workflows were not changed.
+- Verification: `npx tsc --noEmit`, `npm run build`, and `node --import tsx scripts/pre-ai-check.ts` passed. In-memory PostgreSQL migration rerun and matching/lock tests passed with 10,000 fake staff and 50,000 fake shifts. Actual headless browser document readers passed typed bank PDF, bank CSV, scan rejection and timesheet Word fixtures. Browser dashboard desktop/mobile, Reports filters, identity correction and print iframe checks passed using mocked server responses.
+- Still required on separate test hosting: apply migration, authenticated end-to-end upload/recheck with actual files, and real multi-user/load/parallel-run checks. Local fixture checks do not establish production readiness. Unconfirmed client-specific business rules retain their existing defaults.
+- Apply Step 2 over Step 1. Overlay contains changed/new source, SQL, regression checks and this progress record only; no environment files or dependencies.

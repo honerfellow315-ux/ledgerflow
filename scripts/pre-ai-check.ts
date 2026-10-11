@@ -61,3 +61,10 @@ assert.throws(() => bankPageToMatrix([]), /No supported bank table/);
 console.log(
   "PASS: UK GMT/BST clock, timesheet identity labels, bank amounts/dates and PDF debit/credit columns.",
 );
+
+// Only explicit timesheet filenames may suggest identity; staff still confirms it.
+import { filenameStaffName } from "../src/lib/timesheets/fileIdentity";
+assert.equal(filenameStaffName("September 2026 Monthly Time Sheet Format - Muhammad Umair.xlsx"), "Muhammad Umair");
+assert.equal(filenameStaffName("random-export.xlsx"), "");
+assert.equal(filenameStaffName("Timesheet - Staff 123.xlsx"), "");
+console.log("PASS: conservative filename identity hints.");

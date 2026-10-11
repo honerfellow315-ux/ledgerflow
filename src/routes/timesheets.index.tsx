@@ -1,3 +1,4 @@
+import { printTimesheetReport } from "@/lib/timesheets/print";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -49,6 +50,8 @@ import {
   recheckTimesheetBatch,
   recheckTimesheetSheet,
   correctTimesheetIdentity,
+  timesheetMonthLock,
+  setTimesheetMonthLock,
 } from "@/lib/actions/timesheets";
 import { errorMessage } from "@/lib/payroll/queries";
 import { unwrap } from "@/lib/unwrap";
@@ -141,6 +144,44 @@ function TimesheetsPageContent() {
     enabled: ready && isAdmin && openId !== null,
   });
 
+  const lockMonth = openQ.data?.month ?? activeMonth;
+  const lockQ = useQuery({
+    queryKey: ["timesheets", "lock", lockMonth],
+    queryFn: () => unwrap(timesheetMonthLock({ data: { month: lockMonth } })),
+    enabled: ready && isAdmin && lockMonth !== ALL,
+    refetchInterval: 30_000,
+  });
+  const locked = lockQ.data?.locked ?? false;
+  const lockUnknown = lockMonth !== ALL && (lockQ.isPending || lockQ.isError);
+  const lockControl =
+    lockMonth !== ALL ? (
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-muted/40 px-4 py-3">
+        <span className="text-sm">
+          {lockQ.isError
+            ? "Month lock could not be loaded. Check the required SQL migration."
+            : lockQ.isPending
+              ? "Loading month status…"
+              : locked
+                ? `${lockMonth} is locked${lockQ.data?.changedBy ? ` by ${lockQ.data.changedBy}` : ""}`
+                : `${lockMonth} is open for checking`}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || lockUnknown}
+          onClick={() =>
+            void guarded(async () => {
+              await unwrap(setTimesheetMonthLock({ data: { month: lockMonth, locked: !locked } }));
+              await refresh();
+              toast.success(locked ? "Month reopened." : "Month locked.");
+            }, "Could not change the month lock. Every sheet must be ready before locking.")
+          }
+        >
+          {locked ? "Reopen month" : "Lock checked month"}
+        </Button>
+      </div>
+    ) : null;
+
   const refresh = () => qc.invalidateQueries({ queryKey: ["timesheets"] });
 
   async function guarded(fn: () => Promise<void>, fallback: string) {
@@ -162,7 +203,7 @@ function TimesheetsPageContent() {
     }
   }
 
-  async function downloadAll() {
+  async function downloadAll(format: "excel" | "pdf" = "excel") {
     await guarded(async () => {
       const all: TimesheetSheet[] = [];
       const total = Math.min(list?.total ?? 0, REPORT_MAX_SHEETS);
@@ -178,7 +219,8 @@ function TimesheetsPageContent() {
         toast.info("There is nothing to put in the report.");
         return;
       }
-      await downloadTimesheetReport(all);
+      if (format === "pdf") await printTimesheetReport(all);
+      else await downloadTimesheetReport(all);
       if ((list?.total ?? 0) > REPORT_MAX_SHEETS) {
         toast.info(
           `The report has the first ${REPORT_MAX_SHEETS} sheets. Use search or a status filter for the rest.`,
@@ -238,12 +280,16 @@ function TimesheetsPageContent() {
     }
     return (
       <>
+        {lockControl}
         <SheetCheckPanel
           key={open.id + ":" + open.sourceName + ":" + open.sourceNi}
           sheet={open}
-          busy={busy}
+          busy={busy || locked || lockUnknown}
           onBack={() => setOpenId(null)}
           onDownload={() => void downloadReport([open])}
+          onPrint={() =>
+            void guarded(() => printTimesheetReport([open]), "Could not open the PDF receipt.")
+          }
           {...(open.matchedBy === "name" && !open.staffConfirmed
             ? {
                 onConfirm: () =>
@@ -313,6 +359,7 @@ function TimesheetsPageContent() {
 
   return (
     <div className="space-y-5">
+      {lockControl}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Timesheet Check</h1>
@@ -354,7 +401,14 @@ function TimesheetsPageContent() {
           >
             <Download className="size-4" /> Download report
           </Button>
-          <Button onClick={() => setUploadOpen(true)}>
+          <Button
+            variant="outline"
+            disabled={busy || total === 0}
+            onClick={() => void downloadAll("pdf")}
+          >
+            Print / PDF receipts
+          </Button>
+          <Button disabled={busy || locked || lockUnknown} onClick={() => setUploadOpen(true)}>
             <Upload className="size-4" /> Upload timesheets
           </Button>
         </div>
@@ -377,7 +431,7 @@ function TimesheetsPageContent() {
         <SummaryCard
           label="Staff not found"
           value={String(sum?.notFound ?? 0)}
-          sublabel="Add them to Staff first"
+          sublabel="Check the name / NI read from the sheet"
           tone={sum?.notFound ? "danger" : "success"}
         />
       </div>

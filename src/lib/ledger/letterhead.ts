@@ -106,8 +106,8 @@ export function analyzeLetterhead(dataUrl: string): Promise<LetterheadAnalysis> 
           // letterhead these come from the same run; a mid-page watermark
           // just means the content well sits between two runs, which this
           // still gets right since it only looks at the outermost edges.
-          const topRow = runs[0].start;
-          const bottomRow = runs[runs.length - 1].end;
+          const topRow = runs[0]!.start;
+          const bottomRow = runs[runs.length - 1]!.end;
 
           const marginTopMm = Math.round((topRow / canvas.height) * A4_HEIGHT_MM * 10) / 10;
           const marginBottomMm =

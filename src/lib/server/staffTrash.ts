@@ -90,7 +90,9 @@ async function collect(ids: string[]): Promise<Bundle> {
     entries.map((e) => e.id),
     500,
   )) {
-    payments.push(...(await db.select().from(salaryPayments).where(inArray(salaryPayments.entryId, part))));
+    payments.push(
+      ...(await db.select().from(salaryPayments).where(inArray(salaryPayments.entryId, part))),
+    );
   }
 
   const shiftsByStaff = new Map<string, string[]>();
@@ -161,7 +163,8 @@ export async function staffDeleteImpact(ids: string[]): Promise<StaffDeleteImpac
     for (const s of b.staff) {
       if (b.blocked.has(s.id)) {
         out.blocked += 1;
-        if (out.blockedNames.length < 5) out.blockedNames.push(`${s.name} (${b.blocked.get(s.id)})`);
+        if (out.blockedNames.length < 5)
+          out.blockedNames.push(`${s.name} (${b.blocked.get(s.id)})`);
         continue;
       }
       out.staff += 1;
@@ -186,7 +189,10 @@ export interface MoveToTrashResult {
  * Snapshot first, delete second. If the delete fails the snapshot is removed
  * again, so a failure never leaves a ghost entry behind.
  */
-export async function moveStaffToTrash(ids: string[], deletedBy: string): Promise<MoveToTrashResult> {
+export async function moveStaffToTrash(
+  ids: string[],
+  deletedBy: string,
+): Promise<MoveToTrashResult> {
   const result: MoveToTrashResult = { deleted: 0, skipped: 0, skippedNames: [] };
   for (const part of chunk([...new Set(ids)], 20)) {
     const b = await collect(part);
@@ -212,7 +218,7 @@ export async function moveStaffToTrash(ids: string[], deletedBy: string): Promis
         salaryPayments: b.payments.filter((p) => entryIds.has(p.entryId)),
         shiftIds: b.shiftsByStaff.get(s.id) ?? [],
       };
-      return { id: uid("stt"), staffId: s.id, name: s.name, deletedBy, snapshot };
+      return { id: uid("stt"), staffId: s.id, name: s.name, deletedBy, snapshot: { ...snapshot } };
     });
 
     await db.insert(staffTrash).values(rows);
@@ -238,7 +244,9 @@ export async function moveStaffToTrash(ids: string[], deletedBy: string): Promis
 }
 
 /** Puts a deleted person (and whatever of their history still has a home) back. */
-export async function restoreStaffFromTrash(trashId: string): Promise<{ name: string; note: string }> {
+export async function restoreStaffFromTrash(
+  trashId: string,
+): Promise<{ name: string; note: string }> {
   const [row] = await db.select().from(staffTrash).where(eq(staffTrash.id, trashId)).limit(1);
   if (!row) throw new Error("This item is no longer in the recycle bin.");
   const snap = row.snapshot as unknown as StaffTrashSnapshot;
@@ -251,9 +259,16 @@ export async function restoreStaffFromTrash(trashId: string): Promise<{ name: st
   }
   // Same rule as adding a person by hand: one RSS ID / ESS ID / NI per person.
   for (const c of current) {
-    if (s.rssId && c.rssId === s.rssId) throw new Error(`RSS ID ${s.rssId} now belongs to ${c.name}. Fix or remove that profile first.`);
-    if (s.essId && c.essId === s.essId) throw new Error(`ESS ID ${s.essId} now belongs to ${c.name}. Fix or remove that profile first.`);
-    if (s.ni && normNi(c.ni) === normNi(s.ni)) throw new Error(`The NI number now belongs to ${c.name}. Fix or remove that profile first.`);
+    if (s.rssId && c.rssId === s.rssId)
+      throw new Error(
+        `RSS ID ${s.rssId} now belongs to ${c.name}. Fix or remove that profile first.`,
+      );
+    if (s.essId && c.essId === s.essId)
+      throw new Error(
+        `ESS ID ${s.essId} now belongs to ${c.name}. Fix or remove that profile first.`,
+      );
+    if (s.ni && normNi(c.ni) === normNi(s.ni))
+      throw new Error(`The NI number now belongs to ${c.name}. Fix or remove that profile first.`);
   }
 
   await db.insert(payrollStaff).values(s);
@@ -275,10 +290,14 @@ export async function restoreStaffFromTrash(trashId: string): Promise<{ name: st
     const entryIds = new Set(entries.map((e) => e.id));
     const payments = snap.salaryPayments.filter((p) => entryIds.has(p.entryId));
 
-    for (const part of chunk(links, 200)) await db.insert(payrollCompanyStaff).values(part).onConflictDoNothing();
-    for (const part of chunk(lines, 200)) await db.insert(payrollLines).values(part).onConflictDoNothing();
-    for (const part of chunk(entries, 200)) await db.insert(salaryEntries).values(part).onConflictDoNothing();
-    for (const part of chunk(payments, 200)) await db.insert(salaryPayments).values(part).onConflictDoNothing();
+    for (const part of chunk(links, 200))
+      await db.insert(payrollCompanyStaff).values(part).onConflictDoNothing();
+    for (const part of chunk(lines, 200))
+      await db.insert(payrollLines).values(part).onConflictDoNothing();
+    for (const part of chunk(entries, 200))
+      await db.insert(salaryEntries).values(part).onConflictDoNothing();
+    for (const part of chunk(payments, 200))
+      await db.insert(salaryPayments).values(part).onConflictDoNothing();
 
     // Re-link their imported shifts (only ones nobody else has claimed meanwhile).
     for (const part of chunk(snap.shiftIds, 500)) {
@@ -290,7 +309,8 @@ export async function restoreStaffFromTrash(trashId: string): Promise<{ name: st
 
     await db.delete(staffTrash).where(eq(staffTrash.id, row.id));
 
-    const lostLines = snap.salaryEntries.length - entries.length + (snap.payrollLines.length - lines.length);
+    const lostLines =
+      snap.salaryEntries.length - entries.length + (snap.payrollLines.length - lines.length);
     const note =
       lostLines > 0
         ? `${lostLines} sheet line${lostLines === 1 ? "" : "s"} could not be restored because that month / sheet no longer exists.`
@@ -306,7 +326,11 @@ export async function restoreStaffFromTrash(trashId: string): Promise<{ name: st
 
 /** Removes a recycle-bin entry for good. */
 export async function purgeStaffTrash(trashId: string): Promise<string> {
-  const [row] = await db.select({ name: staffTrash.name }).from(staffTrash).where(eq(staffTrash.id, trashId)).limit(1);
+  const [row] = await db
+    .select({ name: staffTrash.name })
+    .from(staffTrash)
+    .where(eq(staffTrash.id, trashId))
+    .limit(1);
   await db.delete(staffTrash).where(eq(staffTrash.id, trashId));
   return row?.name ?? "";
 }

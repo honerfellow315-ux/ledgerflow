@@ -20,6 +20,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { z } from "zod";
+import { assertTimesheetMonthOpen } from "../server/timesheetLocks";
 import { db } from "../server/db";
 import { payrollStaff, timesheetRows, timesheetSheets } from "../../../drizzle/schema";
 import { requireAdmin } from "../server/auth";
@@ -361,6 +362,7 @@ export const deleteTimesheetSheet = createServerFn({ method: "POST" })
       .where(eq(timesheetSheets.id, data.id))
       .limit(1);
     if (!row) return { ok: true };
+    await assertTimesheetMonthOpen(db, row.month);
     await db.delete(timesheetSheets).where(eq(timesheetSheets.id, data.id)); // rows cascade
     await recordActivity({
       actor,
@@ -391,6 +393,7 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
       .where(eq(timesheetSheets.id, data.id))
       .limit(1);
     if (!sheet) throw new Error("That sheet no longer exists.");
+    await assertTimesheetMonthOpen(db, sheet.month);
     const match = await findStaff(db, data.ni, data.name);
     const personKey = personKeyOf(
       match.staffId,
@@ -424,4 +427,31 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
       details: `Result: ${result?.status ?? "staff_not_found"}`,
     });
     return result;
+  });
+
+export const timesheetMonthLock = createServerFn({ method: "GET" })
+  .validator(z.object({ month }))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    const result = await db.execute(
+      sql`SELECT locked, changed_by AS "changedBy", changed_at AS "changedAt" FROM timesheet_month_locks WHERE month = ${data.month}`,
+    );
+    const row = result.rows[0];
+    return { locked: row?.["locked"] === true, changedBy: String(row?.["changedBy"] ?? "") };
+  });
+
+export const setTimesheetMonthLock = createServerFn({ method: "POST" })
+  .validator(z.object({ month, locked: z.boolean() }))
+  .handler(async ({ data }) => {
+    const actor = await requireAdmin();
+    await db.execute(
+      sql`SELECT set_timesheet_month_lock(${data.month}, ${data.locked}, ${actorName(actor)})`,
+    );
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "timesheets",
+      label: `Timesheet month ${data.month} ${data.locked ? "locked" : "reopened"}`,
+    });
+    return { ok: true };
   });

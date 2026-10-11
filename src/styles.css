@@ -1850,3 +1850,33 @@ div.min-h-screen.bg-background:has(> aside.sidebar-shell) {
     animation-iteration-count: 1 !important;
   }
 }
+/* Refined glass surfaces, scoped to the application (print documents stay plain). */
+@media screen {
+  .lf-shell { background: radial-gradient(ellipse at 18% 0%, oklch(0.42 0.075 180 / 0.12), transparent 45%), radial-gradient(ellipse at 95% 60%, oklch(0.42 0.055 225 / 0.08), transparent 55%); }
+  .lf-main { min-width: 0; }
+  .lf-shell .panel, .lf-shell .panel-interactive {
+    border-color: oklch(0.8 0.045 178 / 0.16);
+    background-image: linear-gradient(140deg, oklch(1 0 0 / 0.075), transparent 50%, oklch(0.75 0.07 185 / 0.025));
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.075), 0 12px 32px -22px oklch(0 0 0 / 0.7);
+  }
+  .lf-shell .panel-interactive:hover { border-color: oklch(0.8 0.07 178 / 0.32); }
+  .lf-sidebar { box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 12px 0 40px -28px oklch(0 0 0 / 0.65); }
+  .lf-shell button:focus-visible, .lf-shell a:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+  .lf-main table tbody tr { transition: background-color 140ms ease; }
+  .lf-main table tbody tr:hover { background-color: oklch(0.75 0.07 178 / 0.045); }
+  .lf-hero { padding: 1.1rem 1.25rem; }
+  .lf-hero h2 { text-wrap: balance; }
+  .lf-rail .panel { overflow: hidden; }
+  @media (max-width: 640px) {
+    .lf-main { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .lf-hero { padding: 1rem; }
+    .lf-shell .panel, .lf-shell .panel-interactive { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lf-shell *, .lf-shell *::before, .lf-shell *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation-duration: 0s !important; }
+    .lf-shell .panel-interactive:hover { transform: none; }
+  }
+  @supports not (backdrop-filter: blur(1px)) {
+    .lf-shell .panel, .lf-shell .panel-interactive { background-color: oklch(0.21 0.025 190); }
+  }
+}

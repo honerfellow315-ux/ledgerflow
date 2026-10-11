@@ -33,6 +33,7 @@ export interface TimesheetSheet {
   format: SheetFormat;
   uploadedAt: string;
   monthLabel: string;
+  month?: string;
   /** The total the sheet itself claims. */
   statedHours: number;
   status: SheetStatus;

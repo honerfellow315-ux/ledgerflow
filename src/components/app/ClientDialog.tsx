@@ -73,7 +73,7 @@ export function ClientDialog({
 
   useEffect(() => {
     if (!open) return;
-    setForm(client ? { ...empty, ...client } : empty);
+    setForm(client ? { ...empty, ...client, companyId: client.companyId ?? undefined } : empty);
     setCompanyChoice(client?.companyId ?? NO_COMPANY);
     setNewCompany(emptyNewCompany);
   }, [open, client]);

@@ -104,7 +104,11 @@ export const listInvoices = createServerFn({ method: "GET" }).handler(async () =
     list.push(li);
     byInvoiceId.set(li.invoiceId, list);
   }
-  return rows.map((inv) => ({ ...inv, lineItems: byInvoiceId.get(inv.id) ?? [] }));
+  return rows.map((inv) => ({
+    ...inv,
+    vatMode: inv.vatMode === "remaining" ? ("remaining" as const) : ("full" as const),
+    lineItems: byInvoiceId.get(inv.id) ?? [],
+  }));
 });
 
 export const addInvoice = createServerFn({ method: "POST" })

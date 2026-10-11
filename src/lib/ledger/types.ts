@@ -97,10 +97,10 @@ export interface Invoice {
   description2?: string;
   amountExVat: number;
   /** Set when this invoice was billed as Hours × Rate rather than a fixed amount. */
-  hours?: number;
+  hours?: number | undefined;
   /** Rate per hour used with `hours` to compute `amountExVat`. When a payroll
    * split is set (below), this is the rate for the NON-payroll (remaining) hours. */
-  rate?: number;
+  rate?: number | undefined;
   /** Payroll split (Hours × Rate invoices only): how many of `hours` were
    * already paid through payroll. Billed at `payrollRate`, with no VAT. */
   payrollHours?: number;
@@ -112,14 +112,14 @@ export interface Invoice {
   vatMode?: VatMode;
   /** Ex-VAT amount already paid when VAT was applied (only for vatMode
    * "remaining"). VAT is charged on amountExVat - vatPaidBefore, frozen. */
-  vatPaidBefore?: number;
+  vatPaidBefore?: number | undefined;
   paymentTerms: string;
   notes?: string;
-  lineItems?: InvoiceLineItem[];
+  lineItems?: InvoiceLineItem[] | undefined;
   /** Approval status, entirely separate from payment status. Defaults to false. */
   approved: boolean;
   /** Set when this invoice is an "Additional Invoice" referencing an original. */
-  originalInvoiceId?: string;
+  originalInvoiceId?: string | undefined;
 }
 
 export interface Payment {

@@ -532,7 +532,7 @@ function DashboardContent() {
                         tickLine={false}
                         axisLine={false}
                         width={52}
-                        tickFormatter={(v: number) => `£${(v / 1000).toFixed(0)}k`}
+                        tickFormatter={(v: number) => Math.abs(v) < 1000 ? `£${v}` : `£${Number((v / 1000).toFixed(1))}k`}
                       />
                       <Tooltip
                         formatter={(v: number) => formatMoney(v)}
@@ -689,7 +689,7 @@ function DashboardContent() {
                 }
               />
               <div className="px-4 pb-3">
-                <TaskWorkload />
+                <TaskWorkload compact />
               </div>
               {tasksQ.isError ? (
                 <p className="p-4 text-xs text-destructive">
@@ -700,7 +700,7 @@ function DashboardContent() {
               ) : !tasksQ.data?.tasks.length ? (
                 <p className="p-4 text-xs text-muted-foreground">No tasks yet.</p>
               ) : (
-                <ul className="space-y-2 p-4">
+                <ul className="max-h-72 space-y-2 overflow-auto p-4">
                   {tasksQ.data.tasks.map((task) => {
                     const last = task.events.at(-1);
                     const done =
@@ -860,34 +860,7 @@ function DashboardContent() {
             )}
           </Panel>
 
-          <Panel className="lf-rail-promo relative overflow-hidden">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_120%_at_100%_100%,oklch(0.55_0.13_175/0.35),transparent_65%)]"
-            />
-            <div className="relative p-4">
-              <div className="flex items-center gap-2">
-                <span className="flex size-6 items-center justify-center rounded-md bg-brand-mark/20 text-brand-mark">
-                  <ReceiptText className="size-3.5" />
-                </span>
-                <p className="text-[12.5px] font-semibold text-foreground">
-                  Streamline your receivables
-                </p>
-              </div>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                Review follow-ups, track payments, and inspect your reports.
-              </p>
-              {can("reports", "view") ? (
-                <Link
-                  to="/reports"
-                  className="mt-2.5 inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-[oklch(0.72_0.15_170)] to-[oklch(0.6_0.13_180)] px-3 py-1.5 text-[11.5px] font-semibold text-primary-foreground shadow-[0_8px_20px_-8px_oklch(0.74_0.15_170/0.7)] transition-transform hover:-translate-y-px"
-                >
-                  View reports
-                  <ChevronRight className="size-3.5" />
-                </Link>
-              ) : null}
-            </div>
-          </Panel>
+
         </div>
       </div>
 

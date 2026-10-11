@@ -8,7 +8,7 @@
  * it. Matching asks the database for the one person (never loads all staff), so it stays
  * fast with 10,000+ staff.
  */
-import { and, asc, eq, gt, gte, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, lte, ne, sql } from "drizzle-orm";
 import * as schema from "../../../drizzle/schema";
 import {
   payrollStaff,
@@ -17,6 +17,8 @@ import {
   timesheetSheets,
 } from "../../../drizzle/schema";
 import { formatMonthLabel, normName, normNi, round2 } from "../payroll/calc";
+import { filenameStaffName, FILE_NAME_NOTICE } from "../timesheets/fileIdentity";
+import { assertTimesheetMonthOpen } from "./timesheetLocks";
 import { uid } from "./id";
 import { chunk, type Db } from "./shiftImport";
 import {
@@ -241,7 +243,17 @@ export async function saveParsedSheet(
     sheet: ParsedSheet;
   },
 ): Promise<UploadOutcome> {
-  const { sheet } = a;
+  const sheet = { ...a.sheet, warnings: [...a.sheet.warnings] };
+  if (!sheet.personName && !sheet.personNi) {
+    const hint = filenameStaffName(a.fileName);
+    if (hint) {
+      sheet.personName = hint;
+      sheet.warnings = sheet.warnings.filter(
+        (note) => !note.startsWith("No name or NI number was found"),
+      );
+      sheet.warnings.push(FILE_NAME_NOTICE);
+    }
+  }
   const label = sheet.sheetLabel || a.fileName;
   const fail = (outcome: "duplicate" | "rejected", message: string): UploadOutcome => ({
     label,
@@ -259,6 +271,7 @@ export async function saveParsedSheet(
   if (!month)
     return fail("rejected", "None of the rows has a readable date, so the month is unknown.");
 
+  await assertTimesheetMonthOpen(db, month);
   const inputs: SheetRowInput[] = sheet.rows.map((r, i) => ({
     key: i,
     date: r.date,
@@ -426,6 +439,7 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
     .where(eq(timesheetSheets.id, sheetId))
     .limit(1);
   if (!sheet) return null;
+  await assertTimesheetMonthOpen(db, sheet.month);
   const stored = await db
     .select()
     .from(timesheetRows)
@@ -441,8 +455,16 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
     uncertain: r.uncertain,
     parseNote: r.parseNote,
   }));
+  const inferredName =
+    !sheet.personName && !sheet.personNi ? filenameStaffName(sheet.fileName) : "";
+  const personName = sheet.personName || inferredName;
+  // While rechecking, the sheet cannot be locked as ready with old comparison results.
+  await db
+    .update(timesheetSheets)
+    .set({ status: "needs_review", comparedAt: null })
+    .where(eq(timesheetSheets.id, sheetId));
   const ev = await evaluate(db, {
-    personName: sheet.personName,
+    personName,
     personNi: sheet.personNi,
     month: sheet.month,
     rows: inputs,
@@ -503,11 +525,22 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
   const key = personKeyOf(
     ev.staff.staffId,
     sheet.personNi,
-    sheet.personName,
+    personName,
     sheet.fileHash,
     sheet.sheetLabel,
   );
   const common = {
+    personName,
+    ...(inferredName
+      ? {
+          readNote: [
+            sheet.readNote?.replace(/No name or NI number was found[^.]*\./, "").trim(),
+            FILE_NAME_NOTICE,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        }
+      : {}),
     staffId: ev.staff.staffId,
     matchedBy: ev.staff.matchedBy,
     staffConfirmedAt: keepConfirmed ? sheet.staffConfirmedAt : null,
@@ -525,8 +558,14 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
       .where(eq(timesheetSheets.id, sheetId));
   } catch (err) {
     if (!isUniqueViolation(err)) throw err;
-    // Another sheet already exists for this person and month: keep the old key.
-    await db.update(timesheetSheets).set(common).where(eq(timesheetSheets.id, sheetId));
+    // Keep the comparison reviewable, but never mark a duplicate person/month ready.
+    await db
+      .update(timesheetSheets)
+      .set({ ...common, status: "needs_review", staffConfirmedAt: null })
+      .where(eq(timesheetSheets.id, sheetId));
+    throw new Error(
+      "Another sheet already exists for this staff member and month. Review the duplicate before confirming.",
+    );
   }
 
   return {
@@ -547,6 +586,22 @@ export async function confirmNameMatch(db: Db, sheetId: string): Promise<boolean
     .where(eq(timesheetSheets.id, sheetId))
     .limit(1);
   if (!sheet || !sheet.staffId || sheet.matchedBy !== "name") return false;
+  await assertTimesheetMonthOpen(db, sheet.month);
+  const [duplicate] = await db
+    .select({ id: timesheetSheets.id })
+    .from(timesheetSheets)
+    .where(
+      and(
+        eq(timesheetSheets.staffId, sheet.staffId),
+        eq(timesheetSheets.month, sheet.month),
+        ne(timesheetSheets.id, sheet.id),
+      ),
+    )
+    .limit(1);
+  if (duplicate)
+    throw new Error(
+      "Another sheet exists for this staff member and month. Review the duplicate first.",
+    );
   const mismatch = statedMismatch(sheet.statedHours, sheet.sheetHours);
   const status = decideStatus({
     staffId: sheet.staffId,
@@ -644,6 +699,7 @@ export function toTimesheetSheet(x: SheetWithStaff, rows: readonly RowRec[]): Ti
     fileName: label,
     format: asFormat(s.format),
     uploadedAt: s.uploadedAt.toISOString(),
+    month: s.month,
     monthLabel: formatMonthLabel(s.month),
     // The screens only show the stated total when it differs from the rows, so a sheet
     // with no stated total reports its own total (no false "total is wrong" warning).
