@@ -71,6 +71,13 @@ function dateFromText(t: string): string {
     const y = m[3]!.length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
     return isoIfReal(y, mon + 1, Number(m[1]));
   }
+  // "Tuesday, September 1, 2026", "September 1st 2026" (month name first, as typed PDFs and Word often print it).
+  m = /^(?:[a-z]{3,9}\.?,?\s+)?([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/i.exec(t);
+  if (m) {
+    const mon = MONTH_NAMES.indexOf(m[1]!.slice(0, 3).toLowerCase());
+    if (mon < 0) return "";
+    return isoIfReal(Number(m[3]), mon + 1, Number(m[2]));
+  }
   return "";
 }
 

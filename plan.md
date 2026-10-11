@@ -1,7 +1,7 @@
 # LedgerFlow: kaam ka plan
 
 Ye file batati hai ke hamne kya karna tha, kya ho chuka hai, aur kya baqi hai.
-Aakhri update: 11 Oct 2026 (Owner Overview asli ho gaya).
+Aakhri update: 12 Oct 2026 (Timesheet Check Phase C: typed PDF aur Word).
 
 ## Kaam karne ka tareeqa
 
@@ -46,6 +46,20 @@ Ab `/timesheets` asli data par chalta hai (sample data hata diya, "preview" noti
 - Naye tables: `timesheet_sheets`, `timesheet_rows` (`schema/timesheets-migration.sql`, sirf `CREATE TABLE IF NOT EXISTS`, rows sheet ke saath delete).
 
 **DB par ye SQL chalani hai (code deploy se PEHLE):** `schema/timesheets-migration.sql`
+
+### Timesheet Check: Phase C (typed PDF aur Word)
+Ab `/timesheets` par **`.pdf` (jisme typed text ho) aur `.docx`** bhi upload hote hain. Purani `.doc`, scanned PDF aur photo abhi nahi (Phase D).
+
+- Padhna browser me hota hai: PDF ka text `pdf.js` se, Word ki table `jszip` se. Phir wohi `parseTimesheetMatrix` chalta hai jo Excel ke liye hai, to date, ghante, raat ki shift, aur "jo cell parha na jaye wo kabhi 0 nahi banta" ke qaide bilkul wohi hain.
+- PDF ki row us ki **tareekh** aur do **times** se pehchani jati hai. Hours, Rate, Amount aur Expense ko alag karne ke liye "£" ka nishan dekha jata hai. Agar sirf ek hi "£" wali raqam ho (rate ya amount, pata nahi) to wo **"Check the reading"** me jati hai, andaza nahi lagta.
+- PDF aur Word ki har sheet par peela notice aata hai: text se bani hai, asli file se ghante milao.
+- Tareekh ab "Tuesday, September 1, 2026" (mahina pehle) bhi parhi jati hai.
+- Scanned PDF (typed text nahi) par saaf message: scan ya photo baad ke phase me.
+- Naya format naam **Word** (`timesheet_sheets.format` me "word"). **Database me koi SQL nahi.**
+- **Naye packages:** `pdfjs-dist` (4.10.38) aur `jszip`. **Deploy se pehle `npm install` chalao** aur `package.json` aur `package-lock.json` dono commit karo.
+- Hadein: ek PDF ya Word me ek hi banda. Standard template ki tarteeb (Sr No, Date, Site, Start, End, Hours, Rate, Amount, Expense). Site ka lamba naam PDF me do lines me toot jaye to site ka naam adhoora aa sakta hai (tareekh aur ghante par asar nahi).
+- Asli typed PDF sample par test: 21 rows, 243 ghante, aur sheet ka apna total (326.5) alag parha gaya, jo compare me mismatch ban kar flag hota hai.
+- Files: `lib/timesheets/textRows.ts`, `readPdf.ts`, `readWord.ts`, aur `parseFile.ts` me nayi branches.
 
 ### Tasks (asli backend)
 `/tasks` ab asli database par hai (sample data aur "preview / See it as" hata diya).
@@ -129,7 +143,7 @@ Ab `/timesheets` asli data par chalta hai (sample data hata diya, "preview" noti
 
 **DB par koi SQL nahi chalani.** **Deploy ke baad:** `LOW_MARGIN` (15%) owner se confirm karna.
 
-### Naye screens (sirf UI, sample data, abhi sirf admin ko nazar aate hain)
+### Naye screens (route aur files ki list; sab ab asli data par)
 | Menu | Route | Files | Kya karta hai |
 |---|---|---|---|
 | Timesheet Check | `/timesheets` | `routes/timesheets.index.tsx`, `lib/timesheets/`, `components/app/timesheets/` | Staff ki bheji hui sheet ko apne record se milana, galat rows dikhana, **Excel receipt/report download** |
@@ -169,7 +183,7 @@ Koi screen baqi nahi. Sab UI ho chuki.
 
 ### Timesheet Check (asli kaam)
 - **Phase B:** ho chuka (upar "Ho chuka" me dekho). Baqi: asli staff/shifts par test, mahina lock.
-- **Phase C:** typed PDF aur Word code se padhna.
+- **Phase C:** ho chuka (typed PDF aur Word, upar "Ho chuka" me dekho). Asli guards ki PDF/Word par test baqi.
 - **Phase D:** tasveer / WhatsApp / scan wali sheet **AI vision** se padhna, review screen zaroori. AI sirf parhega, hisaab aur faisla normal code karega.
 - Mahina lock (total check aur duplicate pakadna Phase B me ho chuka).
 - Parallel run: 1 se 2 mahine system aur haath ka kaam saath, phir bharosa.
@@ -194,4 +208,4 @@ Har naye screen par jorte waqt (purani hidayat): "Preview" wala notice hatao, `R
 ## Aaj ki halat ek nazar me
 
 - UI: 7 naye screens ban chuke aur dark redesign pehle se lag chuka hai. **UI ka kaam poora.**
-- Backend: **Timesheet Check asli data se juda hai (Phase B)**. Tasks, Payslips, Invoice Drafts, Follow-ups, Bank Match aur Owner Overview bhi asli. **Koi screen sample data par nahi rahi.**
+- Backend: **Timesheet Check asli data se juda hai (Phase B aur C: Excel, CSV, typed PDF, Word)**. Tasks, Payslips, Invoice Drafts, Follow-ups, Bank Match aur Owner Overview bhi asli. **Koi screen sample data par nahi rahi.**

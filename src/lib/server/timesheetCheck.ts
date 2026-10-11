@@ -524,7 +524,7 @@ const RESULTS: readonly RowResult[] = [
   "check_reading",
 ];
 const asResult = (v: string): RowResult => (RESULTS as readonly string[]).includes(v) ? (v as RowResult) : "check_reading";
-const asFormat = (v: string): SheetFormat => (v === "pdf" || v === "photo" ? v : "excel");
+const asFormat = (v: string): SheetFormat => (v === "pdf" || v === "word" || v === "photo" ? v : "excel");
 
 /** A deleted staff member leaves staff_id empty: the sheet is then "staff not found". */
 export function storedStatus(s: Pick<SheetRec, "staffId" | "status">): SheetStatus {

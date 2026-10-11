@@ -16,11 +16,15 @@ import {
   type ParsedSheet,
 } from "./parsed";
 import { parseTimesheetMatrix, type TsCell, type TsMatrix } from "./parseMatrix";
+import type { SheetFormat } from "./data";
+import { pdfToLines } from "./readPdf";
+import { wordToMatrix } from "./readWord";
+import { linesToMatrix } from "./textRows";
 
 const NO_TABLE =
   "No timesheet table found. The sheet needs a header row with Date, Start time, End time and Duration.";
 
-export const TIMESHEET_EXTENSIONS = ["xlsx", "csv"] as const;
+export const TIMESHEET_EXTENSIONS = ["xlsx", "csv", "pdf", "docx"] as const;
 
 export function fileExtension(name: string): string {
   return name.split(".").pop()?.toLowerCase() ?? "";
@@ -152,6 +156,7 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
   result.fileHash = await sha256Hex(buf);
 
   let grids: { name: string; matrix: TsMatrix; single: boolean }[];
+  let format: SheetFormat = "excel";
   if (ext === "csv") {
     grids = [{ name: "", matrix: csvToMatrix(new TextDecoder("utf-8").decode(buf)), single: true }];
   } else if (ext === "xlsx") {
@@ -162,12 +167,55 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
       result.problems.push("This file could not be opened. Is it a damaged or password protected Excel file?");
       return result;
     }
+  } else if (ext === "pdf") {
+    format = "pdf";
+    let text: { lines: string[]; chars: number };
+    try {
+      text = await pdfToLines(buf);
+    } catch (e) {
+      const why = e instanceof Error ? `${e.name} ${e.message}` : "";
+      result.problems.push(
+        /password/i.test(why) ? "This PDF is password protected." : "This PDF could not be opened. Is the file damaged?",
+      );
+      return result;
+    }
+    if (text.chars < 20) {
+      result.problems.push(
+        "This PDF has no typed text. It looks like a scan or a photo. Scans and photos are read in a later phase.",
+      );
+      return result;
+    }
+    const matrix = linesToMatrix(text.lines);
+    if (!matrix) {
+      result.problems.push(NO_TABLE);
+      return result;
+    }
+    grids = [{ name: "", matrix, single: true }];
+  } else if (ext === "docx") {
+    format = "word";
+    let matrix: TsMatrix | null;
+    try {
+      matrix = await wordToMatrix(buf);
+    } catch {
+      result.problems.push("This Word file could not be opened. Is the file damaged?");
+      return result;
+    }
+    if (!matrix) {
+      result.problems.push(NO_TABLE);
+      return result;
+    }
+    grids = [{ name: "", matrix, single: true }];
   } else if (ext === "xls") {
     result.problems.push("Old .xls files are not supported. Open it in Excel and save it as .xlsx.");
     return result;
+  } else if (ext === "doc") {
+    result.problems.push("Old .doc files are not supported. Open it in Word and save it as .docx.");
+    return result;
   } else {
-    // Phase C (typed PDF / Word) and Phase D (photos) plug in here.
-    result.problems.push("This file type is not supported yet. Use Excel (.xlsx) or CSV.");
+    // Phase D (photos, scans) plugs in here.
+    result.problems.push(
+      "This file type is not supported yet. Use Excel (.xlsx), CSV, a typed PDF or Word (.docx). Photos come in a later phase.",
+    );
     return result;
   }
 
@@ -188,6 +236,12 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
         `${g.name || "The sheet"} has more than ${MAX_ROWS_PER_SHEET} shifts, which is not a normal timesheet. It was not read.`,
       );
       continue;
+    }
+    parsed.format = format;
+    if (format !== "excel") {
+      parsed.warnings.unshift(
+        `Read from the ${format === "pdf" ? "PDF" : "Word file"} text. The rows are rebuilt from the text, so check the figures against the original file.`,
+      );
     }
     found.push(parsed);
   }

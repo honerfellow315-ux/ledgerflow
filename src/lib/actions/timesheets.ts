@@ -43,7 +43,7 @@ const parsedRow = z.object({
 });
 
 const parsedSheet = z.object({
-  format: z.enum(["excel", "pdf", "photo"]),
+  format: z.enum(["excel", "pdf", "word", "photo"]),
   sheetLabel: z.string().max(100),
   personName: z.string().max(120),
   personNi: z.string().max(20),

@@ -3,7 +3,7 @@
  * Types and helpers for the screens (Phase B: the real data comes from the server).
  * The sample data of Phase A has been removed.
  */
-export type SheetFormat = "excel" | "pdf" | "photo";
+export type SheetFormat = "excel" | "pdf" | "word" | "photo";
 export type SheetStatus = "ready" | "needs_review" | "staff_not_found";
 export type RowResult =
   | "match"
@@ -48,6 +48,7 @@ export interface TimesheetSheet {
 export const FORMAT_LABEL: Record<SheetFormat, string> = {
   excel: "Excel",
   pdf: "PDF",
+  word: "Word",
   photo: "Photo",
 };
 

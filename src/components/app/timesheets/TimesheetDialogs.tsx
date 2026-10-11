@@ -23,9 +23,12 @@ import type { UploadOutcome } from "@/lib/timesheets/listTypes";
 function readMode(name: string): { label: string; tone: Tone; supported: boolean } {
   const ext = fileExtension(name);
   if (ext === "xlsx" || ext === "csv") return { label: "Read exactly", tone: "good", supported: true };
+  if (ext === "pdf") return { label: "Read from the typed text", tone: "good", supported: true };
+  if (ext === "docx") return { label: "Read from the document", tone: "good", supported: true };
   if (ext === "xls") return { label: "Save as .xlsx first", tone: "bad", supported: false };
-  if (["pdf", "doc", "docx", "jpg", "jpeg", "png", "webp", "heic"].includes(ext)) {
-    return { label: "Not supported yet", tone: "bad", supported: false };
+  if (ext === "doc") return { label: "Save as .docx first", tone: "bad", supported: false };
+  if (["jpg", "jpeg", "png", "webp", "heic"].includes(ext)) {
+    return { label: "Photos come in a later phase", tone: "bad", supported: false };
   }
   return { label: "Not supported", tone: "bad", supported: false };
 }
@@ -166,8 +169,8 @@ export function UploadTimesheetDialog({
         <DialogHeader>
           <DialogTitle>Upload timesheets</DialogTitle>
           <DialogDescription>
-            Add the Excel or CSV timesheets your staff sent. PDF, Word and photos come in a later
-            phase.
+            Add the timesheets your staff sent: Excel, CSV, typed PDF or Word. Photos and scanned
+            PDFs come in a later phase.
           </DialogDescription>
         </DialogHeader>
 
@@ -193,7 +196,7 @@ export function UploadTimesheetDialog({
             type="file"
             multiple
             className="sr-only"
-            accept=".xlsx,.csv"
+            accept=".xlsx,.csv,.pdf,.docx"
             disabled={running}
             onChange={(e) => {
               add(e.target.files);
