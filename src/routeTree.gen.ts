@@ -21,6 +21,7 @@ import { Route as FollowUpsIndexRouteImport } from './routes/follow-ups.index'
 import { Route as HoursIndexRouteImport } from './routes/hours.index'
 import { Route as InvoiceDraftsIndexRouteImport } from './routes/invoice-drafts.index'
 import { Route as InvoicesIndexRouteImport } from './routes/invoices.index'
+import { Route as OwnerIndexRouteImport } from './routes/owner.index'
 import { Route as PaymentsIndexRouteImport } from './routes/payments.index'
 import { Route as PayrollIndexRouteImport } from './routes/payroll.index'
 import { Route as PayslipsIndexRouteImport } from './routes/payslips.index'
@@ -93,6 +94,11 @@ const InvoiceDraftsIndexRoute = InvoiceDraftsIndexRouteImport.update({
 const InvoicesIndexRoute = InvoicesIndexRouteImport.update({
   id: '/invoices/',
   path: '/invoices/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OwnerIndexRoute = OwnerIndexRouteImport.update({
+  id: '/owner/',
+  path: '/owner/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PaymentsIndexRoute = PaymentsIndexRouteImport.update({
@@ -174,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/hours/': typeof HoursIndexRoute
   '/invoice-drafts/': typeof InvoiceDraftsIndexRoute
   '/invoices/': typeof InvoicesIndexRoute
+  '/owner/': typeof OwnerIndexRoute
   '/payments/': typeof PaymentsIndexRoute
   '/payroll/': typeof PayrollIndexRoute
   '/payslips/': typeof PayslipsIndexRoute
@@ -201,6 +208,7 @@ export interface FileRoutesByTo {
   '/hours': typeof HoursIndexRoute
   '/invoice-drafts': typeof InvoiceDraftsIndexRoute
   '/invoices': typeof InvoicesIndexRoute
+  '/owner': typeof OwnerIndexRoute
   '/payments': typeof PaymentsIndexRoute
   '/payroll': typeof PayrollIndexRoute
   '/payslips': typeof PayslipsIndexRoute
@@ -229,6 +237,7 @@ export interface FileRoutesById {
   '/hours/': typeof HoursIndexRoute
   '/invoice-drafts/': typeof InvoiceDraftsIndexRoute
   '/invoices/': typeof InvoicesIndexRoute
+  '/owner/': typeof OwnerIndexRoute
   '/payments/': typeof PaymentsIndexRoute
   '/payroll/': typeof PayrollIndexRoute
   '/payslips/': typeof PayslipsIndexRoute
@@ -258,6 +267,7 @@ export interface FileRouteTypes {
     | '/hours/'
     | '/invoice-drafts/'
     | '/invoices/'
+    | '/owner/'
     | '/payments/'
     | '/payroll/'
     | '/payslips/'
@@ -285,6 +295,7 @@ export interface FileRouteTypes {
     | '/hours'
     | '/invoice-drafts'
     | '/invoices'
+    | '/owner'
     | '/payments'
     | '/payroll'
     | '/payslips'
@@ -312,6 +323,7 @@ export interface FileRouteTypes {
     | '/hours/'
     | '/invoice-drafts/'
     | '/invoices/'
+    | '/owner/'
     | '/payments/'
     | '/payroll/'
     | '/payslips/'
@@ -340,6 +352,7 @@ export interface RootRouteChildren {
   HoursIndexRoute: typeof HoursIndexRoute
   InvoiceDraftsIndexRoute: typeof InvoiceDraftsIndexRoute
   InvoicesIndexRoute: typeof InvoicesIndexRoute
+  OwnerIndexRoute: typeof OwnerIndexRoute
   PaymentsIndexRoute: typeof PaymentsIndexRoute
   PayrollIndexRoute: typeof PayrollIndexRoute
   PayslipsIndexRoute: typeof PayslipsIndexRoute
@@ -439,6 +452,13 @@ declare module '@tanstack/react-router' {
       path: '/invoices'
       fullPath: '/invoices/'
       preLoaderRoute: typeof InvoicesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/owner/': {
+      id: '/owner/'
+      path: '/owner'
+      fullPath: '/owner/'
+      preLoaderRoute: typeof OwnerIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/payments/': {
@@ -548,6 +568,7 @@ const rootRouteChildren: RootRouteChildren = {
   HoursIndexRoute: HoursIndexRoute,
   InvoiceDraftsIndexRoute: InvoiceDraftsIndexRoute,
   InvoicesIndexRoute: InvoicesIndexRoute,
+  OwnerIndexRoute: OwnerIndexRoute,
   PaymentsIndexRoute: PaymentsIndexRoute,
   PayrollIndexRoute: PayrollIndexRoute,
   PayslipsIndexRoute: PayslipsIndexRoute,

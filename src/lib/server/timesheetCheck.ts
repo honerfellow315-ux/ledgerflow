@@ -19,7 +19,12 @@ import {
 import { formatMonthLabel, normName, normNi, round2 } from "../payroll/calc";
 import { uid } from "./id";
 import { chunk, type Db } from "./shiftImport";
-import { compareRows, type RecordShift, type RowAnswer, type SheetRowInput } from "../timesheets/compare";
+import {
+  compareRows,
+  type RecordShift,
+  type RowAnswer,
+  type SheetRowInput,
+} from "../timesheets/compare";
 import type { ParsedSheet } from "../timesheets/parsed";
 import type {
   RowResult,
@@ -48,11 +53,16 @@ export interface StaffMatch {
   note: string;
 }
 
-const NO_MATCH = (note: string): StaffMatch => ({ staffId: null, matchedBy: "none", staffName: "", note });
+const NO_MATCH = (note: string): StaffMatch => ({
+  staffId: null,
+  matchedBy: "none",
+  staffName: "",
+  note,
+});
 
 export async function findStaff(db: Db, rawNi: string, rawName: string): Promise<StaffMatch> {
   const niKey = normNi(rawNi);
-  const nameKey = normName(rawName);
+  const nameKey = normName(rawName).replace(/\s+/g, " ");
 
   if (niKey.length >= 6) {
     const res = await db.execute(sql`
@@ -71,10 +81,10 @@ export async function findStaff(db: Db, rawNi: string, rawName: string): Promise
   if (nameKey) {
     const res = await db.execute(sql`
       SELECT id, name, ni FROM payroll_staff
-      WHERE trim(regexp_replace(regexp_replace(lower(name), '[(][^)]*[)]', ' ', 'g'), '[^a-z0-9]+', ' ', 'g')) = ${nameKey}
+      WHERE trim(regexp_replace(regexp_replace(regexp_replace(lower(name), '[(][^)]*[)]', ' ', 'g'), '[^a-z0-9]+', ' ', 'g'), ' +', ' ', 'g')) = ${nameKey}
       LIMIT 5`);
     const hits = (res.rows as { id: string; name: string; ni: string }[]).filter(
-      (h) => normName(h.name) === nameKey,
+      (h) => normName(h.name).replace(/\s+/g, " ") === nameKey,
     );
     if (hits.length === 1 && hits[0]) {
       const theirNi = normNi(hits[0].ni);
@@ -86,7 +96,8 @@ export async function findStaff(db: Db, rawNi: string, rawName: string): Promise
       }
       return { staffId: hits[0].id, matchedBy: "name", staffName: hits[0].name, note: "" };
     }
-    if (hits.length > 1) return NO_MATCH("More than one staff member has this name. Add the NI number to the sheet.");
+    if (hits.length > 1)
+      return NO_MATCH("More than one staff member has this name. Add the NI number to the sheet.");
   }
   return NO_MATCH(
     niKey || nameKey ? "This person is not in Staff." : "The sheet has no name and no NI number.",
@@ -142,7 +153,12 @@ export async function evaluate(
 ): Promise<Evaluation> {
   const staff = await findStaff(db, a.personNi, a.personName);
   const records = staff.staffId
-    ? await loadRecords(db, staff.staffId, a.month, a.rows.map((r) => r.date))
+    ? await loadRecords(
+        db,
+        staff.staffId,
+        a.month,
+        a.rows.map((r) => r.date),
+      )
     : [];
   const { answers, missing } = compareRows({
     staffFound: staff.staffId !== null,
@@ -207,7 +223,8 @@ export function dominantMonth(dates: readonly string[]): string {
 function isUniqueViolation(err: unknown): boolean {
   let e: unknown = err;
   for (let i = 0; i < 4 && e; i++) {
-    if (typeof e === "object" && e !== null && (e as { code?: unknown }).code === "23505") return true;
+    if (typeof e === "object" && e !== null && (e as { code?: unknown }).code === "23505")
+      return true;
     e = typeof e === "object" && e !== null ? (e as { cause?: unknown }).cause : undefined;
   }
   return false;
@@ -239,7 +256,8 @@ export async function saveParsedSheet(
   });
 
   const month = dominantMonth(sheet.rows.map((r) => r.date));
-  if (!month) return fail("rejected", "None of the rows has a readable date, so the month is unknown.");
+  if (!month)
+    return fail("rejected", "None of the rows has a readable date, so the month is unknown.");
 
   const inputs: SheetRowInput[] = sheet.rows.map((r, i) => ({
     key: i,
@@ -266,7 +284,13 @@ export async function saveParsedSheet(
     mismatch,
   });
   const id = uid("ts");
-  const key = personKeyOf(ev.staff.staffId, sheet.personNi, sheet.personName, a.fileHash, sheet.sheetLabel);
+  const key = personKeyOf(
+    ev.staff.staffId,
+    sheet.personNi,
+    sheet.personName,
+    a.fileHash,
+    sheet.sheetLabel,
+  );
   const totalRows = sheet.rows.length + ev.missing.length;
 
   const inserted = await db
@@ -302,7 +326,10 @@ export async function saveParsedSheet(
       .select({ at: timesheetSheets.uploadedAt })
       .from(timesheetSheets)
       .where(
-        and(eq(timesheetSheets.fileHash, a.fileHash), eq(timesheetSheets.sheetLabel, sheet.sheetLabel.slice(0, 100))),
+        and(
+          eq(timesheetSheets.fileHash, a.fileHash),
+          eq(timesheetSheets.sheetLabel, sheet.sheetLabel.slice(0, 100)),
+        ),
       )
       .limit(1);
     if (same) {
@@ -393,7 +420,11 @@ export interface RecheckResult {
  * Safe to run any number of times.
  */
 export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResult | null> {
-  const [sheet] = await db.select().from(timesheetSheets).where(eq(timesheetSheets.id, sheetId)).limit(1);
+  const [sheet] = await db
+    .select()
+    .from(timesheetSheets)
+    .where(eq(timesheetSheets.id, sheetId))
+    .limit(1);
   if (!sheet) return null;
   const stored = await db
     .select()
@@ -419,7 +450,9 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
 
   // A human's confirmation of a name-only match only survives while it is the same person.
   const keepConfirmed =
-    ev.staff.matchedBy === "name" && sheet.staffId === ev.staff.staffId && sheet.staffConfirmedAt !== null;
+    ev.staff.matchedBy === "name" &&
+    sheet.staffId === ev.staff.staffId &&
+    sheet.staffConfirmedAt !== null;
   const mismatch = statedMismatch(sheet.statedHours, ev.sheetHours);
   const status = decideStatus({
     staffId: ev.staff.staffId,
@@ -430,7 +463,10 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
   });
 
   // 1. each sheet row's answer
-  for (const part of chunk(stored.map((r, i) => ({ r, a: ev.answers[i]! })), 200)) {
+  for (const part of chunk(
+    stored.map((r, i) => ({ r, a: ev.answers[i]! })),
+    200,
+  )) {
     const list = sql.join(
       part.map(
         ({ r, a }) =>
@@ -464,7 +500,13 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
   for (const part of chunk(extra, 250)) await db.insert(timesheetRows).values(part);
 
   // 3. the sheet's own line
-  const key = personKeyOf(ev.staff.staffId, sheet.personNi, sheet.personName, sheet.fileHash, sheet.sheetLabel);
+  const key = personKeyOf(
+    ev.staff.staffId,
+    sheet.personNi,
+    sheet.personName,
+    sheet.fileHash,
+    sheet.sheetLabel,
+  );
   const common = {
     staffId: ev.staff.staffId,
     matchedBy: ev.staff.matchedBy,
@@ -477,7 +519,10 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
     comparedAt: new Date(),
   };
   try {
-    await db.update(timesheetSheets).set({ ...common, personKey: key }).where(eq(timesheetSheets.id, sheetId));
+    await db
+      .update(timesheetSheets)
+      .set({ ...common, personKey: key })
+      .where(eq(timesheetSheets.id, sheetId));
   } catch (err) {
     if (!isUniqueViolation(err)) throw err;
     // Another sheet already exists for this person and month: keep the old key.
@@ -496,7 +541,11 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
 /* ------------------------------ confirming a name-only match ------------------------------ */
 
 export async function confirmNameMatch(db: Db, sheetId: string): Promise<boolean> {
-  const [sheet] = await db.select().from(timesheetSheets).where(eq(timesheetSheets.id, sheetId)).limit(1);
+  const [sheet] = await db
+    .select()
+    .from(timesheetSheets)
+    .where(eq(timesheetSheets.id, sheetId))
+    .limit(1);
   if (!sheet || !sheet.staffId || sheet.matchedBy !== "name") return false;
   const mismatch = statedMismatch(sheet.statedHours, sheet.sheetHours);
   const status = decideStatus({
@@ -523,8 +572,10 @@ const RESULTS: readonly RowResult[] = [
   "not_on_sheet",
   "check_reading",
 ];
-const asResult = (v: string): RowResult => (RESULTS as readonly string[]).includes(v) ? (v as RowResult) : "check_reading";
-const asFormat = (v: string): SheetFormat => (v === "pdf" || v === "word" || v === "photo" ? v : "excel");
+const asResult = (v: string): RowResult =>
+  (RESULTS as readonly string[]).includes(v) ? (v as RowResult) : "check_reading";
+const asFormat = (v: string): SheetFormat =>
+  v === "pdf" || v === "word" || v === "photo" ? v : "excel";
 
 /** A deleted staff member leaves staff_id empty: the sheet is then "staff not found". */
 export function storedStatus(s: Pick<SheetRec, "staffId" | "status">): SheetStatus {
@@ -600,6 +651,8 @@ export function toTimesheetSheet(x: SheetWithStaff, rows: readonly RowRec[]): Ti
     status: storedStatus(s),
     staffConfirmed: s.staffConfirmedAt !== null,
     ...(s.readNote ? { readNote: s.readNote } : {}),
+    sourceName: s.personName,
+    sourceNi: s.personNi,
     rows: mapped,
   };
 }

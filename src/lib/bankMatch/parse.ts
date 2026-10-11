@@ -33,15 +33,59 @@ export interface ParsedStatement {
 export const MAX_BANK_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_BANK_LINES = 5000;
 
-const key = (v: Cell): string => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const key = (v: Cell): string =>
+  String(v ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 
-const DATE_H = new Set(["date", "transactiondate", "postingdate", "bookingdate", "processeddate", "datetime"]);
-const IN_H = new Set(["creditamount", "credit", "paidin", "moneyin", "paymentsin", "deposits", "deposit", "creditsgbp", "amountcredit"]);
-const OUT_H = new Set(["debitamount", "debit", "paidout", "moneyout", "paymentsout", "withdrawals", "withdrawal", "debitsgbp", "amountdebit"]);
+const DATE_H = new Set([
+  "date",
+  "transactiondate",
+  "postingdate",
+  "bookingdate",
+  "processeddate",
+  "datetime",
+]);
+const IN_H = new Set([
+  "creditamount",
+  "credit",
+  "paidin",
+  "moneyin",
+  "paymentsin",
+  "deposits",
+  "deposit",
+  "creditsgbp",
+  "amountcredit",
+]);
+const OUT_H = new Set([
+  "debitamount",
+  "debit",
+  "paidout",
+  "moneyout",
+  "paymentsout",
+  "withdrawals",
+  "withdrawal",
+  "debitsgbp",
+  "amountdebit",
+]);
 const AMOUNT_H = new Set(["amount", "amountgbp", "value", "transactionamount", "amountinpounds"]);
 const TEXT_H = new Set([
-  "description", "transactiondescription", "details", "narrative", "memo", "reference", "paymentreference",
-  "counterparty", "name", "payee", "payer", "merchant", "notes", "transactiontype", "type", "fromto",
+  "description",
+  "transactiondescription",
+  "details",
+  "narrative",
+  "memo",
+  "reference",
+  "paymentreference",
+  "counterparty",
+  "name",
+  "payee",
+  "payer",
+  "merchant",
+  "notes",
+  "transactiontype",
+  "type",
+  "fromto",
 ]);
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -120,7 +164,11 @@ function findHeader(m: Matrix): { row: number; cols: Columns } | null {
   return null;
 }
 
-export function parseBankMatrix(m: Matrix): { lines: ParsedLine[]; skippedOut: number; problems: string[] } {
+export function parseBankMatrix(m: Matrix): {
+  lines: ParsedLine[];
+  skippedOut: number;
+  problems: string[];
+} {
   const head = findHeader(m);
   if (!head) {
     return {
@@ -175,7 +223,9 @@ export function parseBankMatrix(m: Matrix): { lines: ParsedLine[]; skippedOut: n
     lines.push({ lineNo: rowNo, date, description: description || "(no description)", amount });
   }
   if (lines.length > MAX_BANK_LINES) {
-    problems.push(`This file has more than ${MAX_BANK_LINES} payments in. Split it by month and upload each part.`);
+    problems.push(
+      `This file has more than ${MAX_BANK_LINES} payments in. Split it by month and upload each part.`,
+    );
   }
   return { lines, skippedOut, problems };
 }
@@ -186,7 +236,12 @@ function csvToMatrix(text: string): Matrix {
   const clean = text.replace(/^\uFEFF/, "");
   const first = clean.split(/\r\n|\n|\r/, 1)[0] ?? "";
   const count = (ch: string) => first.split(ch).length - 1;
-  const delim = count("\t") > count(",") && count("\t") > count(";") ? "\t" : count(";") > count(",") ? ";" : ",";
+  const delim =
+    count("\t") > count(",") && count("\t") > count(";")
+      ? "\t"
+      : count(";") > count(",")
+        ? ";"
+        : ",";
   const rows: Matrix = [];
   let row: Cell[] = [];
   let field = "";
@@ -230,7 +285,8 @@ function excelCell(v: unknown): Cell {
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
     if ("result" in o) return excelCell(o["result"]);
-    if (Array.isArray(o["richText"])) return (o["richText"] as { text?: string }[]).map((t) => t.text ?? "").join("");
+    if (Array.isArray(o["richText"]))
+      return (o["richText"] as { text?: string }[]).map((t) => t.text ?? "").join("");
     if (typeof o["text"] === "string") return o["text"];
   }
   return null;
@@ -242,10 +298,17 @@ async function sha256Hex(buf: ArrayBuffer): Promise<string> {
 }
 
 export async function parseBankFile(file: File): Promise<ParsedStatement> {
-  const out: ParsedStatement = { fileName: file.name, fileHash: "", lines: [], skippedOut: 0, problems: [] };
+  const out: ParsedStatement = {
+    fileName: file.name,
+    fileHash: "",
+    lines: [],
+    skippedOut: 0,
+    problems: [],
+  };
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (file.size === 0) return { ...out, problems: ["The file is empty."] };
-  if (file.size > MAX_BANK_FILE_BYTES) return { ...out, problems: ["The file is bigger than 5 MB."] };
+  if (file.size > MAX_BANK_FILE_BYTES)
+    return { ...out, problems: ["The file is bigger than 5 MB."] };
   const buf = await file.arrayBuffer();
   out.fileHash = await sha256Hex(buf);
 
@@ -268,12 +331,46 @@ export async function parseBankFile(file: File): Promise<ParsedStatement> {
       });
       for (let i = 0; i < matrix.length; i++) if (!matrix[i]) matrix[i] = [];
     } catch {
-      return { ...out, problems: ["This file could not be opened. Is it a damaged or password protected Excel file?"] };
+      return {
+        ...out,
+        problems: [
+          "This file could not be opened. Is it a damaged or password protected Excel file?",
+        ],
+      };
     }
+  } else if (ext === "pdf" || ext === "docx") {
+    try {
+      const { bankPdfToMatrix, bankWordToMatrix } = await import("./readDocuments");
+      matrix = ext === "pdf" ? await bankPdfToMatrix(buf) : await bankWordToMatrix(buf);
+    } catch (error) {
+      return {
+        ...out,
+        problems: [
+          error instanceof Error
+            ? error.message
+            : "The document could not be read. Use CSV/Excel instead.",
+        ],
+      };
+    }
+  } else if (["png", "jpg", "jpeg", "webp", "heic"].includes(ext)) {
+    return {
+      ...out,
+      problems: [
+        "Photos require the later AI reading step. Use CSV, Excel, a typed PDF or Word table for now.",
+      ],
+    };
   } else if (ext === "xls") {
-    return { ...out, problems: ["Old .xls files are not supported. Open it in Excel and save it as .xlsx or CSV."] };
+    return {
+      ...out,
+      problems: ["Old .xls files are not supported. Open it in Excel and save it as .xlsx or CSV."],
+    };
   } else {
-    return { ...out, problems: ["This file type is not supported. Use CSV or Excel (.xlsx)."] };
+    return {
+      ...out,
+      problems: [
+        "This file type is not supported. Use CSV, Excel (.xlsx), a typed PDF or Word (.docx) table.",
+      ],
+    };
   }
   const parsed = parseBankMatrix(matrix);
   return { ...out, ...parsed };

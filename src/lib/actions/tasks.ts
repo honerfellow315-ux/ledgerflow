@@ -70,18 +70,31 @@ export const listTasks = createServerFn({ method: "GET" })
       .select()
       .from(tasks)
       .where(where)
-      .orderBy(sql`(${tasks.status} = 'verified') ASC`, asc(tasks.date), asc(tasks.createdAt), asc(tasks.id))
+      .orderBy(
+        sql`(${tasks.status} = 'verified') ASC`,
+        asc(tasks.date),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      )
       .limit(data.pageSize)
       .offset((data.page - 1) * data.pageSize);
 
-    const [count] = await db.select({ n: sql<number>`count(*)::int` }).from(tasks).where(where);
+    const [count] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(tasks)
+      .where(where);
 
     const grouped = await db
       .select({ status: tasks.status, n: sql<number>`count(*)::int` })
       .from(tasks)
       .where(scope.length > 0 ? and(...scope) : undefined)
       .groupBy(tasks.status);
-    const counts: Record<TaskStatus, number> = { todo: 0, in_progress: 0, completed: 0, verified: 0 };
+    const counts: Record<TaskStatus, number> = {
+      todo: 0,
+      in_progress: 0,
+      completed: 0,
+      verified: 0,
+    };
     for (const g of grouped) if (g.status in counts) counts[g.status as TaskStatus] = Number(g.n);
 
     const events =
@@ -105,9 +118,12 @@ export const listTasks = createServerFn({ method: "GET" })
     }
 
     const people: TaskPerson[] = isAdmin
-      ? (await db.select({ id: users.id, displayName: users.displayName, username: users.username }).from(users).orderBy(asc(users.username))).map(
-          (u) => ({ id: u.id, name: nameOf(u) }),
-        )
+      ? (
+          await db
+            .select({ id: users.id, displayName: users.displayName, username: users.username })
+            .from(users)
+            .orderBy(asc(users.username))
+        ).map((u) => ({ id: u.id, name: nameOf(u) }))
       : [];
 
     return {
@@ -198,11 +214,13 @@ export const moveTask = createServerFn({ method: "POST" })
     const isAdmin = actor.role === "admin";
 
     const [task] = await db.select().from(tasks).where(eq(tasks.id, data.id)).limit(1);
-    if (!task || (!isAdmin && task.assigneeId !== actor.id)) throw new Error("That task was not found.");
+    if (!task || (!isAdmin && task.assigneeId !== actor.id))
+      throw new Error("That task was not found.");
 
     const current = task.status as TaskStatus;
     const move = findMove(current, data.to);
-    if (!move) throw new Error("This task has already been changed by someone else. Refresh and try again.");
+    if (!move)
+      throw new Error("This task has already been changed by someone else. Refresh and try again.");
     if (move.adminOnly && !isAdmin) throw new Error("Only an admin can do that.");
 
     // The status is part of the WHERE, so two people clicking at once cannot both win.
@@ -211,9 +229,12 @@ export const moveTask = createServerFn({ method: "POST" })
       .set({ status: move.to, updatedAt: new Date() })
       .where(and(eq(tasks.id, data.id), eq(tasks.status, current)))
       .returning({ id: tasks.id });
-    if (changed.length === 0) throw new Error("This task has already been changed by someone else. Refresh and try again.");
+    if (changed.length === 0)
+      throw new Error("This task has already been changed by someone else. Refresh and try again.");
 
-    await db.insert(taskEvents).values({ id: uid("te"), taskId: data.id, byName: nameOf(actor), text: move.text });
+    await db
+      .insert(taskEvents)
+      .values({ id: uid("te"), taskId: data.id, byName: nameOf(actor), text: move.text });
     await recordActivity({
       actor,
       action: "updated",
@@ -242,3 +263,22 @@ export const deleteTask = createServerFn({ method: "POST" })
     });
     return { ok: true };
   });
+
+/** Counts come from all visible tasks, rather than just the current page. */
+export const taskWorkload = createServerFn({ method: "GET" }).handler(async () => {
+  const actor = await requirePermission("tasks", "view");
+  return db
+    .select({
+      id: tasks.assigneeId,
+      name: tasks.assigneeName,
+      total: sql<number>`count(*)::int`,
+      todo: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'todo')::int`,
+      inProgress: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'in_progress')::int`,
+      completed: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'completed')::int`,
+      verified: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'verified')::int`,
+    })
+    .from(tasks)
+    .where(actor.role === "admin" ? undefined : eq(tasks.assigneeId, actor.id))
+    .groupBy(tasks.assigneeId, tasks.assigneeName)
+    .orderBy(asc(tasks.assigneeName));
+});

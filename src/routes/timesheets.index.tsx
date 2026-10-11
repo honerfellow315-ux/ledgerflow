@@ -48,6 +48,7 @@ import {
   listTimesheetSheets,
   recheckTimesheetBatch,
   recheckTimesheetSheet,
+  correctTimesheetIdentity,
 } from "@/lib/actions/timesheets";
 import { errorMessage } from "@/lib/payroll/queries";
 import { unwrap } from "@/lib/unwrap";
@@ -179,7 +180,9 @@ function TimesheetsPageContent() {
       }
       await downloadTimesheetReport(all);
       if ((list?.total ?? 0) > REPORT_MAX_SHEETS) {
-        toast.info(`The report has the first ${REPORT_MAX_SHEETS} sheets. Use search or a status filter for the rest.`);
+        toast.info(
+          `The report has the first ${REPORT_MAX_SHEETS} sheets. Use search or a status filter for the rest.`,
+        );
       }
     }, "The report could not be made.");
     setProgress("");
@@ -193,9 +196,8 @@ function TimesheetsPageContent() {
       let changed = 0;
       do {
         setProgress(`Checking again… ${done} sheets done`);
-        const step: { processed: number; changed: number; nextCursor: string | null } = await unwrap(
-          recheckTimesheetBatch({ data: { month: activeMonth, cursor, limit: 10 } }),
-        );
+        const step: { processed: number; changed: number; nextCursor: string | null } =
+          await unwrap(recheckTimesheetBatch({ data: { month: activeMonth, cursor, limit: 10 } }));
         done += step.processed;
         changed += step.changed;
         cursor = step.nextCursor;
@@ -237,6 +239,7 @@ function TimesheetsPageContent() {
     return (
       <>
         <SheetCheckPanel
+          key={open.id + ":" + open.sourceName + ":" + open.sourceNi}
           sheet={open}
           busy={busy}
           onBack={() => setOpenId(null)}
@@ -257,6 +260,19 @@ function TimesheetsPageContent() {
               await refresh();
               toast.success("Checked again.");
             }, "Could not check this sheet again.")
+          }
+          onCorrectIdentity={(name, ni) =>
+            void guarded(async () => {
+              const result = await unwrap(
+                correctTimesheetIdentity({ data: { id: open.id, name, ni } }),
+              );
+              await refresh();
+              toast.success(
+                result?.status === "staff_not_found"
+                  ? "Identity saved. No unique matching staff member was found."
+                  : "Identity saved and checked again.",
+              );
+            }, "Could not correct the sheet identity.")
           }
           onDelete={() => setConfirmDelete(true)}
         />
@@ -331,7 +347,11 @@ function TimesheetsPageContent() {
           >
             <RefreshCw className="size-4" /> Check month again
           </Button>
-          <Button variant="outline" disabled={busy || total === 0} onClick={() => void downloadAll()}>
+          <Button
+            variant="outline"
+            disabled={busy || total === 0}
+            onClick={() => void downloadAll()}
+          >
             <Download className="size-4" /> Download report
           </Button>
           <Button onClick={() => setUploadOpen(true)}>

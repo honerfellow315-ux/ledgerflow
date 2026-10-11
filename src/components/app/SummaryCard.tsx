@@ -13,10 +13,10 @@ function sparkPath(values: number[], w: number, h: number) {
     x: values.length === 1 ? w / 2 : (i / (values.length - 1)) * w,
     y: span === 0 ? h / 2 : h - pad - ((v - min) / span) * (h - pad * 2),
   }));
-  let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+  let d = `M ${pts[0]!.x.toFixed(2)} ${pts[0]!.y.toFixed(2)}`;
   for (let i = 1; i < pts.length; i++) {
-    const mx = (pts[i - 1].x + pts[i].x) / 2;
-    d += ` C ${mx.toFixed(2)} ${pts[i - 1].y.toFixed(2)} ${mx.toFixed(2)} ${pts[i].y.toFixed(2)} ${pts[i].x.toFixed(2)} ${pts[i].y.toFixed(2)}`;
+    const mx = (pts[i - 1]!.x + pts[i]!.x) / 2;
+    d += ` C ${mx.toFixed(2)} ${pts[i - 1]!.y.toFixed(2)} ${mx.toFixed(2)} ${pts[i]!.y.toFixed(2)} ${pts[i]!.x.toFixed(2)} ${pts[i]!.y.toFixed(2)}`;
   }
   return { line: d, area: `${d} L ${w} ${h} L 0 ${h} Z` };
 }
@@ -73,7 +73,7 @@ export function SummaryCard({
   /** Display-only % change vs last month (premium cards). null/undefined hides it. */
   trend?: number | null;
   /** Display-only sparkline values (premium cards). */
-  spark?: number[];
+  spark?: number[] | undefined;
 }) {
   const accent = {
     default: "text-primary bg-gradient-to-br from-info-soft to-info-soft/40",
@@ -214,10 +214,7 @@ export function SummaryCard({
         active && "ring-2 ring-warning/60",
       )}
     >
-      <span
-        aria-hidden
-        className={cn("absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r", bar)}
-      />
+      <span aria-hidden className={cn("absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r", bar)} />
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
           {label}

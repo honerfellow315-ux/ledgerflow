@@ -1,8 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLedger } from "@/lib/ledger/store";
 import { RequireView } from "@/components/app/RequireView";
-import { formatDate, formatMoney, paymentOwnerClientId, round2 } from "@/lib/ledger/calc";
+import {
+  formatDate,
+  formatMoney,
+  paymentOwnerClientId,
+  creditNoteOwnerClientId,
+  creditNoteTotal,
+  round2,
+} from "@/lib/ledger/calc";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { StatusBadge } from "@/components/app/StatusBadge";
@@ -44,8 +51,46 @@ function ReportsPage() {
 }
 
 function ReportsPageContent() {
-  const { data, invoiceViews, invoiceViewsWithCredit } = useLedger();
+  const {
+    data,
+    invoiceViews: allInvoices,
+    invoiceViewsWithCredit: allCreditInvoices,
+  } = useLedger();
+  const [companyId, setCompanyId] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [status, setStatus] = useState("");
+  const [search, setSearch] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const clients = data.clients.filter(
+    (c) => !companyId || (companyId === "default" ? !c.companyId : c.companyId === companyId),
+  );
+  const scopedIds = new Set(clients.filter((c) => !clientId || c.id === clientId).map((c) => c.id));
+  const inDates = (date: string) => (!from || date >= from) && (!to || date <= to);
+  const invalidDates = !!from && !!to && from > to;
+  const invoiceViewsWithCredit = allCreditInvoices.filter(
+    (i) =>
+      !invalidDates &&
+      scopedIds.has(i.clientId) &&
+      inDates(i.invoiceDate) &&
+      (!status ||
+        (status === "overdue"
+          ? i.ageing > 0 && i.effectiveOutstanding > 0.004
+          : i.effectiveStatus === status)) &&
+      (!search.trim() ||
+        `${i.number} ${i.clientName} ${i.clientCompany} ${i.description}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase())),
+  );
+  const filteredIds = new Set(invoiceViewsWithCredit.map((i) => i.id));
+  const invoiceViews = allInvoices.filter((i) => filteredIds.has(i.id));
   const [statementClient, setStatementClient] = useState(data.clients[0]?.id ?? "");
+
+  useEffect(() => {
+    const available = clients.filter((c) => !clientId || c.id === clientId);
+    if (!available.some((c) => c.id === statementClient))
+      setStatementClient(available[0]?.id ?? "");
+  }, [companyId, clientId, data.clients, statementClient]);
 
   const outstanding = useMemo(
     () =>
@@ -65,7 +110,9 @@ function ReportsPageContent() {
       vat,
       total,
       paid,
-      outstanding: round2(total - paid),
+      outstanding: round2(
+        invoiceViewsWithCredit.reduce((sum, i) => sum + i.effectiveOutstanding, 0),
+      ),
       counts: {
         paid: invoiceViewsWithCredit.filter((i) => i.effectiveStatus === "paid").length,
         partial: invoiceViewsWithCredit.filter((i) => i.effectiveStatus === "partial").length,
@@ -75,10 +122,35 @@ function ReportsPageContent() {
   }, [invoiceViews, invoiceViewsWithCredit]);
 
   const statement = useMemo(() => {
-    const invoices = invoiceViews.filter((i) => i.clientId === statementClient);
-    const byInvoice = new Map(invoiceViews.map((i) => [i.id, i]));
+    if (invalidDates || !scopedIds.has(statementClient)) return [];
+    const byInvoice = new Map(allInvoices.map((i) => [i.id, i]));
+    const ids = new Set(
+      allCreditInvoices
+        .filter(
+          (i) =>
+            i.clientId === statementClient &&
+            (!status ||
+              (status === "overdue"
+                ? i.ageing > 0 && i.effectiveOutstanding > 0.004
+                : i.effectiveStatus === status)) &&
+            (!search.trim() ||
+              `${i.number} ${i.clientName} ${i.clientCompany} ${i.description}`
+                .toLowerCase()
+                .includes(search.trim().toLowerCase())),
+        )
+        .map((i) => i.id),
+    );
+    const invoices = allInvoices.filter((i) => ids.has(i.id));
     const payments = data.payments.filter(
-      (p) => paymentOwnerClientId(p, byInvoice) === statementClient,
+      (p) =>
+        paymentOwnerClientId(p, byInvoice) === statementClient &&
+        ((!status && !search.trim()) || ids.has(p.invoiceId)),
+    );
+    const credits = data.creditNotes.filter(
+      (n) =>
+        n.status !== "draft" &&
+        creditNoteOwnerClientId(n, byInvoice) === statementClient &&
+        ((!status && !search.trim()) || (!!n.invoiceId && ids.has(n.invoiceId))),
     );
     const rows = [
       ...invoices.map((i) => ({
@@ -95,34 +167,240 @@ function ReportsPageContent() {
         debit: 0,
         credit: p.amount,
       })),
+      ...credits.map((n) => ({
+        key: `c-${n.id}`,
+        date: n.date,
+        detail: `Credit note ${n.number}`,
+        debit: 0,
+        credit: creditNoteTotal(n),
+      })),
     ].sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
-    let balance = 0;
-    return rows.map((r) => {
-      balance = round2(balance + r.debit - r.credit);
-      return { ...r, balance };
-    });
-  }, [invoiceViews, data.payments, statementClient]);
+    let balance = from
+      ? round2(rows.filter((r) => r.date < from).reduce((sum, r) => sum + r.debit - r.credit, 0))
+      : 0;
+    const result = from
+      ? [{ key: "opening", date: from, detail: "Opening balance", debit: 0, credit: 0, balance }]
+      : [];
+    for (const row of rows.filter((r) => inDates(r.date))) {
+      balance = round2(balance + row.debit - row.credit);
+      result.push({ ...row, balance });
+    }
+    return result;
+  }, [
+    allInvoices,
+    allCreditInvoices,
+    data.payments,
+    data.creditNotes,
+    statementClient,
+    companyId,
+    clientId,
+    from,
+    to,
+    status,
+    search,
+    invalidDates,
+  ]);
 
   const paymentHistory = useMemo(() => {
-    const byInvoice = new Map(invoiceViews.map((i) => [i.id, i]));
+    const byInvoice = new Map(allInvoices.map((i) => [i.id, i]));
     const byClient = new Map(data.clients.map((c) => [c.id, c]));
-    return [...data.payments]
+    return data.payments
+      .filter(
+        (p) =>
+          !invalidDates &&
+          scopedIds.has(paymentOwnerClientId(p, byInvoice)) &&
+          inDates(p.date) &&
+          ((!status && !search.trim()) || filteredIds.has(p.invoiceId)),
+      )
       .sort((a, b) => b.date.localeCompare(a.date))
       .map((p) => ({
         ...p,
         invoiceNumber: byInvoice.get(p.invoiceId)?.number ?? "—",
-        company: byClient.get(p.clientId)?.company ?? "Unknown",
+        company: byClient.get(paymentOwnerClientId(p, byInvoice))?.company ?? "Unknown",
       }));
-  }, [data.payments, data.clients, invoiceViews]);
+  }, [
+    data.payments,
+    data.clients,
+    allInvoices,
+    companyId,
+    clientId,
+    from,
+    to,
+    status,
+    search,
+    invalidDates,
+  ]);
 
   return (
     <div className="space-y-4">
+      <Panel>
+        <PanelHeader
+          title="Report filters"
+          description="Invoice totals use invoice dates. Payment rows use payment dates. Statements include the opening balance and issued credit notes."
+        />
+        <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+          <label className="text-xs">
+            Company
+            <select
+              aria-label="Company"
+              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+              value={companyId}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                setClientId("");
+              }}
+            >
+              <option value="">All companies</option>
+              <option value="default">Default business</option>
+              {data.companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs">
+            Client
+            <select
+              aria-label="Client"
+              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+              value={clientId}
+              onChange={(e) => {
+                setClientId(e.target.value);
+                if (e.target.value) setStatementClient(e.target.value);
+              }}
+            >
+              <option value="">All clients</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.company} · {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs">
+            Invoice status
+            <select
+              aria-label="Invoice status"
+              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="">All statuses</option>
+              <option value="paid">Paid</option>
+              <option value="partial">Partially paid</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </label>
+          <label className="text-xs">
+            From
+            <input
+              aria-label="From"
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+            />
+          </label>
+          <label className="text-xs">
+            To
+            <input
+              aria-label="To"
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+            />
+          </label>
+          <label className="text-xs">
+            Invoice / client search
+            <input
+              aria-label="Invoice or client search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+              placeholder="Invoice number, client, description"
+            />
+          </label>
+          <button
+            type="button"
+            className="text-left text-xs text-brand-mark hover:underline"
+            onClick={() => {
+              setCompanyId("");
+              setClientId("");
+              setStatus("");
+              setSearch("");
+              setFrom("");
+              setTo("");
+            }}
+          >
+            Reset filters
+          </button>
+          {invalidDates ? (
+            <p role="alert" className="text-xs text-destructive">
+              From date must be before or equal to To date.
+            </p>
+          ) : null}
+        </div>
+      </Panel>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Net (ex VAT)" value={formatMoney(summary.ex)} />
-        <SummaryCard label="VAT at 20%" value={formatMoney(summary.vat)} />
+        <SummaryCard label="VAT" value={formatMoney(summary.vat)} />
         <SummaryCard label="Received" value={formatMoney(summary.paid)} tone="success" />
         <SummaryCard label="Outstanding" value={formatMoney(summary.outstanding)} tone="warning" />
       </div>
+
+      <Panel>
+        <PanelHeader
+          title="Invoices"
+          description={`${invoiceViewsWithCredit.length} invoices matching these filters`}
+        />
+        {!invoiceViewsWithCredit.length ? (
+          <EmptyState title="No matching invoices" />
+        ) : (
+          <TableWrap>
+            <Table>
+              <THead>
+                <TR>
+                  <TH>Invoice</TH>
+                  <TH>Client</TH>
+                  <TH>Date</TH>
+                  <TH>Due</TH>
+                  <TH align="right">Total</TH>
+                  <TH align="right">Credited</TH>
+                  <TH align="right">Outstanding</TH>
+                  <TH>Status</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {invoiceViewsWithCredit.map((i) => (
+                  <TR key={i.id}>
+                    <TD mono>{i.number}</TD>
+                    <TD>
+                      {i.clientCompany} · {i.clientName}
+                    </TD>
+                    <TD>{formatDate(i.invoiceDate)}</TD>
+                    <TD>{formatDate(i.dueDate)}</TD>
+                    <TD align="right" mono>
+                      {formatMoney(i.total)}
+                    </TD>
+                    <TD align="right" mono>
+                      {formatMoney(i.credited)}
+                    </TD>
+                    <TD align="right" mono>
+                      {formatMoney(i.effectiveOutstanding)}
+                    </TD>
+                    <TD>
+                      <StatusBadge status={i.effectiveStatus} />
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </TableWrap>
+        )}
+      </Panel>
 
       <Panel>
         <PanelHeader
@@ -176,18 +454,20 @@ function ReportsPageContent() {
       <Panel>
         <PanelHeader
           title="Client Statement"
-          description="Running balance for the selected client"
+          description="Running balance for the selected client, including the opening balance before From"
           actions={
             <Select value={statementClient} onValueChange={setStatementClient}>
               <SelectTrigger className="h-8 w-56 text-[13px]">
                 <SelectValue placeholder="Select client" />
               </SelectTrigger>
               <SelectContent>
-                {data.clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.company}
-                  </SelectItem>
-                ))}
+                {clients
+                  .filter((c) => !clientId || c.id === clientId)
+                  .map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.company}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           }
@@ -231,7 +511,7 @@ function ReportsPageContent() {
       <Panel>
         <PanelHeader
           title="Payment History"
-          description={`${paymentHistory.length} payments recorded across all clients`}
+          description={`${paymentHistory.length} payments matching these filters`}
         />
         {paymentHistory.length === 0 ? (
           <EmptyState title="No payments recorded" />
@@ -268,13 +548,16 @@ function ReportsPageContent() {
       </Panel>
 
       <Panel>
-        <PanelHeader title="Invoice Summary" description="Totals across the whole ledger" />
+        <PanelHeader
+          title="Invoice Summary"
+          description="Totals for invoices matching these filters"
+        />
         <TableWrap>
           <Table className="min-w-0">
             <TBody>
               <SummaryRow label="Invoices raised" value={String(invoiceViews.length)} />
               <SummaryRow label="Net total (ex VAT)" value={formatMoney(summary.ex)} />
-              <SummaryRow label="VAT total (20%)" value={formatMoney(summary.vat)} />
+              <SummaryRow label="VAT total" value={formatMoney(summary.vat)} />
               <SummaryRow label="Gross total (inc VAT)" value={formatMoney(summary.total)} />
               <SummaryRow label="Total received" value={formatMoney(summary.paid)} />
               <SummaryRow label="Total outstanding" value={formatMoney(summary.outstanding)} />

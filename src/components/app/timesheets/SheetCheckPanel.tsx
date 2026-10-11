@@ -42,6 +42,7 @@ export function SheetCheckPanel({
   onConfirm,
   onRecheck,
   onDelete,
+  onCorrectIdentity,
   busy = false,
 }: {
   sheet: TimesheetSheet;
@@ -52,7 +53,11 @@ export function SheetCheckPanel({
   onRecheck?: () => void;
   onDelete?: () => void;
   busy?: boolean;
+  onCorrectIdentity?: (name: string, ni: string) => void;
 }) {
+  const [sourceName, setSourceName] = useState(sheet.sourceName ?? "");
+  const [sourceNi, setSourceNi] = useState(sheet.sourceNi ?? "");
+  const [editIdentity, setEditIdentity] = useState(false);
   const [onlyIssues, setOnlyIssues] = useState(false);
   const t = useMemo(() => sheetTotals(sheet), [sheet]);
   const rows = onlyIssues ? sheet.rows.filter((row) => row.result !== "match") : sheet.rows;
@@ -93,9 +98,57 @@ export function SheetCheckPanel({
 
       {notFound ? (
         <Notice tone="warn">
-          This person is not in Staff yet. Add them, or ask the sender for their NI number, before
-          this sheet can be checked.
+          The identity read from this sheet did not match a unique staff member. If the person is
+          already in Staff, check the name and NI on the upload, correct them below, then check
+          again. Different NI numbers are never merged automatically.
         </Notice>
+      ) : null}
+      {onCorrectIdentity ? (
+        <Panel>
+          <div className="p-4">
+            <button
+              type="button"
+              className="text-sm text-primary hover:underline"
+              disabled={busy}
+              onClick={() => setEditIdentity(!editIdentity)}
+            >
+              Correct the name / NI read from this sheet
+            </button>
+            {editIdentity ? (
+              <div className="mt-3 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Use the exact identity from Staff. This updates the uploaded sheet only. A
+                  name-only match still needs confirmation.
+                </p>
+                <label className="block text-xs">
+                  Name on sheet
+                  <input
+                    value={sourceName}
+                    onChange={(e) => setSourceName(e.target.value)}
+                    maxLength={120}
+                    className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+                  />
+                </label>
+                <label className="block text-xs">
+                  NI on sheet
+                  <input
+                    value={sourceNi}
+                    onChange={(e) => setSourceNi(e.target.value)}
+                    maxLength={20}
+                    className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+                  />
+                </label>
+                <Button
+                  size="sm"
+                  disabled={busy || (!sourceName.trim() && !sourceNi.trim())}
+                  onClick={() => onCorrectIdentity(sourceName.trim(), sourceNi.trim())}
+                >
+                  Save identity and check again
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </Panel>
       ) : null}
       {sheet.matchedBy === "name" && !sheet.staffConfirmed ? (
         <Notice tone="warn">

@@ -26,6 +26,13 @@ import {
   ChevronRight,
   type LucideIcon,
 } from "@/lib/icons";
+import { useQuery } from "@tanstack/react-query";
+import { dashboardActivity } from "@/lib/actions/activityLog";
+import { listTasks } from "@/lib/actions/tasks";
+import { unwrap } from "@/lib/unwrap";
+import { TaskWorkload } from "@/components/app/tasks/TaskWorkload";
+import { TaskStatusBadge } from "@/components/app/tasks/TaskDialogs";
+import { ukClock } from "@/lib/dashboard/clock";
 import { useLedger } from "@/lib/ledger/store";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { formatDate, formatMoney, round2 } from "@/lib/ledger/calc";
@@ -82,7 +89,9 @@ function DashboardContent() {
     return {
       invoiced,
       received,
-      outstanding: round2(invoiced - received),
+      outstanding: round2(
+        invoiceViewsWithCredit.reduce((sum, i) => sum + i.effectiveOutstanding, 0),
+      ),
       paidCount: invoiceViewsWithCredit.filter((i) => i.effectiveStatus === "paid").length,
       pendingCount: invoiceViewsWithCredit.filter((i) => i.effectiveStatus !== "paid").length,
     };
@@ -170,26 +179,42 @@ function DashboardContent() {
   const statusPending = Math.max(0, totals.pendingCount - statusOverdue);
   const statusTotal = statusPaid + statusPending + statusOverdue;
 
-
   // ---- Display-only helpers for the glass dashboard (no calculation above is changed) ----
   const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => setNow(new Date()), []);
+  useEffect(() => {
+    setNow(new Date());
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
-  const greeting = !now
-    ? "Welcome,"
-    : now.getHours() < 12
-      ? "Good morning,"
-      : now.getHours() < 18
-        ? "Good afternoon,"
-        : "Good evening,";
-  const todayLabel = now
-    ? now.toLocaleDateString("en-GB", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
-    : "";
+  const clock = now ? ukClock(now) : null;
+  const greeting = clock?.greeting ?? "Welcome,";
+  const todayLabel = clock?.date ?? "";
+  const activityQ = useQuery({
+    queryKey: ["dashboard-activity", user?.username],
+    queryFn: () => unwrap(dashboardActivity()),
+    enabled: !!user,
+    refetchInterval: 30_000,
+  });
+  const tasksQ = useQuery({
+    queryKey: ["tasks", "dashboard", user?.username],
+    queryFn: () =>
+      unwrap(
+        listTasks({
+          data: {
+            search: "",
+            status: null,
+            assigneeId: null,
+            dateFrom: null,
+            dateTo: null,
+            page: 1,
+            pageSize: 5,
+          },
+        }),
+      ),
+    enabled: !!user && can("tasks", "view"),
+    refetchInterval: 30_000,
+  });
 
   // Last 6 calendar months: invoiced, received and running outstanding (for sparklines / trend).
   const monthly = useMemo(() => {
@@ -227,8 +252,8 @@ function DashboardContent() {
 
   const pctChange = (series?: number[]) => {
     if (!series || series.length < 2) return null;
-    const last = series[series.length - 1];
-    const prev = series[series.length - 2];
+    const last = series[series.length - 1]!;
+    const prev = series[series.length - 2]!;
     if (Math.abs(prev) < 0.005) return null;
     return ((last - prev) / Math.abs(prev)) * 100;
   };
@@ -246,26 +271,13 @@ function DashboardContent() {
       .slice(0, 5);
   }, [invoiceViews]);
 
-  const recentActivity = useMemo(() => {
-    const byInvoice = new Map(invoiceViews.map((i) => [i.id, i]));
-    const items = [
-      ...invoiceViews.map((i) => ({
-        key: `inv-${i.id}`,
-        kind: "invoice" as const,
-        date: i.invoiceDate,
-        title: "Invoice Created",
-        detail: `${i.number} has been created`,
-      })),
-      ...data.payments.map((pm) => ({
-        key: `pay-${pm.id}`,
-        kind: "payment" as const,
-        date: pm.date,
-        title: "Payment Received",
-        detail: `${formatMoney(pm.amount)} from ${byInvoice.get(pm.invoiceId)?.clientCompany ?? "client"}`,
-      })),
-    ];
-    return items.sort((x, y) => y.date.localeCompare(x.date)).slice(0, 4);
-  }, [invoiceViews, data.payments]);
+  const recentActivity = (activityQ.data ?? []).map((a) => ({
+    key: a.id,
+    kind: a.module,
+    date: a.at.slice(0, 10),
+    title: `${a.actor} · ${a.action}`,
+    detail: `${a.label}${a.details ? ` · ${a.details}` : ""}`,
+  }));
 
   const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
   const invoiceCount = invoiceViews.length;
@@ -355,10 +367,6 @@ function DashboardContent() {
                 <p className="mt-1 text-[12.5px] text-foreground/80">
                   Here&apos;s your receivables overview.
                 </p>
-                <span className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-success/25 bg-success/15 px-2.5 py-0.5 text-[11px] font-medium text-success">
-                  <span className="size-1.5 rounded-full bg-success shadow-[0_0_8px_var(--color-success)]" />
-                  All systems operational
-                </span>
               </div>
               {todayLabel ? (
                 <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 backdrop-blur-md">
@@ -366,8 +374,11 @@ function DashboardContent() {
                     <Clock className="size-4" />
                   </span>
                   <div className="leading-tight">
-                    <p className="text-[12.5px] font-semibold text-foreground">Today</p>
+                    <p className="text-[12.5px] font-semibold text-foreground">
+                      UK time · Europe/London
+                    </p>
                     <p className="mt-0.5 text-[11px] text-muted-foreground">{todayLabel}</p>
+                    <p className="mt-1 text-[12px] font-semibold text-foreground">{clock?.time}</p>
                   </div>
                   <ChevronRight className="ml-1.5 size-3.5 text-muted-foreground" />
                 </div>
@@ -662,6 +673,74 @@ function DashboardContent() {
             </Panel>
           ) : null}
 
+          {can("tasks", "view") ? (
+            <Panel>
+              <PanelHeader
+                title={isAdmin ? "Team Tasks" : "My Tasks"}
+                description={
+                  tasksQ.data
+                    ? `${tasksQ.data.counts.todo} to do · ${tasksQ.data.counts.in_progress} in progress · ${tasksQ.data.counts.completed} completed · ${tasksQ.data.counts.verified} verified`
+                    : ""
+                }
+                actions={
+                  <Link to="/tasks" className="text-xs text-brand-mark hover:underline">
+                    View all
+                  </Link>
+                }
+              />
+              <div className="px-4 pb-3">
+                <TaskWorkload />
+              </div>
+              {tasksQ.isError ? (
+                <p className="p-4 text-xs text-destructive">
+                  Tasks could not be loaded. Please refresh.
+                </p>
+              ) : tasksQ.isPending ? (
+                <p className="p-4 text-xs text-muted-foreground">Loading tasks…</p>
+              ) : !tasksQ.data?.tasks.length ? (
+                <p className="p-4 text-xs text-muted-foreground">No tasks yet.</p>
+              ) : (
+                <ul className="space-y-2 p-4">
+                  {tasksQ.data.tasks.map((task) => {
+                    const last = task.events.at(-1);
+                    const done =
+                      task.status === "completed" || task.status === "verified"
+                        ? [...task.events]
+                            .reverse()
+                            .find((event) => event.text === "Marked the task as done")
+                        : undefined;
+                    return (
+                      <li
+                        key={task.id}
+                        className="rounded-xl border border-white/10 bg-white/[0.04] p-3"
+                      >
+                        <Link to="/tasks" className="text-sm font-medium hover:underline">
+                          {task.text}
+                        </Link>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          For {task.assignee} · Created by {task.createdBy}
+                        </p>
+                        {done ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Completed by {done.by}
+                          </p>
+                        ) : null}
+                        {last ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {last.by}: {last.text}
+                          </p>
+                        ) : null}
+                        <div className="mt-2">
+                          <TaskStatusBadge status={task.status} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Panel>
+          ) : null}
+
           <Panel>
             <div className="flex items-center justify-between px-4 pb-1 pt-4">
               <div className="flex items-center gap-2">
@@ -669,13 +748,22 @@ function DashboardContent() {
                 <h3 className="text-[14px] font-semibold text-foreground">Recent Activity</h3>
               </div>
               {isAdmin ? (
-                <Link to="/activity-log" className="text-xs font-medium text-brand-mark hover:underline">
+                <Link
+                  to="/activity-log"
+                  className="text-xs font-medium text-brand-mark hover:underline"
+                >
                   View all
                 </Link>
               ) : null}
             </div>
             {recentActivity.length === 0 ? (
-              <p className="px-4 pb-4 pt-2 text-[12px] text-muted-foreground">No activity yet.</p>
+              <p className="px-4 pb-4 pt-2 text-[12px] text-muted-foreground">
+                {activityQ.isError
+                  ? "Activity could not be loaded. Please refresh."
+                  : activityQ.isPending
+                    ? "Loading activity…"
+                    : "No activity yet."}
+              </p>
             ) : (
               <ul className="space-y-0.5 p-2">
                 {recentActivity.map((a) => (
@@ -703,7 +791,9 @@ function DashboardContent() {
                           {formatDate(a.date)}
                         </span>
                       </div>
-                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{a.detail}</p>
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        {a.detail}
+                      </p>
                     </div>
                   </li>
                 ))}
@@ -735,7 +825,8 @@ function DashboardContent() {
                       .slice(0, 2)
                       .map((w) => w.charAt(0).toUpperCase())
                       .join("") || "?";
-                  const width = topClients[0].total > 0 ? (c.total / topClients[0].total) * 100 : 0;
+                  const width =
+                    topClients[0]!.total > 0 ? (c.total / topClients[0]!.total) * 100 : 0;
                   return (
                     <li key={`${c.name}-${idx}`} className="flex items-center gap-3">
                       <span
@@ -779,17 +870,19 @@ function DashboardContent() {
                 <span className="flex size-6 items-center justify-center rounded-md bg-brand-mark/20 text-brand-mark">
                   <ReceiptText className="size-3.5" />
                 </span>
-                <p className="text-[12.5px] font-semibold text-foreground">Streamline your receivables</p>
+                <p className="text-[12.5px] font-semibold text-foreground">
+                  Streamline your receivables
+                </p>
               </div>
               <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                Automate follow-ups, track payments, and get better cash flow.
+                Review follow-ups, track payments, and inspect your reports.
               </p>
               {can("reports", "view") ? (
                 <Link
                   to="/reports"
                   className="mt-2.5 inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-[oklch(0.72_0.15_170)] to-[oklch(0.6_0.13_180)] px-3 py-1.5 text-[11.5px] font-semibold text-primary-foreground shadow-[0_8px_20px_-8px_oklch(0.74_0.15_170/0.7)] transition-transform hover:-translate-y-px"
                 >
-                  Learn more
+                  View reports
                   <ChevronRight className="size-3.5" />
                 </Link>
               ) : null}
@@ -1025,7 +1118,10 @@ function MiniStat({
     >
       <div className="flex items-center gap-3">
         <span
-          className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg border", iconTint)}
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-lg border",
+            iconTint,
+          )}
         >
           <Icon className="size-4" />
         </span>
@@ -1035,7 +1131,12 @@ function MiniStat({
       <p className="num text-[20px] font-semibold leading-none text-foreground">{value}</p>
       <div className="flex items-center justify-between gap-2">
         <p className="truncate text-[10.5px] text-muted-foreground">{sub}</p>
-        <span className={cn("shrink-0 rounded-full border px-1.5 py-px text-[10px] font-semibold", pillCls)}>
+        <span
+          className={cn(
+            "shrink-0 rounded-full border px-1.5 py-px text-[10px] font-semibold",
+            pillCls,
+          )}
+        >
           {pill}
         </span>
       </div>

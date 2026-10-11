@@ -3,7 +3,7 @@ import { and, desc, eq, gte, ilike, lte, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../server/db";
 import { activityLog } from "../../../drizzle/schema";
-import { requireAdmin } from "../server/auth";
+import { requirePermission, requireAdmin } from "../server/auth";
 import type { ActivityAction } from "../server/activity";
 
 /** Every value the Activity Log screen's action filter can send — kept in
@@ -68,3 +68,23 @@ export const listActivityLog = createServerFn({ method: "GET" })
 
     return rows;
   });
+
+/** Dashboard: admins see the audit trail; other users see only their own actions. */
+export const dashboardActivity = createServerFn({ method: "GET" }).handler(async () => {
+  const actor = await requirePermission("dashboard", "view");
+  const rows = await db
+    .select()
+    .from(activityLog)
+    .where(actor.role === "admin" ? undefined : eq(activityLog.userId, actor.id))
+    .orderBy(desc(activityLog.createdAt), desc(activityLog.id))
+    .limit(6);
+  return rows.map((row) => ({
+    id: row.id,
+    at: row.createdAt.toISOString(),
+    actor: row.displayName || row.username,
+    action: row.action,
+    module: row.module,
+    label: row.label,
+    details: row.details,
+  }));
+});

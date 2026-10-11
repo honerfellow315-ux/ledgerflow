@@ -5,7 +5,20 @@
  * The work itself lives in src/lib/server/timesheetCheck.ts.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../server/db";
 import { payrollStaff, timesheetRows, timesheetSheets } from "../../../drizzle/schema";
@@ -14,6 +27,8 @@ import { recordActivity } from "../server/activity";
 import { formatMonthLabel } from "../payroll/calc";
 import {
   confirmNameMatch,
+  findStaff,
+  personKeyOf,
   recheckSheet,
   saveParsedSheet,
   toListItem,
@@ -235,7 +250,12 @@ export const getTimesheetSheet = createServerFn({ method: "GET" })
 
 /** Sheets WITH their rows, a page at a time, for the Excel receipt / report download. */
 export const getTimesheetReportPage = createServerFn({ method: "GET" })
-  .validator(listFilter.extend({ offset: z.number().int().min(0).max(100000), limit: z.number().int().min(1).max(50) }))
+  .validator(
+    listFilter.extend({
+      offset: z.number().int().min(0).max(100000),
+      limit: z.number().int().min(1).max(50),
+    }),
+  )
   .handler(async ({ data }): Promise<TimesheetSheet[]> => {
     await requireAdmin();
     const found = await db
@@ -350,4 +370,58 @@ export const deleteTimesheetSheet = createServerFn({ method: "POST" })
       label: `Timesheet — ${row.name || row.file} ${formatMonthLabel(row.month)}`,
     });
     return { ok: true };
+  });
+
+/** Fix only the identity read from this upload; existing Staff / payroll records are untouched. */
+export const correctTimesheetIdentity = createServerFn({ method: "POST" })
+  .validator(
+    z
+      .object({
+        id: z.string().min(1).max(100),
+        name: z.string().trim().max(120),
+        ni: z.string().trim().max(20),
+      })
+      .refine((value) => !!value.name || !!value.ni, "Enter a name or NI number."),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requireAdmin();
+    const [sheet] = await db
+      .select()
+      .from(timesheetSheets)
+      .where(eq(timesheetSheets.id, data.id))
+      .limit(1);
+    if (!sheet) throw new Error("That sheet no longer exists.");
+    const match = await findStaff(db, data.ni, data.name);
+    const personKey = personKeyOf(
+      match.staffId,
+      data.ni,
+      data.name,
+      sheet.fileHash,
+      sheet.sheetLabel,
+    );
+    // Reserve the corrected person/month key before rechecking. A duplicate fails without changing the sheet.
+    const changed = await db
+      .update(timesheetSheets)
+      .set({
+        personKey,
+        personName: data.name,
+        personNi: data.ni,
+        staffId: null,
+        matchedBy: "none",
+        staffConfirmedAt: null,
+        status: "staff_not_found",
+      })
+      .where(eq(timesheetSheets.id, data.id))
+      .returning({ id: timesheetSheets.id });
+    if (!changed.length) throw new Error("That sheet no longer exists.");
+    const result = await recheckSheet(db, data.id);
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "timesheets",
+      entityId: data.id,
+      label: "Timesheet identity corrected and checked again",
+      details: `Result: ${result?.status ?? "staff_not_found"}`,
+    });
+    return result;
   });

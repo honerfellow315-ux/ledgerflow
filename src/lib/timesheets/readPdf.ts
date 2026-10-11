@@ -19,7 +19,10 @@ export interface PdfPiece {
 export function piecesToLines(pieces: PdfPiece[]): string[] {
   const items = pieces.filter((p) => p.str.trim() !== "");
   if (items.length === 0) return [];
-  const heights = items.map((p) => p.h).filter((h) => h > 0).sort((a, b) => a - b);
+  const heights = items
+    .map((p) => p.h)
+    .filter((h) => h > 0)
+    .sort((a, b) => a - b);
   const median = heights.length ? heights[Math.floor(heights.length / 2)]! : 10;
   const tol = Math.max(2, median * 0.5);
   items.sort((a, b) => b.y - a.y || a.x - b.x);
@@ -40,7 +43,8 @@ export function piecesToLines(pieces: PdfPiece[]): string[] {
     let prevEnd = 0;
     g.forEach((p, i) => {
       const gap = p.x - prevEnd;
-      const needsSpace = i > 0 && gap > Math.max(1, median * 0.2) && !out.endsWith(" ") && !p.str.startsWith(" ");
+      const needsSpace =
+        i > 0 && gap > Math.max(1, median * 0.2) && !out.endsWith(" ") && !p.str.startsWith(" ");
       out += (needsSpace ? " " : "") + p.str;
       prevEnd = p.x + p.w;
     });
@@ -59,7 +63,9 @@ export async function pdfToLines(buf: ArrayBuffer): Promise<{ lines: string[]; c
   const lines: string[] = [];
   let chars = 0;
   try {
-    const pages = Math.min(doc.numPages, MAX_PAGES);
+    if (doc.numPages > MAX_PAGES)
+      throw new Error(`The PDF has more than ${MAX_PAGES} pages. Split it before uploading.`);
+    const pages = doc.numPages;
     for (let p = 1; p <= pages; p++) {
       const page = await doc.getPage(p);
       const content = await page.getTextContent();
@@ -67,7 +73,13 @@ export async function pdfToLines(buf: ArrayBuffer): Promise<{ lines: string[]; c
       for (const item of content.items) {
         if (!("str" in item)) continue;
         chars += item.str.trim().length;
-        pieces.push({ str: item.str, x: item.transform[4] ?? 0, y: item.transform[5] ?? 0, w: item.width, h: item.height });
+        pieces.push({
+          str: item.str,
+          x: item.transform[4] ?? 0,
+          y: item.transform[5] ?? 0,
+          w: item.width,
+          h: item.height,
+        });
       }
       lines.push(...piecesToLines(pieces));
     }

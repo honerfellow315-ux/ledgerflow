@@ -6,12 +6,7 @@
 export type SheetFormat = "excel" | "pdf" | "word" | "photo";
 export type SheetStatus = "ready" | "needs_review" | "staff_not_found";
 export type RowResult =
-  | "match"
-  | "hours_over"
-  | "hours_under"
-  | "not_in_records"
-  | "not_on_sheet"
-  | "check_reading";
+  "match" | "hours_over" | "hours_under" | "not_in_records" | "not_on_sheet" | "check_reading";
 
 export interface SheetRow {
   id: string;
@@ -29,6 +24,8 @@ export interface SheetRow {
 export interface TimesheetSheet {
   id: string;
   staffName: string;
+  sourceName?: string;
+  sourceNi?: string;
   email: string;
   ni: string;
   matchedBy: "ni" | "name" | "none";

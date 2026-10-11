@@ -51,7 +51,18 @@ function isoIfReal(y: number, m: number, d: number): string {
 }
 
 const MONTH_NAMES = [
-  "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
 ];
 
 function dateFromText(t: string): string {
@@ -64,7 +75,10 @@ function dateFromText(t: string): string {
     return isoIfReal(y, Number(m[2]), Number(m[1]));
   }
   // "Mon 1 Sep 2026", "1st September 2026"
-  m = /^(?:[a-z]{3,9}\.?,?\s+)?(\d{1,2})(?:st|nd|rd|th)?[\s-]+([a-z]{3,9})\.?,?[\s-]+(\d{2,4})$/i.exec(t);
+  m =
+    /^(?:[a-z]{3,9}\.?,?\s+)?(\d{1,2})(?:st|nd|rd|th)?[\s-]+([a-z]{3,9})\.?,?[\s-]+(\d{2,4})$/i.exec(
+      t,
+    );
   if (m) {
     const mon = MONTH_NAMES.indexOf(m[2]!.slice(0, 3).toLowerCase());
     if (mon < 0) return "";
@@ -168,7 +182,10 @@ export function readMoney(c: TsCell | undefined): Read<number> {
   if (typeof c === "number") {
     return Number.isFinite(c) && c >= 0 && c <= 1_000_000 ? OK(round2(c)) : BAD;
   }
-  const t = c.trim().replace(/[£\s]/g, "").replace(/,(?=\d{3}(\D|$))/g, "");
+  const t = c
+    .trim()
+    .replace(/[£\s]/g, "")
+    .replace(/,(?=\d{3}(\D|$))/g, "");
   if (!t) return EMPTY;
   if (!/^\d+(?:\.\d+)?$/.test(t)) return BAD;
   const n = Number(t);
@@ -180,7 +197,8 @@ const hoursOf = (min: number) => round2(min / 60);
 
 /* ------------------------------ header detection ------------------------------ */
 
-type Col = "date" | "start" | "end" | "duration" | "rate" | "amount" | "expense" | "siteName" | "site";
+type Col =
+  "date" | "start" | "end" | "duration" | "rate" | "amount" | "expense" | "siteName" | "site";
 
 const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
@@ -192,7 +210,15 @@ function classify(label: string): Col | null {
   if (h.startsWith("end") || h.startsWith("finish") || h === "timeout" || h === "out") return "end";
   if (
     h.startsWith("duration") ||
-    ["hours", "hrs", "totalhours", "hoursworked", "workedhours", "totalhrs", "hoursworked"].includes(h)
+    [
+      "hours",
+      "hrs",
+      "totalhours",
+      "hoursworked",
+      "workedhours",
+      "totalhrs",
+      "hoursworked",
+    ].includes(h)
   ) {
     return "duration";
   }
@@ -211,7 +237,10 @@ function findHeader(m: TsMatrix): { row: number; cols: Partial<Record<Col, numbe
       const k = classify(textOf(c));
       if (k && cols[k] === undefined) cols[k] = idx;
     });
-    if (cols.date !== undefined && (cols.start !== undefined || cols.end !== undefined || cols.duration !== undefined)) {
+    if (
+      cols.date !== undefined &&
+      (cols.start !== undefined || cols.end !== undefined || cols.duration !== undefined)
+    ) {
       return { row: i, cols };
     }
   }
@@ -220,8 +249,10 @@ function findHeader(m: TsMatrix): { row: number; cols: Partial<Record<Col, numbe
 
 /* ------------------------------ name / NI above the table ------------------------------ */
 
-const NAME_LABEL = /^(?:(?:staff|employee|guard|officer|full|your|sia)\s+)?name\b\s*[:\-]?\s*(.*)$/i;
-const NI_LABEL = /^(?:n\.?\s?i\.?(?:\s*(?:number|no\.?|num))?|national\s+insurance(?:\s*(?:number|no\.?))?)(?=$|[\s:#\-.])\s*[:#\-.]?\s*(.*)$/i;
+const NAME_LABEL =
+  /^(?:(?:staff|employee|guard|officer|full|your|sia)\s+)?name\b\s*[:\-]?\s*(.*)$/i;
+const NI_LABEL =
+  /^(?:n\.?\s?i\.?n?\.?(?:\s*(?:number|no\.?|num))?|national\s+insurance(?:\s*(?:number|no\.?))?)(?=$|[\s:#\-.])\s*[:#\-.]?\s*(.*)$/i;
 
 function valueNear(top: TsMatrix, r: number, c: number, inline: string): string {
   if (inline) return inline;
@@ -254,7 +285,14 @@ function readPerson(top: TsMatrix): { name: string; ni: string } {
         const m = NAME_LABEL.exec(t);
         if (m) {
           const v = valueNear(top, r, c, (m[1] ?? "").trim());
-          if (v && !NAME_LABEL.test(v) && !NI_LABEL.test(v) && !/^\d+(\.\d+)?$/.test(v)) name = v;
+          if (v && !NAME_LABEL.test(v) && !NI_LABEL.test(v) && !/^\d+(\.\d+)?$/.test(v)) {
+            const split =
+              /\s+(?:n\.?\s?i\.?n?\.?(?:\s*(?:number|no\.?|num))?|national\s+insurance(?:\s+number)?)\s*[:#]\s*(.*)$/i.exec(
+                v,
+              );
+            name = split ? v.slice(0, split.index).trim() : v;
+            if (split && !ni) ni = (split[1] ?? "").trim();
+          }
         }
       }
     }
@@ -272,7 +310,10 @@ function readPerson(top: TsMatrix): { name: string; ni: string } {
       if (ni) break;
     }
   }
-  return { name: name.replace(/\s+/g, " ").trim().slice(0, 120), ni: ni ? formatNi(ni).slice(0, 20) : "" };
+  return {
+    name: name.replace(/\s+/g, " ").trim().slice(0, 120),
+    ni: ni ? formatNi(ni).slice(0, 20) : "",
+  };
 }
 
 /* ------------------------------ the sheet's own total ------------------------------ */
@@ -325,7 +366,8 @@ export function parseTimesheetMatrix(matrix: TsMatrix, sheetLabel: string): Pars
     const filled = row.filter((c) => textOf(c) !== "" || (typeof c === "object" && c !== null));
     if (filled.length === 0) continue;
 
-    const cell = (k: Col): TsCell | undefined => (cols[k] === undefined ? undefined : row[cols[k]!]);
+    const cell = (k: Col): TsCell | undefined =>
+      cols[k] === undefined ? undefined : row[cols[k]!];
     const dateR = readDate(cell("date"));
 
     // A "Total" line: the sheet's own total, never a shift. A row with a real date is always
@@ -353,7 +395,11 @@ export function parseTimesheetMatrix(matrix: TsMatrix, sheetLabel: string): Pars
 
     // A line with only a number under Duration (and nothing else) is the sheet's total.
     const onlyNumbers =
-      dateR.kind === "empty" && startR.kind === "empty" && endR.kind === "empty" && !site && !siteName;
+      dateR.kind === "empty" &&
+      startR.kind === "empty" &&
+      endR.kind === "empty" &&
+      !site &&
+      !siteName;
     if (onlyNumbers) {
       const probe = readLength(cell("duration"), 2000);
       if (probe.kind === "ok") {
@@ -377,7 +423,8 @@ export function parseTimesheetMatrix(matrix: TsMatrix, sheetLabel: string): Pars
     const amount = money(amountR);
     const expense = money(expenseR);
 
-    const unreadableHours = hoursMin === null && (durR.kind === "bad" || startR.kind === "bad" || endR.kind === "bad");
+    const unreadableHours =
+      hoursMin === null && (durR.kind === "bad" || startR.kind === "bad" || endR.kind === "bad");
     const hasMoney = (amount ?? 0) > 0 || (expense ?? 0) > 0;
 
     // Keep a row only when it has a real date, or real hours: otherwise it is a hint line,
@@ -406,7 +453,11 @@ export function parseTimesheetMatrix(matrix: TsMatrix, sheetLabel: string): Pars
         `The Duration cell could not be read, so ${hoursOf(minutesFromTimes)} h was worked out from start and end.`,
       );
       uncertain = true;
-    } else if (durR.kind === "ok" && minutesFromTimes !== null && hoursOf(durR.value) !== hoursOf(minutesFromTimes)) {
+    } else if (
+      durR.kind === "ok" &&
+      minutesFromTimes !== null &&
+      hoursOf(durR.value) !== hoursOf(minutesFromTimes)
+    ) {
       notes.push(
         `Duration says ${hoursOf(durR.value)} h but start and end give ${hoursOf(minutesFromTimes)} h.`,
       );
@@ -431,12 +482,22 @@ export function parseTimesheetMatrix(matrix: TsMatrix, sheetLabel: string): Pars
     });
   }
 
-  if (zeroRows > 0) warnings.push(`${zeroRows} row${zeroRows === 1 ? "" : "s"} with no hours ${zeroRows === 1 ? "was" : "were"} ignored.`);
-  if (ignoredRows > 0) warnings.push(`${ignoredRows} row${ignoredRows === 1 ? "" : "s"} with no usable date or hours ${ignoredRows === 1 ? "was" : "were"} ignored.`);
+  if (zeroRows > 0)
+    warnings.push(
+      `${zeroRows} row${zeroRows === 1 ? "" : "s"} with no hours ${zeroRows === 1 ? "was" : "were"} ignored.`,
+    );
+  if (ignoredRows > 0)
+    warnings.push(
+      `${ignoredRows} row${ignoredRows === 1 ? "" : "s"} with no usable date or hours ${ignoredRows === 1 ? "was" : "were"} ignored.`,
+    );
   if (!person.name && !person.ni) {
-    warnings.push("No name or NI number was found above the table, so this person cannot be matched yet.");
+    warnings.push(
+      "No name or NI number was found above the table, so this person cannot be matched yet.",
+    );
   } else if (person.ni && !isValidNi(person.ni)) {
-    warnings.push("The NI number on the sheet does not look valid (2 letters, 6 digits, then A to D). Check for typos.");
+    warnings.push(
+      "The NI number on the sheet does not look valid (2 letters, 6 digits, then A to D). Check for typos.",
+    );
   }
   if (normNi(person.ni).length === 0 && person.name) {
     warnings.push("The sheet has no NI number, so the person can only be matched by name.");

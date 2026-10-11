@@ -1,7 +1,16 @@
 # LedgerFlow: kaam ka plan
 
 Ye file batati hai ke hamne kya karna tha, kya ho chuka hai, aur kya baqi hai.
-Aakhri update: 12 Oct 2026 (Timesheet Check Phase C: typed PDF aur Word).
+Aakhri update: 12 Oct 2026 (Step 1: pre-AI operational fixes).
+
+## Current instructions (12 Oct 2026)
+
+- Step 1 mein user ne dashboard, tasks/activity, report filters, Timesheet matching aur pre-AI document upload fixes authorize kiye.
+- Purane working Salary, Payroll aur Staff Excel workflows unchanged rehne hain.
+- Ab sample/mock UI phase nahi: operational modules existing database data use karte hain.
+- AI photos/scanned PDFs last step mein; abhi implement nahi kiye.
+- Database reset aur production deployment nahi karna. Testing aur production accounts alag hain.
+- Neeche purana plan history hai; current instructions ko priority deni hai.
 
 ## Kaam karne ka tareeqa
 
@@ -209,3 +218,30 @@ Har naye screen par jorte waqt (purani hidayat): "Preview" wala notice hatao, `R
 
 - UI: 7 naye screens ban chuke aur dark redesign pehle se lag chuka hai. **UI ka kaam poora.**
 - Backend: **Timesheet Check asli data se juda hai (Phase B aur C: Excel, CSV, typed PDF, Word)**. Tasks, Payslips, Invoice Drafts, Follow-ups, Bank Match aur Owner Overview bhi asli. **Koi screen sample data par nahi rahi.**
+
+
+## Step 1 completed: pre-AI operational fixes (12 Oct 2026)
+
+- Dashboard greeting, date and live clock use Europe/London (automatic GMT/BST). Hardcoded operational-status badge removed.
+- Dashboard reads actual audit activity: actor, action and record label. Admin sees all activity, others only their own. Query failures are shown.
+- Tasks dashboard and Tasks page show current totals per assigned user. Task cards/table show owner, creator, completion actor and last action actor. Existing assignment, transitions, permissions and history retained.
+- Reports: company, client, invoice status, overdue, invoice/client/description search and inclusive date filters; invoice detail table, credit-aware outstanding, payment ownership from invoice, statements with opening balance and issued/applied credit notes. Invalid date ranges show a message.
+- Timesheet identity reader handles a combined Name/NI line and NIN labels. Admin can correct the name/NI read from the uploaded sheet and recheck, without editing Staff or shifts. Name-only matches still require confirmation; differing NI or duplicate names are not merged. Corrected identity reserves the unique person/month key before recheck.
+- Existing saved sheets can be checked again from their detail page/month action. Client's actual failing sheet was not provided, so its specific cause is not yet verified.
+- Bank Match accepts typed PDF tables and Word (.docx) tables in addition to existing CSV/Excel. PDF columns retain blank credit/debit cells. PDF/Word require an explicit review before upload. Existing payment matching/confirmation flow is retained.
+- Bank PDFs require recognized headers on every page and a stable table layout, max 30 pages; unsupported layouts/scans fail with a message. Timesheet PDF max-page handling now rejects oversized PDFs instead of truncating them.
+- No AI/OCR, no new packages, no database reset, no new SQL migration, no deployment. Existing schema migrations still need to be present in whichever test/production DB runs these modules.
+
+### Verification
+
+- `npm run build`: passed.
+- `node --import tsx scripts/pre-ai-check.ts`: passed (fake identity/header fixtures, bank dates/amounts/PDF columns, London GMT/BST and date rollover).
+- In-memory PostgreSQL matching checks: passed for formatted NI, normalized unique name, duplicate names, NI conflicts, missing identity, duplicate NI. Fake rows only; no connected DB was used.
+- Actual typed PDF text extraction and Word/CSV/Excel parsing: passed with fake fixtures in Node. Existing sample timesheet Word also passed.
+- Reports server-render checks: passed for company/client/search/date filters, opening balance, credit notes and invalid date ranges.
+- TypeScript: baseline had 27 errors; current project has 8 pre-existing errors in ClientDialog, InvoiceDialog, letterhead, ledger store, staffTrash and root error handler. Changed modules have no type errors. These older modules were not changed.
+- Authenticated browser UI/upload flow was NOT verified. Browser runtime was unavailable. Test the overlay on the user's separate test hosting before production transfer.
+
+### Next separate step
+
+AI photo/scanned-PDF reading with review and an AI key, then remaining business rules/load/parallel-run verification already listed in this plan. This delivery does not claim full production readiness.

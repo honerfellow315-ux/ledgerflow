@@ -1,8 +1,17 @@
+import { TaskWorkload } from "@/components/app/tasks/TaskWorkload";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Clock, Plus, Search } from "@/lib/icons";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Clock,
+  Plus,
+  Search,
+} from "@/lib/icons";
 import { RequireView } from "@/components/app/RequireView";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
@@ -19,7 +28,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Pill } from "@/components/app/timesheets/badges";
 import {
   NewTaskDialog,
@@ -37,7 +52,10 @@ export const Route = createFileRoute("/tasks/")({
   head: () => ({
     meta: [
       { title: "Tasks — LedgerFlow" },
-      { name: "description", content: "Give out tasks, tick them off and check the finished ones." },
+      {
+        name: "description",
+        content: "Give out tasks, tick them off and check the finished ones.",
+      },
     ],
   }),
   component: TasksPage,
@@ -156,7 +174,10 @@ function TasksContent() {
   if (listQ.isError || !data) {
     return (
       <Panel>
-        <EmptyState title="Tasks could not be loaded" description={errorMessage(listQ.error, "Please try again.")} />
+        <EmptyState
+          title="Tasks could not be loaded"
+          description={errorMessage(listQ.error, "Please try again.")}
+        />
       </Panel>
     );
   }
@@ -165,6 +186,12 @@ function TasksContent() {
 
   return (
     <div className="space-y-5">
+      <Panel>
+        <PanelHeader title="Task totals by user" />
+        <div className="p-4">
+          <TaskWorkload />
+        </div>
+      </Panel>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Tasks</h1>
@@ -312,6 +339,8 @@ function TasksContent() {
                   <TH>Day</TH>
                   <TH>Status</TH>
                   <TH>Created by</TH>
+                  <TH>Completed by</TH>
+                  <TH>Last action by</TH>
                   <TH align="right">Action</TH>
                 </TR>
               </THead>
@@ -332,6 +361,13 @@ function TasksContent() {
                       <TaskStatusBadge status={t.status} />
                     </TD>
                     <TD className="text-muted-foreground">{t.createdBy}</TD>
+                    <TD>
+                      {t.status === "completed" || t.status === "verified"
+                        ? ([...t.events].reverse().find((e) => e.text === "Marked the task as done")
+                            ?.by ?? "—")
+                        : "—"}
+                    </TD>
+                    <TD className="text-muted-foreground">{t.events.at(-1)?.by ?? "—"}</TD>
                     <TD align="right">
                       <div onClick={(e) => e.stopPropagation()}>
                         <TaskActions task={t} canVerify={isAdmin} onMove={move} disabled={busy} />
@@ -349,10 +385,20 @@ function TasksContent() {
               Page {page} of {pages}
             </span>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
                 <ChevronLeft className="size-4" /> Previous
               </Button>
-              <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={page >= pages}
+                onClick={() => setPage((p) => Math.min(pages, p + 1))}
+              >
                 Next <ChevronRight className="size-4" />
               </Button>
             </div>
@@ -377,15 +423,22 @@ function TasksContent() {
         onMove={(id, to) => move(id, to)}
         {...(isAdmin ? { onDelete: (t: Task) => setToDelete(t) } : {})}
       />
-      <AlertDialog open={toDelete !== null} onOpenChange={(o) => (o ? undefined : setToDelete(null))}>
+      <AlertDialog
+        open={toDelete !== null}
+        onOpenChange={(o) => (o ? undefined : setToDelete(null))}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this task?</AlertDialogTitle>
-            <AlertDialogDescription>The task and its activity history are removed for good.</AlertDialogDescription>
+            <AlertDialogDescription>
+              The task and its activity history are removed for good.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep it</AlertDialogCancel>
-            <AlertDialogAction onClick={() => toDelete && remove(toDelete)}>Delete</AlertDialogAction>
+            <AlertDialogAction onClick={() => toDelete && remove(toDelete)}>
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
