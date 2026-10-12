@@ -1,7 +1,12 @@
+import {
+  lockInvoiceNumbers,
+  nextInvoiceNumber,
+  checkInvoiceNumber,
+} from "../server/invoiceNumbers";
 import { createServerFn } from "@tanstack/react-start";
 import { eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../server/db";
+import { db, withTransaction } from "../server/db";
 import { invoices, invoiceLineItems, settings } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
 import { uid } from "../server/id";
@@ -16,6 +21,7 @@ const invoiceLineItemInput = z.object({
 });
 
 const invoiceInput = z.object({
+  autoNumber: z.boolean().optional(),
   number: z.string().min(1),
   clientId: z.string().min(1),
   month: z.string().optional(),
@@ -113,73 +119,88 @@ export const listInvoices = createServerFn({ method: "GET" }).handler(async () =
 
 export const addInvoice = createServerFn({ method: "POST" })
   .validator(invoiceInput)
-  .handler(async ({ data }) => {
-    const actor = await requirePermission("invoices", "create");
-    const { lineItems, ...invoiceFields } = data;
-    const amountExVat =
-      lineItems && lineItems.length > 0 ? sumLineItems(lineItems) : invoiceFields.amountExVat;
+  .handler(async ({ data }) =>
+    withTransaction(async () => {
+      const actor = await requirePermission("invoices", "create");
+      await lockInvoiceNumbers();
+      const { lineItems, autoNumber, ...invoiceFields } = data;
+      if (autoNumber) invoiceFields.number = await nextInvoiceNumber(invoiceFields.clientId);
+      await checkInvoiceNumber(invoiceFields.number, invoiceFields.clientId);
+      const amountExVat =
+        lineItems && lineItems.length > 0 ? sumLineItems(lineItems) : invoiceFields.amountExVat;
 
-    const [row] = await db
-      .insert(invoices)
-      .values({ id: uid("inv"), ...invoiceFields, amountExVat })
-      .returning();
+      const [row] = await db
+        .insert(invoices)
+        .values({ id: uid("inv"), ...invoiceFields, amountExVat })
+        .returning();
 
-    if (row) {
-      if (lineItems) {
-        await replaceLineItems(row.id, lineItems);
+      if (row) {
+        if (lineItems) {
+          await replaceLineItems(row.id, lineItems);
+        }
+        try {
+          await db
+            .update(settings)
+            .set({ nextInvoiceNumber: sql`${settings.nextInvoiceNumber} + 1` })
+            .where(eq(settings.id, "default"));
+        } catch (err) {
+          console.error("addInvoice: failed to bump nextInvoiceNumber", err);
+        }
+        await recordActivity({
+          actor,
+          action: "created",
+          module: "invoices",
+          entityId: row.id,
+          label: `Invoice ${row.number}`,
+        });
       }
-      try {
-        await db
-          .update(settings)
-          .set({ nextInvoiceNumber: sql`${settings.nextInvoiceNumber} + 1` })
-          .where(eq(settings.id, "default"));
-      } catch (err) {
-        console.error("addInvoice: failed to bump nextInvoiceNumber", err);
-      }
-      await recordActivity({
-        actor,
-        action: "created",
-        module: "invoices",
-        entityId: row.id,
-        label: `Invoice ${row.number}`,
-      });
-    }
 
-    return row && stripNulls({ ...row, lineItems: lineItems ?? [] });
-  });
+      return row && stripNulls({ ...row, lineItems: lineItems ?? [] });
+    }),
+  );
 
 export const updateInvoice = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string(), patch: invoiceInput.partial() }))
-  .handler(async ({ data }) => {
-    // Note: Agar invoice update ke dauran approval status bhi update ho raha hai to edit permission se handle ho jaata hai
-    const actor = await requirePermission("invoices", "edit");
-    const { lineItems, ...patchFields } = data.patch;
-    if (lineItems && lineItems.length > 0) {
-      (patchFields as { amountExVat?: number }).amountExVat = sumLineItems(lineItems);
-    }
-
-    const [row] = await db
-      .update(invoices)
-      .set(patchFields)
-      .where(eq(invoices.id, data.id))
-      .returning();
-
-    if (row) {
-      if (lineItems) {
-        await replaceLineItems(row.id, lineItems);
+  .handler(async ({ data }) =>
+    withTransaction(async () => {
+      // Note: Agar invoice update ke dauran approval status bhi update ho raha hai to edit permission se handle ho jaata hai
+      const actor = await requirePermission("invoices", "edit");
+      await lockInvoiceNumbers();
+      const { lineItems, autoNumber: _autoNumber, ...patchFields } = data.patch;
+      const [current] = await db.select().from(invoices).where(eq(invoices.id, data.id));
+      if (!current) throw new Error("Invoice no longer exists.");
+      await checkInvoiceNumber(
+        patchFields.number ?? current.number,
+        patchFields.clientId ?? current.clientId,
+        data.id,
+      );
+      if (lineItems && lineItems.length > 0) {
+        (patchFields as { amountExVat?: number }).amountExVat = sumLineItems(lineItems);
       }
-      await recordActivity({
-        actor,
-        action: "updated",
-        module: "invoices",
-        entityId: row.id,
-        label: `Invoice ${row.number}`,
-        details: changedFieldsSummary(data.patch),
-      });
-    }
 
-    return row && stripNulls({ ...row, ...(lineItems ? { lineItems } : {}) });
-  });
+      const [row] = await db
+        .update(invoices)
+        .set(patchFields)
+        .where(eq(invoices.id, data.id))
+        .returning();
+
+      if (row) {
+        if (lineItems) {
+          await replaceLineItems(row.id, lineItems);
+        }
+        await recordActivity({
+          actor,
+          action: "updated",
+          module: "invoices",
+          entityId: row.id,
+          label: `Invoice ${row.number}`,
+          details: changedFieldsSummary(data.patch),
+        });
+      }
+
+      return row && stripNulls({ ...row, ...(lineItems ? { lineItems } : {}) });
+    }),
+  );
 
 export const deleteInvoice = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string() }))

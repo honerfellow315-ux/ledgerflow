@@ -11,7 +11,11 @@ import { SummaryCard } from "@/components/app/SummaryCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/app/timesheets/badges";
-import { ClientDetailDialog, LogFollowUpDialog, type FollowUpInput } from "@/components/app/followUps/FollowUpDialogs";
+import {
+  ClientDetailDialog,
+  LogFollowUpDialog,
+  type FollowUpInput,
+} from "@/components/app/followUps/FollowUpDialogs";
 import { listFollowUps, logFollowUp, type FollowFilter } from "@/lib/actions/followUps";
 import { formatDate, formatMoney } from "@/lib/ledger/calc";
 import { errorMessage } from "@/lib/payroll/queries";
@@ -22,7 +26,10 @@ export const Route = createFileRoute("/follow-ups/")({
   head: () => ({
     meta: [
       { title: "Overdue Follow-ups — LedgerFlow" },
-      { name: "description", content: "Keep track of who is overdue, every chase, and every promise to pay." },
+      {
+        name: "description",
+        content: "Keep track of who is overdue, every chase, and every promise to pay.",
+      },
     ],
   }),
   component: FollowUpsPage,
@@ -111,7 +118,14 @@ function FollowUpsContent() {
     key: Exclude<FollowFilter, "all">,
     tone: "warning" | "success" | "danger" | "default",
   ) => (
-    <SummaryCard label={label} value={String(value)} sublabel={sub} tone={tone} active={filter === key} onClick={() => pick(key)} />
+    <SummaryCard
+      label={label}
+      value={String(value)}
+      sublabel={sub}
+      tone={tone}
+      active={filter === key}
+      onClick={() => pick(key)}
+    />
   );
 
   return (
@@ -119,7 +133,8 @@ function FollowUpsContent() {
       <div>
         <h1 className="text-xl font-semibold text-foreground">Overdue Follow-ups</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          See who is overdue, note every chase, and keep track of every promise to pay. Nothing is emailed from here.
+          See who is overdue, note every chase, and keep track of every promise to pay. Nothing is
+          emailed from here.
         </p>
       </div>
 
@@ -131,9 +146,21 @@ function FollowUpsContent() {
           icon={AlertTriangle}
           tone="danger"
         />
-        {card("Follow-up due", sum?.due ?? 0, "Today or already late", "due", sum?.due ? "warning" : "success")}
+        {card(
+          "Follow-up due",
+          sum?.due ?? 0,
+          "Today or already late",
+          "due",
+          sum?.due ? "warning" : "success",
+        )}
         {card("Promised to pay", sum?.promised ?? 0, "Waiting for the date", "promised", "default")}
-        {card("Never chased", sum?.never ?? 0, "No contact logged", "never", sum?.never ? "warning" : "success")}
+        {card(
+          "Never chased",
+          sum?.never ?? 0,
+          "No contact logged",
+          "never",
+          sum?.never ? "warning" : "success",
+        )}
       </div>
 
       <Panel>
@@ -142,10 +169,14 @@ function FollowUpsContent() {
           {BUCKETS.map((b, i) => (
             <div key={b.label} className="rounded-lg border border-border px-3 py-2.5">
               <p className="text-xs text-muted-foreground">{b.label}</p>
-              <p className="num mt-0.5 text-base font-semibold text-foreground">{formatMoney(sum?.buckets[i] ?? 0)}</p>
+              <p className="num mt-0.5 text-base font-semibold text-foreground">
+                {formatMoney(sum?.buckets[i] ?? 0)}
+              </p>
               <div className="mt-2 h-1.5 rounded-full bg-muted" aria-hidden="true">
                 <div
-                  className={i >= 2 ? "h-1.5 rounded-full bg-destructive" : "h-1.5 rounded-full bg-warning"}
+                  className={
+                    i >= 2 ? "h-1.5 rounded-full bg-destructive" : "h-1.5 rounded-full bg-warning"
+                  }
                   style={{ width: `${Math.round(((sum?.buckets[i] ?? 0) / bucketMax) * 100)}%` }}
                 />
               </div>
@@ -162,7 +193,12 @@ function FollowUpsContent() {
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
-                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients" className="h-9 w-44 pl-8" />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search clients"
+                  className="h-9 w-44 pl-8"
+                />
               </div>
               {filter !== "all" || q ? (
                 <Button
@@ -183,11 +219,18 @@ function FollowUpsContent() {
         {listQ.isLoading ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">Loading…</p>
         ) : listQ.isError ? (
-          <EmptyState title="The list could not be loaded" description={errorMessage(listQ.error, "Please try again.")} />
+          <EmptyState
+            title="The list could not be loaded"
+            description={errorMessage(listQ.error, "Please try again.")}
+          />
         ) : rows.length === 0 ? (
           <EmptyState
             title={(sum?.clients ?? 0) === 0 ? "Nothing is overdue" : "No clients here"}
-            description={(sum?.clients ?? 0) === 0 ? "Every invoice is paid or not yet due." : "Change the filter or search."}
+            description={
+              (sum?.clients ?? 0) === 0
+                ? "Every invoice is paid or not yet due."
+                : "Change the filter or search."
+            }
           />
         ) : (
           <>
@@ -220,7 +263,9 @@ function FollowUpsContent() {
                             <span className="text-[13px]">
                               {c.lastContact.method}, {formatDate(c.lastContact.at.slice(0, 10))}
                             </span>
-                            <span className="line-clamp-1 block text-xs text-muted-foreground">{c.lastContact.note}</span>
+                            <span className="line-clamp-1 block text-xs text-muted-foreground">
+                              {c.lastContact.note}
+                            </span>
                           </>
                         ) : (
                           <Pill tone="bad">Never chased</Pill>
@@ -249,9 +294,16 @@ function FollowUpsContent() {
                         )}
                       </TD>
                       <TD align="right">
-                        <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                        <div
+                          className="flex justify-end gap-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <Button size="sm" variant="outline" asChild>
-                            <Link to="/statements" search={{ client: c.id }} aria-label={`Open statement for ${c.client}`}>
+                            <Link
+                              to="/statements"
+                              search={{ client: c.id }}
+                              aria-label={`Open statement for ${c.client}`}
+                            >
                               <Download className="size-3.5" />
                             </Link>
                           </Button>
@@ -273,10 +325,20 @@ function FollowUpsContent() {
                   Page {page} of {pages}
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
                     <ChevronLeft className="size-4" /> Previous
                   </Button>
-                  <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page >= pages}
+                    onClick={() => setPage((p) => Math.min(pages, p + 1))}
+                  >
                     Next <ChevronRight className="size-4" />
                   </Button>
                 </div>
@@ -286,11 +348,21 @@ function FollowUpsContent() {
         )}
       </Panel>
 
-      <ClientDetailDialog client={detail} canLog={canLog} onClose={() => setDetail(null)} onLog={(c) => setLogging(c)} />
-      <LogFollowUpDialog client={logging} busy={busy} onClose={() => setLogging(null)} onSave={(id, input) => {
-        const c = logging;
-        if (c && c.id === id) void save(c, input);
-      }} />
+      <ClientDetailDialog
+        client={detail}
+        canLog={canLog}
+        onClose={() => setDetail(null)}
+        onLog={(c) => setLogging(c)}
+      />
+      <LogFollowUpDialog
+        client={logging}
+        busy={busy}
+        onClose={() => setLogging(null)}
+        onSave={(id, input) => {
+          const c = logging;
+          if (c && c.id === id) void save(c, input);
+        }}
+      />
     </div>
   );
 }

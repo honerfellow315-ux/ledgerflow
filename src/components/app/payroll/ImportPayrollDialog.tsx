@@ -204,7 +204,9 @@ export function ImportPayrollDialog({
   const problems = preview
     ? preview.rows.filter((r) => ["notFound", "ambiguous", "niConflict"].includes(r.match))
     : [];
-  const writes = preview ? preview.added + preview.updated + preview.created + preview.filledStaff : 0;
+  const writes = preview
+    ? preview.added + preview.updated + preview.created + preview.filledStaff
+    : 0;
   const invalidList = parse ? Object.entries(parse.invalid) : [];
 
   return (
@@ -231,7 +233,9 @@ export function ImportPayrollDialog({
             />
           </Field>
 
-          {reading ? <p className="text-[12px] text-muted-foreground">Reading {fileName}…</p> : null}
+          {reading ? (
+            <p className="text-[12px] text-muted-foreground">Reading {fileName}…</p>
+          ) : null}
           {error ? (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
               {error}
@@ -341,15 +345,16 @@ export function ImportPayrollDialog({
               </div>
               <p className="text-[12px] text-muted-foreground">
                 Hours written: <b className="text-foreground">{num(preview.writtenHours)}</b> ·
-                Amount: <b className="text-foreground">{formatMoney(preview.writtenAmount)}</b> — compare
-                with “Total Working hours” / “Total Amount” at the top of your Excel file.
+                Amount: <b className="text-foreground">{formatMoney(preview.writtenAmount)}</b> —
+                compare with “Total Working hours” / “Total Amount” at the top of your Excel file.
                 {preview.unchanged > 0 ? ` ${preview.unchanged} already match.` : ""}
                 {preview.skipped > 0 ? ` ${preview.skipped} left as they are.` : ""}
               </p>
               {preview.noRate > 0 ? (
                 <p className="rounded-md border border-amber-400/50 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-                  {preview.noRate} line{preview.noRate === 1 ? "" : "s"} will have a rate of 0 (no rate in
-                  the file and no company default) — their amount will show 0 until you set a rate.
+                  {preview.noRate} line{preview.noRate === 1 ? "" : "s"} will have a rate of 0 (no
+                  rate in the file and no company default) — their amount will show 0 until you set
+                  a rate.
                 </p>
               ) : null}
               {problems.length > 0 ? (
@@ -383,11 +388,15 @@ export function ImportPayrollDialog({
                         <td className="px-2">{r.name}</td>
                         <td className="px-2">{MATCH_LABEL[r.match]}</td>
                         <td className="px-2">{LINE_LABEL[r.line]}</td>
-                        <td className="px-2 text-right">{r.line === "none" ? "—" : num(r.unitsHours)}</td>
+                        <td className="px-2 text-right">
+                          {r.line === "none" ? "—" : num(r.unitsHours)}
+                        </td>
                         <td className="px-2 text-right">
                           {r.line === "none" ? "—" : num(r.bankHolidayHours)}
                         </td>
-                        <td className="px-2 text-right">{r.line === "none" ? "—" : num(r.totalHours)}</td>
+                        <td className="px-2 text-right">
+                          {r.line === "none" ? "—" : num(r.totalHours)}
+                        </td>
                         <td className="px-2 text-right">{r.line === "none" ? "—" : num(r.rate)}</td>
                         <td className="px-2 text-right">
                           {r.line === "none" ? "—" : formatMoney(r.amount)}

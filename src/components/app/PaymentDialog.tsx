@@ -396,7 +396,8 @@ export function PaymentDialog({
               <p className="text-[12.5px]">
                 Payroll part of this invoice: {formatHours(selected.payrollHours ?? 0)} h × £
                 {selected.payrollRate} ={" "}
-                <span className="num font-semibold">{formatMoney(payrollDue)}</span> still to record.
+                <span className="num font-semibold">{formatMoney(payrollDue)}</span> still to
+                record.
               </p>
               <Button
                 type="button"

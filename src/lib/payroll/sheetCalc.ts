@@ -25,7 +25,9 @@ export interface LineTotals {
 
 export function lineTotals(
   l: Pick<PayrollLine, "unitsHours" | "bankHolidayHours" | "rate"> &
-    Partial<Pick<PayrollLine, "holidayEntitlement" | "fixedAmount" | "holidayRate" | "uniformCost">>,
+    Partial<
+      Pick<PayrollLine, "holidayEntitlement" | "fixedAmount" | "holidayRate" | "uniformCost">
+    >,
 ): LineTotals {
   const totalHours = round2(n(l.unitsHours) + n(l.bankHolidayHours));
   if (typeof l.fixedAmount === "number" && Number.isFinite(l.fixedAmount)) {

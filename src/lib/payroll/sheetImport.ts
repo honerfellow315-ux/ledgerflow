@@ -229,7 +229,12 @@ function combineParts(parts: readonly LineValues[]): LineValues {
       (a, b) =>
         num(b.unitsHours) + num(b.bankHolidayHours) - (num(a.unitsHours) + num(a.bankHolidayHours)),
     )[0]!.rate;
-  } else if (totalHours === 0 && num(entitlement) === 0 && !(num(rate) > 0) && num(fileAmount) > 0) {
+  } else if (
+    totalHours === 0 &&
+    num(entitlement) === 0 &&
+    !(num(rate) > 0) &&
+    num(fileAmount) > 0
+  ) {
     // fixed-pay guard: Rate 0 and a typed Amount
     fixedAmount = round2(num(fileAmount));
   }

@@ -52,11 +52,46 @@ export interface StatementInfo {
 /* ------------------------------ text helpers ------------------------------ */
 
 const PAYMENT_WORDS = new Set([
-  "faster", "payment", "payments", "fp", "fpi", "bacs", "chaps", "transfer", "trf", "standing", "order", "so",
-  "credit", "cr", "dd", "bgc", "tfr", "inv", "invoice", "ref", "from", "bank", "giro", "inward", "received",
+  "faster",
+  "payment",
+  "payments",
+  "fp",
+  "fpi",
+  "bacs",
+  "chaps",
+  "transfer",
+  "trf",
+  "standing",
+  "order",
+  "so",
+  "credit",
+  "cr",
+  "dd",
+  "bgc",
+  "tfr",
+  "inv",
+  "invoice",
+  "ref",
+  "from",
+  "bank",
+  "giro",
+  "inward",
+  "received",
 ]);
 const NAME_STOP = new Set([
-  "ltd", "limited", "plc", "llp", "the", "and", "uk", "group", "services", "service", "co", "company", "of",
+  "ltd",
+  "limited",
+  "plc",
+  "llp",
+  "the",
+  "and",
+  "uk",
+  "group",
+  "services",
+  "service",
+  "co",
+  "company",
+  "of",
 ]);
 
 /** Upper-case letters and digits only. */
@@ -119,9 +154,13 @@ export function textHasClientName(text: string, clientName: string): boolean {
 export const sameMoney = (a: number, b: number): boolean => Math.abs(round2(a - b)) < 0.005;
 
 /** A payment can never be more than what is still owed on the invoice. */
-export const overpays = (amount: number, inv: OpenInvoice): boolean => round2(amount - inv.outstanding) > 0.004;
+export const overpays = (amount: number, inv: OpenInvoice): boolean =>
+  round2(amount - inv.outstanding) > 0.004;
 
-export function compareAmount(amount: number, inv: OpenInvoice): { label: string; tone: "good" | "warn" | "bad" } {
+export function compareAmount(
+  amount: number,
+  inv: OpenInvoice,
+): { label: string; tone: "good" | "warn" | "bad" } {
   const diff = round2(inv.outstanding - amount);
   if (Math.abs(diff) < 0.005) return { label: "Exact amount", tone: "good" };
   if (diff > 0) return { label: `Part payment, ${formatMoney(diff)} would remain`, tone: "warn" };
@@ -138,9 +177,16 @@ function dayGap(a: string, b: string): number {
  * amount on this invoice within a week of the bank date is flagged: a person must tick
  * "record anyway" before it is recorded a second time.
  */
-export function duplicateWarning(line: { date: string; amount: number }, inv: OpenInvoice): string | null {
-  const hit = inv.payments.find((p) => sameMoney(p.amount, line.amount) && dayGap(p.date, line.date) <= 7);
-  return hit ? `A payment of ${formatMoney(hit.amount)} was already recorded on this invoice on ${hit.date}.` : null;
+export function duplicateWarning(
+  line: { date: string; amount: number },
+  inv: OpenInvoice,
+): string | null {
+  const hit = inv.payments.find(
+    (p) => sameMoney(p.amount, line.amount) && dayGap(p.date, line.date) <= 7,
+  );
+  return hit
+    ? `A payment of ${formatMoney(hit.amount)} was already recorded on this invoice on ${hit.date}.`
+    : null;
 }
 
 /* ------------------------------ matching ------------------------------ */
@@ -166,12 +212,20 @@ export function matchLine(
   const text = line.description;
   const hits: Hit[] = [];
   for (const inv of open) {
-    const nameHit = textHasClientName(text, inv.client) || (linkedClientId !== null && linkedClientId === inv.clientId);
-    const numberHit = textHasInvoiceNumber(text, inv.number) || (nameHit && textHasShortRef(text, inv.number));
+    const nameHit =
+      textHasClientName(text, inv.client) ||
+      (linkedClientId !== null && linkedClientId === inv.clientId);
+    const numberHit =
+      textHasInvoiceNumber(text, inv.number) || (nameHit && textHasShortRef(text, inv.number));
     if (numberHit || nameHit) hits.push({ inv, byNumber: numberHit });
   }
   if (hits.length === 0) {
-    return { status: "none", invoiceId: null, candidateIds: [], reason: "Nothing in the bank text points to a client or an invoice." };
+    return {
+      status: "none",
+      invoiceId: null,
+      candidateIds: [],
+      reason: "Nothing in the bank text points to a client or an invoice.",
+    };
   }
 
   const numbered = hits.filter((h) => h.byNumber);
@@ -186,14 +240,22 @@ export function matchLine(
   );
   const rest = hits.filter((h) => !pool.includes(h)).map((h) => h.inv.id);
   const candidateIds = [...ordered.map((h) => h.inv.id), ...rest];
-  const clue = numbered.length > 0 ? "Invoice number found in the bank text" : "Client name found in the bank text";
+  const clue =
+    numbered.length > 0
+      ? "Invoice number found in the bank text"
+      : "Client name found in the bank text";
   const best = ordered[0]!;
 
   if (exact.length === 1) {
     const only = exact[0]!;
     const dup = duplicateWarning(line, only.inv);
     if (dup) return { status: "review", invoiceId: only.inv.id, candidateIds, reason: dup };
-    return { status: "matched", invoiceId: only.inv.id, candidateIds, reason: `${clue} and the amount is exact.` };
+    return {
+      status: "matched",
+      invoiceId: only.inv.id,
+      candidateIds,
+      reason: `${clue} and the amount is exact.`,
+    };
   }
   if (exact.length > 1) {
     return {

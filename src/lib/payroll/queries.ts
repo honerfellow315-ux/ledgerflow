@@ -31,7 +31,11 @@ export const usePeriodSheet = (periodId: string | null) =>
   });
 
 export const useAllPayrollCompanies = (enabled = true) =>
-  useQuery({ queryKey: salaryKeys.companies, queryFn: () => unwrap(listPayrollCompanies()), enabled });
+  useQuery({
+    queryKey: salaryKeys.companies,
+    queryFn: () => unwrap(listPayrollCompanies()),
+    enabled,
+  });
 
 /** Every shift company (RSS, ESS and the ones the client added), incl. switched-off ones. */
 export const useShiftCompanies = (enabled = true) =>

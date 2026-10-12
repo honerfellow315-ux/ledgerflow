@@ -18,8 +18,28 @@
  */
 import type { TsCell, TsMatrix } from "./parseMatrix";
 
-const C = { serial: 0, date: 1, site: 2, start: 3, end: 4, hours: 5, rate: 6, amount: 7, expense: 8 } as const;
-const HEADER: TsCell[] = ["Sr No", "Date", "Site", "Start time", "End time", "Hours", "Rate", "Amount", "Expense"];
+const C = {
+  serial: 0,
+  date: 1,
+  site: 2,
+  start: 3,
+  end: 4,
+  hours: 5,
+  rate: 6,
+  amount: 7,
+  expense: 8,
+} as const;
+const HEADER: TsCell[] = [
+  "Sr No",
+  "Date",
+  "Site",
+  "Start time",
+  "End time",
+  "Hours",
+  "Rate",
+  "Amount",
+  "Expense",
+];
 const WIDTH = HEADER.length;
 
 const MONTH =
@@ -62,7 +82,10 @@ function columnOrder(header: string): number[] {
   return found.length > 0 ? found : [C.hours, C.rate, C.amount, C.expense];
 }
 
-export function parseShiftLine(raw: string, order: number[] = [C.hours, C.rate, C.amount, C.expense]): TsCell[] | null {
+export function parseShiftLine(
+  raw: string,
+  order: number[] = [C.hours, C.rate, C.amount, C.expense],
+): TsCell[] | null {
   const s = tidy(raw);
   const serial = /^(\d{1,3})\s+(?=\S)/.exec(s);
   let serialText = "";
@@ -94,7 +117,11 @@ export function parseShiftLine(raw: string, order: number[] = [C.hours, C.rate, 
   row[C.start] = tm[1]!;
   row[C.end] = tm[2]!;
 
-  const tokens = after.slice(tm.index + tm[0].length).trim().split(" ").filter(Boolean);
+  const tokens = after
+    .slice(tm.index + tm[0].length)
+    .trim()
+    .split(" ")
+    .filter(Boolean);
   const firstPound = tokens.findIndex(isPound);
   if (firstPound >= 0) {
     if (firstPound > 0) row[C.hours] = tokens[0]!;
@@ -111,7 +138,8 @@ export function parseShiftLine(raw: string, order: number[] = [C.hours, C.rate, 
       if (pounds.length >= 3) row[C.expense] = pounds[2]!;
     }
     const post = tokens.slice(i);
-    if (row[C.expense] === null && post.length > 0 && isNumberish(post[0]!)) row[C.expense] = post[0]!;
+    if (row[C.expense] === null && post.length > 0 && isNumberish(post[0]!))
+      row[C.expense] = post[0]!;
   } else {
     tokens.slice(0, order.length).forEach((t, k) => {
       row[order[k]!] = t;
@@ -127,7 +155,8 @@ const LABELS =
   "date of birth|d\\.?o\\.?b\\.?|national insurance(?: number| no\\.?)?|n\\.?\\s?i\\.?(?: number| no\\.?| num)?|" +
   "sia badge(?: no\\.?| number)?|sia licen[cs]e(?: no\\.?| number)?|sort code|expiry date|address|phone|mobile|email|note";
 const NAME_LABELS = /^(?:full name|staff name|employee name|guard name|your name|name)$/i;
-const NI_LABELS = /^(?:national insurance(?: number| no\.?)?|n\.?\s?i\.?(?: number| no\.?| num)?)$/i;
+const NI_LABELS =
+  /^(?:national insurance(?: number| no\.?)?|n\.?\s?i\.?(?: number| no\.?| num)?)$/i;
 const NI_TOKEN = /\b[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D]\b/i;
 
 export function topRows(lines: string[]): TsMatrix {
@@ -157,7 +186,10 @@ export function topRows(lines: string[]): TsMatrix {
 
 export function totalRows(lines: string[]): TsMatrix {
   for (const l of lines) {
-    const m = /total\s+(?:hours?|hrs?)(?:\s+worked)?\s*[:\-]?\s*(\d[\d,]*(?:\.\d+)?(?::\d{2})?)/i.exec(tidy(l));
+    const m =
+      /total\s+(?:hours?|hrs?)(?:\s+worked)?\s*[:-]?\s*(\d[\d,]*(?:\.\d+)?(?::\d{2})?)/i.exec(
+        tidy(l),
+      );
     if (m) return [["Total Hours", m[1]!.replace(/,/g, "")]];
   }
   return [];
@@ -165,7 +197,8 @@ export function totalRows(lines: string[]): TsMatrix {
 
 /* ------------------------------ whole document ------------------------------ */
 
-const isHeaderLine = (l: string) => /\bdate\b/i.test(l) && /\bstart\b/i.test(l) && /\b(?:end|finish)\b/i.test(l);
+const isHeaderLine = (l: string) =>
+  /\bdate\b/i.test(l) && /\bstart\b/i.test(l) && /\b(?:end|finish)\b/i.test(l);
 
 /** Returns null when no timesheet header line is found. */
 export function linesToMatrix(all: string[]): TsMatrix | null {

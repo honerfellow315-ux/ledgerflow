@@ -8,11 +8,16 @@ import type { ImportCheckIssue, ImportCheckReport } from "../payroll/types";
 import { shiftProblems, shiftStats, sheetSourceTotals } from "./salaryShifts";
 import type { Db } from "./shiftImport";
 
-const money = (v: number) => `£${v.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = (v: number) =>
+  `£${v.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const names = (rows: Record<string, unknown>[], key: string) =>
   rows.map((r) => String(r[key] ?? "").trim()).filter(Boolean);
 
-export async function buildImportChecks(db: Db, periodId: string, month: string): Promise<ImportCheckReport> {
+export async function buildImportChecks(
+  db: Db,
+  periodId: string,
+  month: string,
+): Promise<ImportCheckReport> {
   const stats = await shiftStats(db, periodId, month);
   const summary = stats.map((s) => ({
     source: s.source,
@@ -24,7 +29,8 @@ export async function buildImportChecks(db: Db, periodId: string, month: string)
   if (stats.length === 0) return { summary, issues: [] };
 
   const issues: ImportCheckIssue[] = [];
-  const sum = (pick: (s: (typeof stats)[number]) => number) => stats.reduce((t, s) => t + pick(s), 0);
+  const sum = (pick: (s: (typeof stats)[number]) => number) =>
+    stats.reduce((t, s) => t + pick(s), 0);
 
   // 1) shifts nobody could be matched to — their money is on no salary line
   const unmatched = sum((s) => s.unmatchedShifts);

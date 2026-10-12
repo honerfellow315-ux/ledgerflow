@@ -9,7 +9,12 @@ import { formatMonthLabel, formatNi } from "../payroll/calc";
 import { earningLines, payslipTotals, type PayslipRow } from "./data";
 
 const esc = (s: string): string =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 const hrs = (n: number) => String(Number(n.toFixed(2)));
 
@@ -74,7 +79,8 @@ export function printPayslips(rows: readonly PayslipRow[], title: string): Promi
     }
     const frame = document.createElement("iframe");
     frame.setAttribute("aria-hidden", "true");
-    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    frame.style.cssText =
+      "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
     const cleanup = () => window.setTimeout(() => frame.remove(), 1000);
     frame.onload = () => {
       const win = frame.contentWindow;

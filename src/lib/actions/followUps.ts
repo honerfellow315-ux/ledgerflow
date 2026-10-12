@@ -31,7 +31,14 @@ export interface FollowUpPage {
   total: number;
   page: number;
   pageSize: number;
-  summary: { overdue: number; clients: number; due: number; promised: number; never: number; buckets: number[] };
+  summary: {
+    overdue: number;
+    clients: number;
+    due: number;
+    promised: number;
+    never: number;
+    buckets: number[];
+  };
 }
 
 export const listFollowUps = createServerFn({ method: "GET" })
@@ -57,7 +64,12 @@ export const listFollowUps = createServerFn({ method: "GET" })
         return true;
       })
       .filter((c) => (needle ? c.client.toLowerCase().includes(needle) : true))
-      .sort((a, b) => URGENCY[a.state] - URGENCY[b.state] || b.overdue - a.overdue || a.client.localeCompare(b.client));
+      .sort(
+        (a, b) =>
+          URGENCY[a.state] - URGENCY[b.state] ||
+          b.overdue - a.overdue ||
+          a.client.localeCompare(b.client),
+      );
 
     const start = (data.page - 1) * data.pageSize;
     return {
@@ -88,14 +100,22 @@ export const getClientFollowUp = createServerFn({ method: "POST" })
     const res = await db.execute(sql`
       SELECT id, at, method, note, by_name FROM follow_up_contacts
       WHERE client_id = ${data.clientId} ORDER BY at DESC LIMIT 100`);
-    const contacts: Contact[] = (res.rows as { id: string; at: Date | string; method: string; note: string; by_name: string }[]).map((r) => ({
+    const contacts: Contact[] = (
+      res.rows as { id: string; at: Date | string; method: string; note: string; by_name: string }[]
+    ).map((r) => ({
       id: r.id,
       at: new Date(r.at).toISOString(),
       method: r.method,
       note: r.note,
       by: r.by_name,
     }));
-    return { id: c.id, client: c.client, invoices: c.invoices, contacts, contactCount: c.contactCount };
+    return {
+      id: c.id,
+      client: c.client,
+      invoices: c.invoices,
+      contacts,
+      contactCount: c.contactCount,
+    };
   });
 
 const day = z.string().refine(isRealDay, "That is not a real date.");
@@ -114,7 +134,9 @@ export const logFollowUp = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const actor = await requirePermission("followUps", "create");
-    const found = await db.execute(sql`SELECT name FROM clients WHERE id = ${data.clientId} AND deleted_at IS NULL LIMIT 1`);
+    const found = await db.execute(
+      sql`SELECT name FROM clients WHERE id = ${data.clientId} AND deleted_at IS NULL LIMIT 1`,
+    );
     const client = (found.rows[0] as { name: string } | undefined)?.name;
     if (!client) throw new Error("That client no longer exists.");
     const id = uid("fu");

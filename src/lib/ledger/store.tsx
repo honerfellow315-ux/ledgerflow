@@ -159,7 +159,10 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     queryKey: KEYS.subcontracts,
     queryFn: () => unwrap(listSubcontracts()),
   });
-  const creditNotesQ = useQuery({ queryKey: KEYS.creditNotes, queryFn: () => unwrap(listCreditNotes()) });
+  const creditNotesQ = useQuery({
+    queryKey: KEYS.creditNotes,
+    queryFn: () => unwrap(listCreditNotes()),
+  });
   const settingsQ = useQuery({ queryKey: KEYS.settings, queryFn: () => unwrap(getSettings()) });
 
   // Small helper: fire a mutation, then invalidate the list(s) it affects.
@@ -243,7 +246,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     )(patch);
   const deletePayment = action((id: string) => deletePaymentFn({ data: { id } }), [KEYS.payments]);
   const clearInvoicePayments = async (invoiceId: string) => {
-    const toRemove = (asArray(paymentsQ.data)).filter((p) => p.invoiceId === invoiceId);
+    const toRemove = asArray(paymentsQ.data).filter((p) => p.invoiceId === invoiceId);
     try {
       await Promise.all(toRemove.map((p) => deletePaymentFn({ data: { id: p.id } })));
     } finally {
@@ -323,7 +326,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     hours: asArray(hoursQ.data),
     subcontracts: asArray(subcontractsQ.data),
     creditNotes: asArray(creditNotesQ.data),
-    settings: settingsQ.data && !(settingsQ.data instanceof Response) ? settingsQ.data : defaultSettings,
+    settings:
+      settingsQ.data && !(settingsQ.data instanceof Response) ? settingsQ.data : defaultSettings,
   };
 
   const invoiceViews = useMemo(

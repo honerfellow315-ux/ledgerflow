@@ -104,12 +104,12 @@ export function parseUkDate(v: Cell): string | null {
   const s = v.trim();
   let m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/.exec(s);
   if (m) return realDay(+m[1]!, +m[2]!, +m[3]!);
-  m = /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2}|\d{4})(?:[ T,].*)?$/.exec(s);
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})(?:[ T,].*)?$/.exec(s);
   if (m) {
     const y = m[3]!.length === 2 ? 2000 + +m[3]! : +m[3]!;
     return realDay(y, +m[2]!, +m[1]!);
   }
-  m = /^(\d{1,2})[ \-]([A-Za-z]{3,9})[ \-,]+(\d{2}|\d{4})(?:[ T,].*)?$/.exec(s);
+  m = /^(\d{1,2})[ -]([A-Za-z]{3,9})[ -,]+(\d{2}|\d{4})(?:[ T,].*)?$/.exec(s);
   if (m) {
     const mon = MONTHS.indexOf(m[2]!.slice(0, 3).toLowerCase()) + 1;
     const y = m[3]!.length === 2 ? 2000 + +m[3]! : +m[3]!;

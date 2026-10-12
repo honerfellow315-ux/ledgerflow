@@ -7,7 +7,12 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, asc, eq, ilike, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../server/db";
-import { payrollCompanies, payrollLines, payrollSheets, payrollStaff } from "../../../drizzle/schema";
+import {
+  payrollCompanies,
+  payrollLines,
+  payrollSheets,
+  payrollStaff,
+} from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
 import { round2 } from "../payroll/calc";
 import { lineTotals } from "../payroll/sheetCalc";
@@ -175,7 +180,7 @@ export const listPayslips = createServerFn({ method: "GET" })
         rate: payrollLines.rate,
         holidayRate: payrollLines.holidayRate,
         uniformCost: payrollLines.uniformCost,
-  fixedAmount: payrollLines.fixedAmount,
+        fixedAmount: payrollLines.fixedAmount,
       })
       .from(payrollLines)
       .innerJoin(payrollStaff, eq(payrollStaff.id, payrollLines.staffId))
@@ -187,7 +192,11 @@ export const listPayslips = createServerFn({ method: "GET" })
       const t = lineTotals(l);
       pay += t.amount;
       hours += t.totalHours;
-      if (payslipIssue(toRow({ id: "", name: "", ...l }, { company: "", address: "", month: "" })) !== null) needLook++;
+      if (
+        payslipIssue(toRow({ id: "", name: "", ...l }, { company: "", address: "", month: "" })) !==
+        null
+      )
+        needLook++;
     }
 
     return {

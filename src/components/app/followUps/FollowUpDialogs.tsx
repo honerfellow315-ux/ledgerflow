@@ -13,7 +13,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Pill } from "@/components/app/timesheets/badges";
 import { getClientFollowUp } from "@/lib/actions/followUps";
 import { formatDate, formatMoney } from "@/lib/ledger/calc";
@@ -29,7 +35,12 @@ export interface FollowUpInput {
 }
 
 const when = (iso: string) =>
-  new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  new Date(iso).toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
 /* ------------------------------------------------------------- log */
 
@@ -53,7 +64,8 @@ function LogForm({
       <DialogHeader>
         <DialogTitle>Log a follow-up</DialogTitle>
         <DialogDescription>
-          {client.client}, {formatMoney(client.overdue)} overdue. Write what happened in your own words.
+          {client.client}, {formatMoney(client.overdue)} overdue. Write what happened in your own
+          words.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-3">
@@ -85,11 +97,21 @@ function LogForm({
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="fu-promised">Promised to pay on (empty = no promise)</Label>
-            <Input id="fu-promised" type="date" value={promised} onChange={(e) => setPromised(e.target.value)} />
+            <Input
+              id="fu-promised"
+              type="date"
+              value={promised}
+              onChange={(e) => setPromised(e.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="fu-next">Follow up again on</Label>
-            <Input id="fu-next" type="date" value={next} onChange={(e) => setNext(e.target.value)} />
+            <Input
+              id="fu-next"
+              type="date"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+            />
           </div>
         </div>
       </div>
@@ -100,7 +122,12 @@ function LogForm({
         <Button
           disabled={busy || note.trim().length === 0}
           onClick={() =>
-            onSave({ method, note: note.trim(), promisedDate: promised || null, nextFollowUp: next || null })
+            onSave({
+              method,
+              note: note.trim(),
+              promisedDate: promised || null,
+              nextFollowUp: next || null,
+            })
           }
         >
           {busy ? "Saving…" : "Save follow-up"}
@@ -124,7 +151,15 @@ export function LogFollowUpDialog({
   return (
     <Dialog open={client !== null} onOpenChange={(o) => (o ? undefined : onClose())}>
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-        {client ? <LogForm key={client.id} client={client} busy={busy} onCancel={onClose} onSave={(i) => onSave(client.id, i)} /> : null}
+        {client ? (
+          <LogForm
+            key={client.id}
+            client={client}
+            busy={busy}
+            onCancel={onClose}
+            onSave={(i) => onSave(client.id, i)}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -164,7 +199,9 @@ export function ClientDetailDialog({
 
             {detailQ.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
             {detailQ.isError ? (
-              <p className="text-sm text-destructive">{errorMessage(detailQ.error, "The details could not be loaded.")}</p>
+              <p className="text-sm text-destructive">
+                {errorMessage(detailQ.error, "The details could not be loaded.")}
+              </p>
             ) : null}
 
             {d ? (
@@ -229,7 +266,9 @@ export function ClientDetailDialog({
                     </ol>
                   )}
                   {d.contactCount > d.contacts.length ? (
-                    <p className="mt-2 text-xs text-muted-foreground">Showing the latest {d.contacts.length} of {d.contactCount}.</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Showing the latest {d.contacts.length} of {d.contactCount}.
+                    </p>
                   ) : null}
                 </div>
               </>

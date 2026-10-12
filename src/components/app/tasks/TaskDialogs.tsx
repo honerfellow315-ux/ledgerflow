@@ -13,7 +13,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Pill } from "@/components/app/timesheets/badges";
 import type { TaskPerson } from "@/lib/actions/tasks";
 import {
@@ -49,10 +55,19 @@ export function TaskActions({
   if (task.status === "todo")
     return (
       <div className="flex justify-end gap-2">
-        <Button size="sm" variant="outline" disabled={disabled} onClick={() => go("in_progress", "Started the task")}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => go("in_progress", "Started the task")}
+        >
           Start
         </Button>
-        <Button size="sm" disabled={disabled} onClick={() => go("completed", "Marked the task as done")}>
+        <Button
+          size="sm"
+          disabled={disabled}
+          onClick={() => go("completed", "Marked the task as done")}
+        >
           Mark done
         </Button>
       </div>
@@ -60,7 +75,11 @@ export function TaskActions({
   if (task.status === "in_progress")
     return (
       <div className="flex justify-end">
-        <Button size="sm" disabled={disabled} onClick={() => go("completed", "Marked the task as done")}>
+        <Button
+          size="sm"
+          disabled={disabled}
+          onClick={() => go("completed", "Marked the task as done")}
+        >
           Mark done
         </Button>
       </div>
@@ -68,7 +87,12 @@ export function TaskActions({
   if (task.status === "completed")
     return canVerify ? (
       <div className="flex justify-end gap-2">
-        <Button size="sm" variant="outline" disabled={disabled} onClick={() => go("in_progress", "Sent back for more work")}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => go("in_progress", "Sent back for more work")}
+        >
           Send back
         </Button>
         <Button size="sm" disabled={disabled} onClick={() => go("verified", "Verified as correct")}>
@@ -107,7 +131,8 @@ export function TaskDetailDialog({
             <DialogHeader>
               <DialogTitle className="text-base leading-snug">{task.text}</DialogTitle>
               <DialogDescription>
-                For {task.assignee}, {dayLabel(task.date).toLowerCase()}. Created by {task.createdBy}.
+                For {task.assignee}, {dayLabel(task.date).toLowerCase()}. Created by{" "}
+                {task.createdBy}.
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-wrap items-center gap-2">
@@ -254,7 +279,15 @@ function NewTaskForm({
         </Button>
         <Button
           disabled={busy || text.trim().length === 0 || !date}
-          onClick={() => onCreate({ text: text.trim(), notes: notes.trim(), assigneeId: assignee, date, alreadyDone })}
+          onClick={() =>
+            onCreate({
+              text: text.trim(),
+              notes: notes.trim(),
+              assigneeId: assignee,
+              date,
+              alreadyDone,
+            })
+          }
         >
           Add task
         </Button>

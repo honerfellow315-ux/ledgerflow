@@ -1,5 +1,11 @@
 import { ArrowLeft, ArrowRight, Download } from "@/lib/icons";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "@/lib/ledger/calc";
 import { formatMonthLabel } from "@/lib/payroll/calc";
@@ -32,7 +38,8 @@ export function PayslipPreviewDialog({
             <DialogHeader>
               <DialogTitle>Payslip preview</DialogTitle>
               <DialogDescription>
-                {index + 1} of {rows.length} on this page. The printed payslip shows the full NI number.
+                {index + 1} of {rows.length} on this page. The printed payslip shows the full NI
+                number.
               </DialogDescription>
             </DialogHeader>
 
@@ -75,8 +82,12 @@ export function PayslipPreviewDialog({
                   {earningLines(p).map((l) => (
                     <tr key={l.label} className="border-b border-slate-100">
                       <td className="py-2">{l.label}</td>
-                      <td className="num py-2 text-right">{l.hours === null ? "" : hrs(l.hours)}</td>
-                      <td className="num py-2 text-right">{l.rate === null ? "" : formatMoney(l.rate)}</td>
+                      <td className="num py-2 text-right">
+                        {l.hours === null ? "" : hrs(l.hours)}
+                      </td>
+                      <td className="num py-2 text-right">
+                        {l.rate === null ? "" : formatMoney(l.rate)}
+                      </td>
                       <td className="num py-2 text-right">{formatMoney(l.amount)}</td>
                     </tr>
                   ))}
@@ -92,13 +103,21 @@ export function PayslipPreviewDialog({
 
               <footer className="mt-4 flex items-center justify-between border-t border-slate-300 pt-3">
                 <span className="font-semibold">Total pay</span>
-                <span className="num text-lg font-semibold">{formatMoney(payslipTotals(p).amount)}</span>
+                <span className="num text-lg font-semibold">
+                  {formatMoney(payslipTotals(p).amount)}
+                </span>
               </footer>
             </article>
 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex gap-2">
-                <Button variant="outline" size="icon" aria-label="Previous payslip" disabled={index === 0} onClick={() => onIndex(index - 1)}>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Previous payslip"
+                  disabled={index === 0}
+                  onClick={() => onIndex(index - 1)}
+                >
                   <ArrowLeft className="size-4" />
                 </Button>
                 <Button

@@ -463,7 +463,13 @@ export function invoiceHoursDisplay(
   subcontracts: SubcontractEntry[],
   paid: number,
   total: number,
-): { total: number; subcontractHours: number; paidHours: number; processed: number; remaining: number } {
+): {
+  total: number;
+  subcontractHours: number;
+  paidHours: number;
+  processed: number;
+  remaining: number;
+} {
   const totalHours = invoice.hours ?? 0;
   const subcontractHours = processedHoursForInvoice(invoice.id, subcontracts);
   const paidHours = paidHoursForInvoice(invoice, paid, total);
@@ -593,7 +599,9 @@ export function suggestNextInvoiceNumber(args: {
   const { invoices, clients, clientId, prefix, fallbackNext } = args;
   const companyOf = new Map(clients.map((c) => [c.id, c.companyId ?? null]));
   const scope = companyOf.get(clientId) ?? null;
-  const inScope = invoices.filter((i) => (companyOf.get(i.clientId) ?? null) === scope);
+  const inScope = invoices.filter((i) =>
+    scope ? companyOf.get(i.clientId) === scope : i.clientId === clientId,
+  );
 
   const highestIn = (pfx: string, pool: Invoice[]) => {
     let best: { value: number; width: number } | null = null;

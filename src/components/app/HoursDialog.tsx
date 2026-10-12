@@ -169,7 +169,8 @@ export function HoursDialog({
 
     if (form.payrollRate.trim() !== "") {
       const pr = Number(form.payrollRate);
-      if (!Number.isFinite(pr) || pr < 0) next.payrollRate = "Payroll rate must be a number, 0 or more.";
+      if (!Number.isFinite(pr) || pr < 0)
+        next.payrollRate = "Payroll rate must be a number, 0 or more.";
     }
 
     if (

@@ -106,7 +106,9 @@ export function ShiftCompaniesDialog({
                 }
               >
                 <span className="num font-semibold">{c.code}</span>
-                {c.name !== c.code ? <span className="text-muted-foreground"> · {c.name}</span> : null}
+                {c.name !== c.code ? (
+                  <span className="text-muted-foreground"> · {c.name}</span>
+                ) : null}
               </span>
               <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
                 {c.active ? "On" : "Off"}

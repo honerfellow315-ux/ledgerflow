@@ -18,19 +18,27 @@ export async function recomputeFromShifts(db: Db, periodId: string): Promise<voi
   await db.execute(sql`
     UPDATE salary_shifts sh SET staff_id = s.id FROM payroll_staff s
     WHERE sh.period_id = ${periodId} AND sh.staff_id IS NULL AND sh.source = 'RSS'
-      AND sh.employee_id <> '' AND s.rss_id = sh.employee_id`);
+      AND sh.employee_id <> '' AND s.rss_id = sh.employee_id
+      AND (SELECT count(*) FROM payroll_staff x WHERE x.rss_id=sh.employee_id)=1
+      AND (sh.ni='' OR s.ni='' OR upper(regexp_replace(sh.ni,'[^A-Za-z0-9]','','g'))=upper(regexp_replace(s.ni,'[^A-Za-z0-9]','','g')))`);
   await db.execute(sql`
     UPDATE salary_shifts sh SET staff_id = s.id FROM payroll_staff s
     WHERE sh.period_id = ${periodId} AND sh.staff_id IS NULL AND sh.source = 'ESS'
-      AND sh.employee_id <> '' AND s.ess_id = sh.employee_id`);
+      AND sh.employee_id <> '' AND s.ess_id = sh.employee_id
+      AND (SELECT count(*) FROM payroll_staff x WHERE x.ess_id=sh.employee_id)=1
+      AND (sh.ni='' OR s.ni='' OR upper(regexp_replace(sh.ni,'[^A-Za-z0-9]','','g'))=upper(regexp_replace(s.ni,'[^A-Za-z0-9]','','g')))`);
   await db.execute(sql`
     UPDATE salary_shifts sh SET staff_id = s.id FROM payroll_staff s
     WHERE sh.period_id = ${periodId} AND sh.staff_id IS NULL AND sh.source NOT IN ('RSS', 'ESS')
-      AND sh.employee_id <> '' AND (s.ext_ids ->> sh.source) = sh.employee_id`);
+      AND sh.employee_id <> '' AND (s.ext_ids ->> sh.source) = sh.employee_id
+      AND (SELECT count(*) FROM payroll_staff x WHERE (x.ext_ids ->> sh.source)=sh.employee_id)=1
+      AND (sh.ni='' OR s.ni='' OR upper(regexp_replace(sh.ni,'[^A-Za-z0-9]','','g'))=upper(regexp_replace(s.ni,'[^A-Za-z0-9]','','g')))`);
   await db.execute(sql`
     UPDATE salary_shifts sh SET staff_id = s.id FROM payroll_staff s
     WHERE sh.period_id = ${periodId} AND sh.staff_id IS NULL AND sh.ni <> '' AND s.ni <> ''
-      AND upper(regexp_replace(sh.ni, '[^A-Za-z0-9]', '', 'g')) = upper(regexp_replace(s.ni, '[^A-Za-z0-9]', '', 'g'))`);
+      AND upper(regexp_replace(sh.ni, '[^A-Za-z0-9]', '', 'g')) = upper(regexp_replace(s.ni, '[^A-Za-z0-9]', '', 'g'))
+      AND (SELECT count(*) FROM payroll_staff x WHERE upper(regexp_replace(x.ni,'[^A-Za-z0-9]','','g'))=upper(regexp_replace(sh.ni,'[^A-Za-z0-9]','','g')))=1
+      AND (sh.employee_id='' OR coalesce(CASE sh.source WHEN 'RSS' THEN s.rss_id WHEN 'ESS' THEN s.ess_id ELSE s.ext_ids->>sh.source END,'') IN ('',sh.employee_id))`);
 
   // 2) aggregate per person: RSS and ESS have their own columns
   await db.execute(sql`
@@ -69,9 +77,11 @@ export async function recomputeFromShifts(db: Db, periodId: string): Promise<voi
         (SELECT jsonb_object_agg(x.src, jsonb_build_object('amount', x.amt, 'hours', x.hrs))
          FROM (
            SELECT sh.source AS src,
-                  ${INCLUDE_EXPENSES_AND_PENALTY
-                    ? sql`round(sum(sh.amount + sh.expenses - sh.penalty), 2)`
-                    : sql`round(sum(sh.amount), 2)`} AS amt,
+                  ${
+                    INCLUDE_EXPENSES_AND_PENALTY
+                      ? sql`round(sum(sh.amount + sh.expenses - sh.penalty), 2)`
+                      : sql`round(sum(sh.amount), 2)`
+                  } AS amt,
                   round(sum(sh.hours), 2) AS hrs
            FROM salary_shifts sh
            WHERE sh.period_id = e2.period_id AND sh.staff_id = e2.staff_id
@@ -107,7 +117,11 @@ const f = (v: unknown) => Math.round(Number(v ?? 0) * 100) / 100;
 const n = (v: unknown) => Number(v ?? 0);
 
 /** What was imported, per shift company, split by matched / unmatched / problem shifts. */
-export async function shiftStats(db: Db, periodId: string, month: string): Promise<ShiftStatsRow[]> {
+export async function shiftStats(
+  db: Db,
+  periodId: string,
+  month: string,
+): Promise<ShiftStatsRow[]> {
   const amt = INCLUDE_EXPENSES_AND_PENALTY ? sql`(amount + expenses - penalty)` : sql`amount`;
   const res = await db.execute(sql`
     SELECT source,

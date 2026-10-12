@@ -3,14 +3,7 @@
  *  - "Summary": one line per sheet, either "All correct" or how many issues it has.
  *  - "Issues": only the rows that need a look, so a correct sheet never clutters it.
  */
-import {
-  fmtDate,
-  fmtDiff,
-  maskNi,
-  sheetTotals,
-  type RowResult,
-  type TimesheetSheet,
-} from "./data";
+import { fmtDate, fmtDiff, maskNi, sheetTotals, type RowResult, type TimesheetSheet } from "./data";
 
 const ISSUE_LABEL: Record<RowResult, string> = {
   match: "Matches",
@@ -30,7 +23,11 @@ export async function downloadTimesheetReport(sheets: readonly TimesheetSheet[])
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
 
-  const fill = (argb: string) => ({ type: "pattern" as const, pattern: "solid" as const, fgColor: { argb } });
+  const fill = (argb: string) => ({
+    type: "pattern" as const,
+    pattern: "solid" as const,
+    fgColor: { argb },
+  });
   const headRow = (ws: import("exceljs").Worksheet) => {
     const r = ws.getRow(1);
     r.font = { bold: true };

@@ -91,7 +91,8 @@ export function CompanyClientPicker({
     }
     return list.map((c) => {
       const base = c.name || c.company;
-      const dup = (count.get(base.trim().toLowerCase()) ?? 0) > 1 && c.company && c.company !== base;
+      const dup =
+        (count.get(base.trim().toLowerCase()) ?? 0) > 1 && c.company && c.company !== base;
       return {
         id: c.id,
         label:

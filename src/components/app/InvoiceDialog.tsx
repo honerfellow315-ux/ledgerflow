@@ -272,6 +272,7 @@ export function InvoiceDialog({
     duplicateFrom,
     additionalFor,
     defaultClientId,
+    data,
     data.clients,
     data.companies,
     data.invoices,
@@ -444,6 +445,7 @@ export function InvoiceDialog({
     if (duplicate) return fail("That invoice number already exists for this company/client.");
 
     const payload = {
+      autoNumber: !invoice && form.number.trim() === nextInvoiceNumberFor(data, form.clientId),
       number: form.number.trim(),
       clientId: form.clientId,
       invoiceDate: form.invoiceDate,

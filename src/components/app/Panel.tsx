@@ -8,7 +8,9 @@ export function Panel({ children, className }: { children: ReactNode; className?
   // below), which would trap it inside this panel instead of letting it
   // stick to the viewport. Rounded corners are clipped further down
   // instead (PanelHeader's own rounded-t-lg, TableWrap's rounded-b-lg).
-  return <section className={cn("panel min-w-0 max-w-full rounded-xl", className)}>{children}</section>;
+  return (
+    <section className={cn("panel min-w-0 max-w-full rounded-xl", className)}>{children}</section>
+  );
 }
 
 export function PanelHeader({

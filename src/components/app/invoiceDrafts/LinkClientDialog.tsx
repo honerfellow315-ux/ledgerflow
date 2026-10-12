@@ -1,9 +1,21 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { linkShiftClient, listMappableClients } from "@/lib/actions/invoiceDrafts";
 import { errorMessage } from "@/lib/payroll/queries";
 import { unwrap } from "@/lib/unwrap";
@@ -59,7 +71,9 @@ export function LinkClientDialog({
         </DialogHeader>
         <Select value={clientId} onValueChange={setClientId}>
           <SelectTrigger>
-            <SelectValue placeholder={clientsQ.isLoading ? "Loading clients…" : "Choose a client"} />
+            <SelectValue
+              placeholder={clientsQ.isLoading ? "Loading clients…" : "Choose a client"}
+            />
           </SelectTrigger>
           <SelectContent>
             {(clientsQ.data ?? []).map((c) => (
@@ -70,7 +84,9 @@ export function LinkClientDialog({
           </SelectContent>
         </Select>
         {clientsQ.isError ? (
-          <p className="text-[13px] text-destructive">{errorMessage(clientsQ.error, "The clients could not be loaded.")}</p>
+          <p className="text-[13px] text-destructive">
+            {errorMessage(clientsQ.error, "The clients could not be loaded.")}
+          </p>
         ) : null}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>

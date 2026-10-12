@@ -193,7 +193,12 @@ function InvoicesPageContent() {
               .includes(q)
           : true,
       )
-      .sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate));
+      .sort(
+        (a, b) =>
+          b.number.localeCompare(a.number, "en-GB", { numeric: true, sensitivity: "base" }) ||
+          b.invoiceDate.localeCompare(a.invoiceDate) ||
+          b.id.localeCompare(a.id),
+      );
   }, [
     invoiceViewsWithCredit,
     query,
@@ -325,7 +330,12 @@ function InvoicesPageContent() {
             description={`${rows.length} of ${invoiceViewsWithCredit.length} invoices`}
             actions={
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={exportExcel} disabled={rows.length === 0}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportExcel}
+                  disabled={rows.length === 0}
+                >
                   <Download className="size-4" /> Export to Excel
                 </Button>
                 {can("invoices", "create") ? (

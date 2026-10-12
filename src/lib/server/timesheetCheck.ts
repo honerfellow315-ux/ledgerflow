@@ -164,10 +164,14 @@ async function loadRecords(
   const unlinkedBy: SQL[] = [];
   if (niKey.length >= 6) unlinkedBy.push(sql`${shiftNi} = ${niKey}`);
   for (const p of idPairs) {
-    unlinkedBy.push(sql`(${salaryShifts.source} = ${p.source} AND ${salaryShifts.employeeId} = ${p.id})`);
+    unlinkedBy.push(
+      sql`(${salaryShifts.source} = ${p.source} AND ${salaryShifts.employeeId} = ${p.id})`,
+    );
   }
   if (nameKey) {
-    unlinkedBy.push(sql`(${shiftName} = ${nameKey} AND ${shiftNi} = '' AND ${salaryShifts.employeeId} = '')`);
+    unlinkedBy.push(
+      sql`(${shiftName} = ${nameKey} AND ${shiftNi} = '' AND ${salaryShifts.employeeId} = '')`,
+    );
   }
   const unlinkedAny = unlinkedBy.length > 0 ? or(...unlinkedBy) : undefined;
   const whose = unlinkedAny
@@ -188,7 +192,8 @@ async function loadRecords(
     .where(and(whose, gte(salaryShifts.date, from), lte(salaryShifts.date, to)));
 
   const dayTotal = new Map<string, number>();
-  for (const r of rows) if (r.hours > 0) dayTotal.set(r.date, (dayTotal.get(r.date) ?? 0) + r.hours);
+  for (const r of rows)
+    if (r.hours > 0) dayTotal.set(r.date, (dayTotal.get(r.date) ?? 0) + r.hours);
 
   const records: RecordShift[] = [];
   const zeroHourDates = new Set<string>();

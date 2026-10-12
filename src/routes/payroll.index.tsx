@@ -839,301 +839,318 @@ function PayrollPageContent() {
                 ? {
                     onClick: showAttention,
                     active: onlyWarn,
-                    title: onlyWarn ? "Click to show all staff again" : "Click to show only these lines",
+                    title: onlyWarn
+                      ? "Click to show all staff again"
+                      : "Click to show only these lines",
                   }
                 : {})}
             />
           </div>
 
           <div ref={tableRef} className="scroll-mt-4">
-          <Panel>
-            <PanelHeader
-              title={`Payroll — ${filtered.length} of ${rows.length} staff`}
-              description={
-                canSeeDetails
-                  ? "Hours, rate, uniform cost and comment save on blur or Enter. Total hours and amount are calculated."
-                  : "Personal and bank columns need the Staff permission."
-              }
-              actions={
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-                    <Input
-                      className="h-9 w-48 pl-8"
-                      placeholder="Search name or NI"
-                      value={q}
-                      onChange={(e) => setQ(e.target.value)}
-                    />
+            <Panel>
+              <PanelHeader
+                title={`Payroll — ${filtered.length} of ${rows.length} staff`}
+                description={
+                  canSeeDetails
+                    ? "Hours, rate, uniform cost and comment save on blur or Enter. Total hours and amount are calculated."
+                    : "Personal and bank columns need the Staff permission."
+                }
+                actions={
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                      <Input
+                        className="h-9 w-48 pl-8"
+                        placeholder="Search name or NI"
+                        value={q}
+                        onChange={(e) => setQ(e.target.value)}
+                      />
+                    </div>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="h-9 w-36">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL}>All statuses</SelectItem>
+                        <SelectItem value="Active">Active</SelectItem>
+                        <SelectItem value="Need P45">Need P45</SelectItem>
+                        <SelectItem value="P45">P45</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                      <Checkbox
+                        checked={onlyWarn}
+                        onCheckedChange={(v) => setOnlyWarn(v === true)}
+                      />
+                      Warnings only
+                    </label>
                   </div>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="h-9 w-36">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL}>All statuses</SelectItem>
-                      <SelectItem value="Active">Active</SelectItem>
-                      <SelectItem value="Need P45">Need P45</SelectItem>
-                      <SelectItem value="P45">P45</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                    <Checkbox checked={onlyWarn} onCheckedChange={(v) => setOnlyWarn(v === true)} />
-                    Warnings only
-                  </label>
-                </div>
-              }
-            />
-            <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Columns
-              </span>
-              {GROUPS.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  onClick={() => setShown((s) => ({ ...s, [g.id]: !s[g.id] }))}
-                  className={cn(
-                    "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
-                    shown[g.id]
-                      ? "border-primary/30 bg-info-soft text-primary"
-                      : "border-border text-muted-foreground hover:bg-accent",
-                  )}
-                >
-                  {g.label}
-                </button>
-              ))}
-            </div>
-
-            {rows.length === 0 ? (
-              <EmptyState
-                title="No staff on this sheet"
-                {...(canEdit
-                  ? {
-                      description: "Use “Add staff” to pick existing staff or create a new person.",
-                    }
-                  : {})}
+                }
               />
-            ) : (
-              <TableWrap>
-                <Table className="min-w-[1100px]">
-                  <THead>
-                    <tr className="text-[10px] font-bold uppercase tracking-wide">
-                      <th className="sticky left-0 z-20 bg-surface-muted" />
-                      <th
-                        colSpan={10}
-                        className="border-l border-border bg-info-soft px-3 py-1 text-center text-primary"
-                      >
-                        Employment
-                      </th>
-                      {visibleGroups.map((g) => (
+              <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Columns
+                </span>
+                {GROUPS.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setShown((s) => ({ ...s, [g.id]: !s[g.id] }))}
+                    className={cn(
+                      "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                      shown[g.id]
+                        ? "border-primary/30 bg-info-soft text-primary"
+                        : "border-border text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+
+              {rows.length === 0 ? (
+                <EmptyState
+                  title="No staff on this sheet"
+                  {...(canEdit
+                    ? {
+                        description:
+                          "Use “Add staff” to pick existing staff or create a new person.",
+                      }
+                    : {})}
+                />
+              ) : (
+                <TableWrap>
+                  <Table className="min-w-[1100px]">
+                    <THead>
+                      <tr className="text-[10px] font-bold uppercase tracking-wide">
+                        <th className="sticky left-0 z-20 bg-surface-muted" />
                         <th
-                          key={g.id}
-                          colSpan={g.cols.length}
-                          className="border-l border-border px-3 py-1 text-center text-muted-foreground"
+                          colSpan={10}
+                          className="border-l border-border bg-info-soft px-3 py-1 text-center text-primary"
                         >
-                          {g.label}
+                          Employment
                         </th>
-                      ))}
-                      <th className="border-l border-border" />
-                    </tr>
-                    <TR className="h-9">
-                      <TH className="sticky left-0 z-20 min-w-[220px] bg-surface-muted">
-                        Employee name
-                      </TH>
-                      <TH align="right">Units (hours)</TH>
-                      <TH align="right">Bank holiday hrs</TH>
-                      <TH align="right">Holiday entitlement</TH>
-                      <TH align="right">Total hours</TH>
-                      <TH>Comment</TH>
-                      <TH align="right">Rate</TH>
-                      <TH align="right">Holiday rate</TH>
-                      <TH align="right">Fixed amount</TH>
-                      <TH align="right">Uniform cost (£)</TH>
-                      <TH align="right">Amount</TH>
-                      {visibleGroups.flatMap((g) =>
-                        g.cols.map((c) => (
-                          <TH key={`${g.id}-${c.key}`} align={c.align ?? "left"}>
-                            {c.label}
-                          </TH>
-                        )),
-                      )}
-                      <TH align="right">Actions</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {filtered.map((r) => {
-                      const dim = r.staff.contractStatus === "P45" || r.link?.active === false;
-                      return (
-                        <TR key={r.line.id} className={cn(dim && "opacity-70")}>
-                          <TD className="sticky left-0 z-10 bg-background">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{r.staff.name}</span>
-                              {r.warnings.length > 0 ? (
-                                <span
-                                  title={r.warnings.map((w) => w.text).join("\n")}
-                                  className={cn(
-                                    "inline-flex",
-                                    r.warnings.some((w) => w.severity === "error")
-                                      ? "text-destructive"
-                                      : "text-warning",
-                                  )}
+                        {visibleGroups.map((g) => (
+                          <th
+                            key={g.id}
+                            colSpan={g.cols.length}
+                            className="border-l border-border px-3 py-1 text-center text-muted-foreground"
+                          >
+                            {g.label}
+                          </th>
+                        ))}
+                        <th className="border-l border-border" />
+                      </tr>
+                      <TR className="h-9">
+                        <TH className="sticky left-0 z-20 min-w-[220px] bg-surface-muted">
+                          Employee name
+                        </TH>
+                        <TH align="right">Units (hours)</TH>
+                        <TH align="right">Bank holiday hrs</TH>
+                        <TH align="right">Holiday entitlement</TH>
+                        <TH align="right">Total hours</TH>
+                        <TH>Comment</TH>
+                        <TH align="right">Rate</TH>
+                        <TH align="right">Holiday rate</TH>
+                        <TH align="right">Fixed amount</TH>
+                        <TH align="right">Uniform cost (£)</TH>
+                        <TH align="right">Amount</TH>
+                        {visibleGroups.flatMap((g) =>
+                          g.cols.map((c) => (
+                            <TH key={`${g.id}-${c.key}`} align={c.align ?? "left"}>
+                              {c.label}
+                            </TH>
+                          )),
+                        )}
+                        <TH align="right">Actions</TH>
+                      </TR>
+                    </THead>
+                    <TBody>
+                      {filtered.map((r) => {
+                        const dim = r.staff.contractStatus === "P45" || r.link?.active === false;
+                        return (
+                          <TR key={r.line.id} className={cn(dim && "opacity-70")}>
+                            <TD className="sticky left-0 z-10 bg-background">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{r.staff.name}</span>
+                                {r.warnings.length > 0 ? (
+                                  <span
+                                    title={r.warnings.map((w) => w.text).join("\n")}
+                                    className={cn(
+                                      "inline-flex",
+                                      r.warnings.some((w) => w.severity === "error")
+                                        ? "text-destructive"
+                                        : "text-warning",
+                                    )}
+                                  >
+                                    <AlertTriangle className="size-3.5" />
+                                  </span>
+                                ) : null}
+                                {r.link?.active === false ? (
+                                  <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+                                    inactive here
+                                  </span>
+                                ) : null}
+                              </div>
+                            </TD>
+                            <TD align="right">
+                              <NumCell
+                                label={`Units for ${r.staff.name}`}
+                                value={r.line.unitsHours}
+                                disabled={!canEdit}
+                                onCommit={(n) => saveLine(r.line.id, { unitsHours: n })}
+                              />
+                            </TD>
+                            <TD align="right">
+                              <NumCell
+                                label={`Bank holiday hours for ${r.staff.name}`}
+                                value={r.line.bankHolidayHours}
+                                disabled={!canEdit}
+                                onCommit={(n) => saveLine(r.line.id, { bankHolidayHours: n })}
+                              />
+                            </TD>
+                            <TD align="right">
+                              <NumCell
+                                label={`Holiday entitlement for ${r.staff.name}`}
+                                value={r.line.holidayEntitlement}
+                                disabled={!canEdit}
+                                onCommit={(n) =>
+                                  saveLine(r.line.id, {
+                                    holidayEntitlement: n,
+                                    // holiday hours are only paid when a holiday rate is set
+                                    ...(n > 0 &&
+                                    r.line.holidayRate == null &&
+                                    r.line.fixedAmount == null
+                                      ? { holidayRate: HOLIDAY_PAY_RATE }
+                                      : {}),
+                                  })
+                                }
+                              />
+                            </TD>
+                            <TD align="right" mono className="font-semibold">
+                              {hrs(r.totals.totalHours)}
+                            </TD>
+                            <TD>
+                              <CommentCell
+                                value={r.line.comment}
+                                disabled={!canEdit}
+                                onCommit={(v) => saveLine(r.line.id, { comment: v })}
+                              />
+                            </TD>
+                            <TD align="right">
+                              <NumCell
+                                label={`Rate for ${r.staff.name}`}
+                                value={r.line.rate}
+                                disabled={!canEdit}
+                                onCommit={(n) => saveLine(r.line.id, { rate: n })}
+                              />
+                            </TD>
+                            <TD align="right">
+                              <OptionalNumCell
+                                label={`Holiday rate for ${r.staff.name}`}
+                                value={r.line.holidayRate}
+                                disabled={!canEdit}
+                                onCommit={(n) => saveLine(r.line.id, { holidayRate: n })}
+                              />
+                            </TD>
+                            <TD align="right">
+                              <OptionalNumCell
+                                label={`Fixed amount for ${r.staff.name}`}
+                                value={r.line.fixedAmount}
+                                disabled={!canEdit}
+                                placeholder="none"
+                                onCommit={(n) => saveLine(r.line.id, { fixedAmount: n })}
+                              />
+                            </TD>
+                            <TD align="right">
+                              <NumCell
+                                label={`Uniform cost for ${r.staff.name}`}
+                                value={r.line.uniformCost ?? 0}
+                                disabled={!canEdit}
+                                onCommit={(n) => saveLine(r.line.id, { uniformCost: n })}
+                              />
+                            </TD>
+                            <TD align="right" mono className="font-semibold">
+                              {formatMoney(r.totals.amount)}
+                            </TD>
+                            {visibleGroups.flatMap((g) =>
+                              g.cols.map((c) => (
+                                <TD key={`${g.id}-${c.key}`} align={c.align ?? "left"}>
+                                  {c.render(r.staff)}
+                                </TD>
+                              )),
+                            )}
+                            <TD align="right">
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Status, rate and active in this company"
+                                  onClick={() => setStatusFor(r.staff.id)}
                                 >
-                                  <AlertTriangle className="size-3.5" />
-                                </span>
-                              ) : null}
-                              {r.link?.active === false ? (
-                                <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
-                                  inactive here
-                                </span>
-                              ) : null}
-                            </div>
-                          </TD>
-                          <TD align="right">
-                            <NumCell
-                              label={`Units for ${r.staff.name}`}
-                              value={r.line.unitsHours}
-                              disabled={!canEdit}
-                              onCommit={(n) => saveLine(r.line.id, { unitsHours: n })}
-                            />
-                          </TD>
-                          <TD align="right">
-                            <NumCell
-                              label={`Bank holiday hours for ${r.staff.name}`}
-                              value={r.line.bankHolidayHours}
-                              disabled={!canEdit}
-                              onCommit={(n) => saveLine(r.line.id, { bankHolidayHours: n })}
-                            />
-                          </TD>
-                          <TD align="right">
-                            <NumCell
-                              label={`Holiday entitlement for ${r.staff.name}`}
-                              value={r.line.holidayEntitlement}
-                              disabled={!canEdit}
-                              onCommit={(n) =>
-                                saveLine(r.line.id, {
-                                  holidayEntitlement: n,
-                                  // holiday hours are only paid when a holiday rate is set
-                                  ...(n > 0 && r.line.holidayRate == null && r.line.fixedAmount == null
-                                    ? { holidayRate: HOLIDAY_PAY_RATE }
-                                    : {}),
-                                })
-                              }
-                            />
-                          </TD>
-                          <TD align="right" mono className="font-semibold">
-                            {hrs(r.totals.totalHours)}
-                          </TD>
-                          <TD>
-                            <CommentCell
-                              value={r.line.comment}
-                              disabled={!canEdit}
-                              onCommit={(v) => saveLine(r.line.id, { comment: v })}
-                            />
-                          </TD>
-                          <TD align="right">
-                            <NumCell
-                              label={`Rate for ${r.staff.name}`}
-                              value={r.line.rate}
-                              disabled={!canEdit}
-                              onCommit={(n) => saveLine(r.line.id, { rate: n })}
-                            />
-                          </TD>
-                          <TD align="right">
-                            <OptionalNumCell
-                              label={`Holiday rate for ${r.staff.name}`}
-                              value={r.line.holidayRate}
-                              disabled={!canEdit}
-                              onCommit={(n) => saveLine(r.line.id, { holidayRate: n })}
-                            />
-                          </TD>
-                          <TD align="right">
-                            <OptionalNumCell
-                              label={`Fixed amount for ${r.staff.name}`}
-                              value={r.line.fixedAmount}
-                              disabled={!canEdit}
-                              placeholder="none"
-                              onCommit={(n) => saveLine(r.line.id, { fixedAmount: n })}
-                            />
-                          </TD>
-                          <TD align="right">
-                            <NumCell label={`Uniform cost for ${r.staff.name}`} value={r.line.uniformCost ?? 0} disabled={!canEdit} onCommit={(n) => saveLine(r.line.id, { uniformCost: n })} />
-                          </TD>
-                          <TD align="right" mono className="font-semibold">
-                            {formatMoney(r.totals.amount)}
-                          </TD>
-                          {visibleGroups.flatMap((g) =>
-                            g.cols.map((c) => (
-                              <TD key={`${g.id}-${c.key}`} align={c.align ?? "left"}>
-                                {c.render(r.staff)}
-                              </TD>
-                            )),
+                                  <ShieldCheck className="size-3.5" />
+                                </Button>
+                                {canSeeDetails && can("staff", "edit") ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    title="Edit staff details"
+                                    onClick={() => setEditStaffId(r.staff.id)}
+                                  >
+                                    <Pencil className="size-3.5" />
+                                  </Button>
+                                ) : null}
+                                {!locked && can("payroll", "delete") ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive"
+                                    title="Remove from this month"
+                                    onClick={() => setRemoveLine(r)}
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </TD>
+                          </TR>
+                        );
+                      })}
+                      <TR className="h-10 bg-surface-muted font-semibold hover:bg-surface-muted">
+                        <TD className="sticky left-0 z-10 bg-surface-muted">
+                          Total{filtersOn ? " (filtered)" : ""}
+                        </TD>
+                        <TD align="right" mono>
+                          {hrs(totals.unitsHours)}
+                        </TD>
+                        <TD align="right" mono>
+                          {hrs(totals.bankHolidayHours)}
+                        </TD>
+                        <TD />
+                        <TD align="right" mono>
+                          {hrs(totals.totalHours)}
+                        </TD>
+                        <TD />
+                        <TD />
+                        <TD />
+                        <TD />
+                        <TD align="right" mono>
+                          {formatMoney(
+                            filtered.reduce((sum, r) => sum + (r.line.uniformCost ?? 0), 0),
                           )}
-                          <TD align="right">
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                title="Status, rate and active in this company"
-                                onClick={() => setStatusFor(r.staff.id)}
-                              >
-                                <ShieldCheck className="size-3.5" />
-                              </Button>
-                              {canSeeDetails && can("staff", "edit") ? (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  title="Edit staff details"
-                                  onClick={() => setEditStaffId(r.staff.id)}
-                                >
-                                  <Pencil className="size-3.5" />
-                                </Button>
-                              ) : null}
-                              {!locked && can("payroll", "delete") ? (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-destructive"
-                                  title="Remove from this month"
-                                  onClick={() => setRemoveLine(r)}
-                                >
-                                  <Trash2 className="size-3.5" />
-                                </Button>
-                              ) : null}
-                            </div>
-                          </TD>
-                        </TR>
-                      );
-                    })}
-                    <TR className="h-10 bg-surface-muted font-semibold hover:bg-surface-muted">
-                      <TD className="sticky left-0 z-10 bg-surface-muted">
-                        Total{filtersOn ? " (filtered)" : ""}
-                      </TD>
-                      <TD align="right" mono>
-                        {hrs(totals.unitsHours)}
-                      </TD>
-                      <TD align="right" mono>
-                        {hrs(totals.bankHolidayHours)}
-                      </TD>
-                      <TD />
-                      <TD align="right" mono>
-                        {hrs(totals.totalHours)}
-                      </TD>
-                      <TD />
-                      <TD />
-                      <TD />
-                      <TD />
-                      <TD align="right" mono>{formatMoney(filtered.reduce((sum, r) => sum + (r.line.uniformCost ?? 0), 0))}</TD>
-                      <TD align="right" mono>
-                        {formatMoney(totals.amount)}
-                      </TD>
-                      {detailColCount > 0 ? <TD colSpan={detailColCount} /> : null}
-                      <TD />
-                    </TR>
-                  </TBody>
-                </Table>
-              </TableWrap>
-            )}
-          </Panel>
+                        </TD>
+                        <TD align="right" mono>
+                          {formatMoney(totals.amount)}
+                        </TD>
+                        {detailColCount > 0 ? <TD colSpan={detailColCount} /> : null}
+                        <TD />
+                      </TR>
+                    </TBody>
+                  </Table>
+                </TableWrap>
+              )}
+            </Panel>
           </div>
         </>
       )}
@@ -1244,7 +1261,9 @@ function PayrollPageContent() {
                       ...(removeIds.length ? { alsoRemoveStaffIds: removeIds } : {}),
                     },
                   }),
-                removeIds.length ? `Sheet and ${removeIds.length} staff deleted.` : "Sheet deleted.",
+                removeIds.length
+                  ? `Sheet and ${removeIds.length} staff deleted.`
+                  : "Sheet deleted.",
               ).then(() => setSheetId(null));
             }}
           />

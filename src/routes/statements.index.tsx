@@ -1,3 +1,5 @@
+import { multiCompanyClients, groupStatement } from "@/lib/ledger/statementGroups";
+import { GroupedStatement } from "@/components/app/statements/GroupedStatement";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Download, FileText, Printer, Wallet } from "@/lib/icons";
@@ -141,6 +143,9 @@ function StatementsPageContent() {
   const [selectedId, setSelectedId] = useState<string | null>(Route.useSearch().client ?? null);
   // Billing company filter for the client list. ALL_COMPANIES = everyone
   // (the behaviour before this filter existed).
+  const [groupKey, setGroupKey] = useState("");
+  const groups = useMemo(() => multiCompanyClients(data.clients), [data.clients]);
+  const selectedGroup = groups.find((g) => g.key === groupKey);
   const [companyKey, setCompanyKey] = useState<string>(ALL_COMPANIES);
   // "" = every invoice of the client; UNASSIGNED_END_CLIENT = only invoices with
   // no End Client; otherwise one End Client's own statement.
@@ -166,7 +171,7 @@ function StatementsPageContent() {
     () => clientsInCompany(data.clients, companyKey),
     [data.clients, companyKey],
   );
-  const client = useMemo<Client | undefined>(
+  const scopedClient = useMemo<Client | undefined>(
     () =>
       companyClients.find((c) => c.id === selectedId) ??
       companyClients.find((c) => c.status === "active") ??
@@ -174,6 +179,7 @@ function StatementsPageContent() {
     [companyClients, selectedId],
   );
 
+  const client = scopedClient ?? data.clients[0];
   // End Clients used on this client's invoices. The selector only appears when
   // at least one invoice has an End Client set.
   const endClients = useMemo(
@@ -356,7 +362,7 @@ function StatementsPageContent() {
     ? (rows.filter((r) => r.date.slice(0, 7) < selectedMonth).at(-1)?.balance ?? 0)
     : 0;
 
-  const totals = client ? totalsForViews(scopedViews) : null;
+  const totals = totalsForViews(scopedViews);
   const closingBalance = visibleRows.at(-1)?.balance ?? openingBalance;
   // Reconciliation check always compares the *account's* true closing
   // balance (all history) to totalsForClient — not the month-scoped one,
@@ -450,7 +456,17 @@ function StatementsPageContent() {
     });
   };
 
-  if (data.clients.length === 0 || !client || !totals) {
+  if (selectedGroup)
+    return (
+      <GroupedStatement
+        key={selectedGroup.key}
+        name={selectedGroup.name}
+        clients={selectedGroup.clients}
+        onBack={() => setGroupKey("")}
+      />
+    );
+  const companySummary = groupStatement(data, invoiceViews, companyClients);
+  if (data.clients.length === 0) {
     return (
       <Panel>
         <PanelHeader
@@ -465,6 +481,23 @@ function StatementsPageContent() {
     );
   }
 
+  if (!scopedClient || !client)
+    return (
+      <Panel>
+        <PanelHeader title="Statement of Account" />
+        <div className="p-4">
+          <CompanyClientPicker
+            clients={data.clients}
+            companies={data.companies}
+            companyKey={companyKey}
+            clientId=""
+            onCompanyChange={setCompanyKey}
+            onClientChange={setSelectedId}
+          />
+          <p className="mt-4">No clients in this billing company.</p>
+        </div>
+      </Panel>
+    );
   return (
     <>
       <div className="statement-screen space-y-4">
@@ -486,6 +519,24 @@ function StatementsPageContent() {
                 setEndClientFilter("");
               }}
             />
+            {groups.length > 0 ? (
+              <Select
+                value={groupKey || "none"}
+                onValueChange={(v) => setGroupKey(v === "none" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 w-full sm:w-64" aria-label="Multi-company clients">
+                  <SelectValue placeholder="Multi-company clients" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Multi-company clients</SelectItem>
+                  {groups.map((g) => (
+                    <SelectItem key={g.key} value={g.key}>
+                      {g.name} ({g.companyCount} companies)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
             {hasEndClients ? (
               <Select
                 value={effectiveEndClient || "all"}
@@ -525,7 +576,7 @@ function StatementsPageContent() {
                 ))}
               </SelectContent>
             </Select>
-            <div className="flex items-center gap-2 sm:ml-auto">
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
               <Button
                 variant="outline"
                 size="sm"
@@ -558,6 +609,25 @@ function StatementsPageContent() {
           ) : null}
         </Panel>
 
+        <Panel>
+          <PanelHeader
+            title={
+              companyKey === ALL_COMPANIES
+                ? "All billing companies — summary"
+                : "Selected billing company — summary"
+            }
+            description="All clients in this billing scope. Account balance includes payments and issued credit notes."
+          />
+          <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+            <SummaryCard label="Invoiced" value={formatMoney(companySummary.invoiced)} />
+            <SummaryCard label="Received" value={formatMoney(companySummary.received)} />
+            <SummaryCard
+              label="Account balance"
+              value={formatMoney(companySummary.accountBalance)}
+            />
+            <SummaryCard label="Overdue invoices" value={formatMoney(companySummary.overdue)} />
+          </div>
+        </Panel>
         <Panel>
           <PanelHeader
             title={client.company}

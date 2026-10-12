@@ -313,8 +313,17 @@ export const emptyTrash = createServerFn({ method: "POST" }).handler(async () =>
   let removed = 0;
 
   // 1) rows nothing else depends on
-  for (const table of [payments, expenses, hoursEntries, subcontractEntries, creditNotes] as const) {
-    const gone = await db.delete(table).where(isNotNull(table.deletedAt)).returning({ id: table.id });
+  for (const table of [
+    payments,
+    expenses,
+    hoursEntries,
+    subcontractEntries,
+    creditNotes,
+  ] as const) {
+    const gone = await db
+      .delete(table)
+      .where(isNotNull(table.deletedAt))
+      .returning({ id: table.id });
     removed += gone.length;
   }
 
@@ -346,7 +355,12 @@ export const emptyTrash = createServerFn({ method: "POST" }).handler(async () =>
 
   // 4) clients — only those with nothing live left under them
   const liveUnder = (
-    table: typeof invoices | typeof payments | typeof hoursEntries | typeof subcontractEntries | typeof creditNotes,
+    table:
+      | typeof invoices
+      | typeof payments
+      | typeof hoursEntries
+      | typeof subcontractEntries
+      | typeof creditNotes,
   ) =>
     exists(
       db

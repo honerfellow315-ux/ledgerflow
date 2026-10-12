@@ -28,7 +28,8 @@ import {
 type Actor = Parameters<typeof recordActivity>[0]["actor"];
 
 const num = (v: unknown) => Number(v ?? 0);
-const rows = (res: unknown) => ((res as { rows?: Record<string, unknown>[] }).rows ?? []) as Record<string, unknown>[];
+const rows = (res: unknown) =>
+  ((res as { rows?: Record<string, unknown>[] }).rows ?? []) as Record<string, unknown>[];
 
 export interface DraftSet {
   periodFound: boolean;
@@ -38,59 +39,66 @@ export interface DraftSet {
 }
 
 export async function loadDrafts(month: string): Promise<DraftSet> {
-  const [period] = await db.execute(sql`SELECT id, status FROM salary_periods WHERE month = ${month} LIMIT 1`).then(rows);
+  const [period] = await db
+    .execute(sql`SELECT id, status FROM salary_periods WHERE month = ${month} LIMIT 1`)
+    .then(rows);
   if (!period) return { periodFound: false, periodStatus: "", drafts: [], unmatched: [] };
   const periodId = String(period["id"]);
 
-  const [groups, dupes, clientRows, aliasRows, hoursRows, monthInvoices, runRows, setRows] = await Promise.all([
-    db
-      .execute(
-        sql`SELECT client_name AS name, count(*)::int AS shifts, round(sum(hours), 2)::float8 AS hours,
+  const [groups, dupes, clientRows, aliasRows, hoursRows, monthInvoices, runRows, setRows] =
+    await Promise.all([
+      db
+        .execute(
+          sql`SELECT client_name AS name, count(*)::int AS shifts, round(sum(hours), 2)::float8 AS hours,
               (count(*) FILTER (WHERE substr(date, 1, 7) <> ${month}))::int AS outside
             FROM salary_shifts WHERE period_id = ${periodId} AND hours > 0
             GROUP BY client_name`,
-      )
-      .then(rows),
-    db
-      .execute(
-        sql`SELECT client_name AS name, coalesce(sum(c - 1), 0)::int AS dupes FROM (
+        )
+        .then(rows),
+      db
+        .execute(
+          sql`SELECT client_name AS name, coalesce(sum(c - 1), 0)::int AS dupes FROM (
               SELECT client_name, count(*) AS c FROM salary_shifts
               WHERE period_id = ${periodId} AND hours > 0
               GROUP BY source, client_name, coalesce(nullif(employee_id, ''), employee_name), date, site_name, hours, amount
               HAVING count(*) > 1) t GROUP BY client_name`,
-      )
-      .then(rows),
-    db
-      .execute(
-        sql`SELECT id, name, company, account_reference, rate::float8 AS rate, status
+        )
+        .then(rows),
+      db
+        .execute(
+          sql`SELECT id, name, company, account_reference, rate::float8 AS rate, status
             FROM clients WHERE deleted_at IS NULL`,
-      )
-      .then(rows),
-    db.execute(sql`SELECT name_key, client_id FROM invoice_draft_aliases`).then(rows),
-    db
-      .execute(
-        sql`SELECT h.client_id, sum(h.total_hours)::float8 AS th, sum(h.payroll_hours)::float8 AS ph,
+        )
+        .then(rows),
+      db.execute(sql`SELECT name_key, client_id FROM invoice_draft_aliases`).then(rows),
+      db
+        .execute(
+          sql`SELECT h.client_id, sum(h.total_hours)::float8 AS th, sum(h.payroll_hours)::float8 AS ph,
               max(h.payroll_rate)::float8 AS pr, max(h.rate)::float8 AS r,
               max(i.id) AS invoice_id, max(i.number) AS invoice_number
             FROM hours_entries h LEFT JOIN invoices i ON i.id = h.invoice_id AND i.deleted_at IS NULL
             WHERE h.month = ${month} AND h.deleted_at IS NULL GROUP BY h.client_id`,
-      )
-      .then(rows),
-    db
-      .execute(
-        sql`SELECT id, number, client_id FROM invoices
+        )
+        .then(rows),
+      db
+        .execute(
+          sql`SELECT id, number, client_id FROM invoices
             WHERE month = ${month} AND deleted_at IS NULL AND original_invoice_id IS NULL
             ORDER BY number`,
-      )
-      .then(rows),
-    db
-      .execute(
-        sql`SELECT r.client_id, i.id AS invoice_id, i.number FROM invoice_draft_runs r
+        )
+        .then(rows),
+      db
+        .execute(
+          sql`SELECT r.client_id, i.id AS invoice_id, i.number FROM invoice_draft_runs r
             JOIN invoices i ON i.id = r.invoice_id AND i.deleted_at IS NULL WHERE r.month = ${month}`,
-      )
-      .then(rows),
-    db.execute(sql`SELECT default_vat_rate::float8 AS vat FROM settings WHERE id = 'default' LIMIT 1`).then(rows),
-  ]);
+        )
+        .then(rows),
+      db
+        .execute(
+          sql`SELECT default_vat_rate::float8 AS vat FROM settings WHERE id = 'default' LIMIT 1`,
+        )
+        .then(rows),
+    ]);
   const vatRate = setRows[0] ? num(setRows[0]["vat"]) : 20;
 
   const clientById = new Map(clientRows.map((c) => [String(c["id"]), c]));
@@ -106,7 +114,8 @@ export async function loadDrafts(month: string): Promise<DraftSet> {
   }
   const aliasByKey = new Map<string, string>();
   for (const a of aliasRows) {
-    if (clientById.has(String(a["client_id"]))) aliasByKey.set(String(a["name_key"]), String(a["client_id"]));
+    if (clientById.has(String(a["client_id"])))
+      aliasByKey.set(String(a["name_key"]), String(a["client_id"]));
   }
   const dupesByName = new Map(dupes.map((d) => [String(d["name"] ?? ""), num(d["dupes"])]));
 
@@ -134,10 +143,21 @@ export async function loadDrafts(month: string): Promise<DraftSet> {
       }
     }
     if (!clientId) {
-      unmatched.push({ name: name || "(no client name)", shifts: num(g["shifts"]), hours: round2(num(g["hours"])), reason });
+      unmatched.push({
+        name: name || "(no client name)",
+        shifts: num(g["shifts"]),
+        hours: round2(num(g["hours"])),
+        reason,
+      });
       continue;
     }
-    const acc = perClient.get(clientId) ?? { names: new Set<string>(), shifts: 0, hours: 0, outside: 0, dupes: 0 };
+    const acc = perClient.get(clientId) ?? {
+      names: new Set<string>(),
+      shifts: 0,
+      hours: 0,
+      outside: 0,
+      dupes: 0,
+    };
     acc.names.add(name);
     acc.shifts += num(g["shifts"]);
     acc.hours += num(g["hours"]);
@@ -149,10 +169,19 @@ export async function loadDrafts(month: string): Promise<DraftSet> {
   const hoursBy = new Map(hoursRows.map((h) => [String(h["client_id"]), h]));
   const invoicedBy = new Map<string, { id: string; number: string }>();
   for (const h of hoursRows) {
-    if (h["invoice_id"]) invoicedBy.set(String(h["client_id"]), { id: String(h["invoice_id"]), number: String(h["invoice_number"] ?? "") });
+    if (h["invoice_id"])
+      invoicedBy.set(String(h["client_id"]), {
+        id: String(h["invoice_id"]),
+        number: String(h["invoice_number"] ?? ""),
+      });
   }
-  for (const i of monthInvoices) invoicedBy.set(String(i["client_id"]), { id: String(i["id"]), number: String(i["number"]) });
-  for (const r of runRows) invoicedBy.set(String(r["client_id"]), { id: String(r["invoice_id"]), number: String(r["number"]) });
+  for (const i of monthInvoices)
+    invoicedBy.set(String(i["client_id"]), { id: String(i["id"]), number: String(i["number"]) });
+  for (const r of runRows)
+    invoicedBy.set(String(r["client_id"]), {
+      id: String(r["invoice_id"]),
+      number: String(r["number"]),
+    });
 
   const drafts: Draft[] = [];
   for (const [clientId, acc] of perClient) {
@@ -247,40 +276,70 @@ export async function createDraftInvoices(args: {
 
   // Data for the next invoice number, same rule as the invoice screen (suggestNextInvoiceNumber).
   const [settingRow] = await db.select().from(settings).where(eq(settings.id, "default")).limit(1);
-  const companyRows = await db.select({ id: companies.id, invoicePrefix: companies.invoicePrefix }).from(companies);
+  const companyRows = await db
+    .select({ id: companies.id, invoicePrefix: companies.invoicePrefix })
+    .from(companies);
   const prefixOfCompany = new Map(companyRows.map((c) => [c.id, c.invoicePrefix]));
-  const clientsForNumber = (await db.execute(sql`SELECT id, company_id, payment_term_days FROM clients`).then(rows)).map(
-    (c) => ({ id: String(c["id"]), companyId: c["company_id"] ? String(c["company_id"]) : null, terms: c["payment_term_days"] as number | null }),
-  );
+  const clientsForNumber = (
+    await db.execute(sql`SELECT id, company_id, payment_term_days FROM clients`).then(rows)
+  ).map((c) => ({
+    id: String(c["id"]),
+    companyId: c["company_id"] ? String(c["company_id"]) : null,
+    terms: c["payment_term_days"] as number | null,
+  }));
   const termsOf = new Map(clientsForNumber.map((c) => [c.id, c.terms]));
   const existing = (
-    await db.execute(sql`SELECT number, client_id, invoice_date FROM invoices WHERE deleted_at IS NULL`).then(rows)
-  ).map((i) => ({ number: String(i["number"]), clientId: String(i["client_id"]), invoiceDate: String(i["invoice_date"]) }));
+    await db.execute(sql`SELECT number, client_id, invoice_date FROM invoices`).then(rows)
+  ).map((i) => ({
+    number: String(i["number"]),
+    clientId: String(i["client_id"]),
+    invoiceDate: String(i["invoice_date"]),
+  }));
 
   const byName = actor?.displayName || actor?.username || "";
   const uniqueIds = [...new Set(args.clientIds)];
   for (const clientId of uniqueIds) {
     const d = byId.get(clientId);
     if (!d) {
-      result.skipped.push({ clientId, client: clientId, reason: "No shifts for this client this month." });
+      result.skipped.push({
+        clientId,
+        client: clientId,
+        reason: "No shifts for this client this month.",
+      });
       continue;
     }
     const st = draftState(d);
     if (st.state === "done") {
-      result.skipped.push({ clientId, client: d.client, reason: `Already invoiced${d.invoiceNumber ? ` (${d.invoiceNumber})` : ""}.` });
+      result.skipped.push({
+        clientId,
+        client: d.client,
+        reason: `Already invoiced${d.invoiceNumber ? ` (${d.invoiceNumber})` : ""}.`,
+      });
       continue;
     }
     if (!canCreateDraft(st.issues)) {
-      result.skipped.push({ clientId, client: d.client, reason: st.issues.find((i) => i.kind === "hard")?.text ?? "Needs a look." });
+      result.skipped.push({
+        clientId,
+        client: d.client,
+        reason: st.issues.find((i) => i.kind === "hard")?.text ?? "Needs a look.",
+      });
       continue;
     }
     if (st.issues.length > 0 && !allowWarnings) {
-      result.skipped.push({ clientId, client: d.client, reason: `${st.issues[0]?.text ?? "Needs a look"}. Check it, then create it from the draft.` });
+      result.skipped.push({
+        clientId,
+        client: d.client,
+        reason: `${st.issues[0]?.text ?? "Needs a look"}. Check it, then create it from the draft.`,
+      });
       continue;
     }
 
     if (!(await claimRun(clientId, month, byName))) {
-      result.skipped.push({ clientId, client: d.client, reason: "Already invoiced (someone just created it)." });
+      result.skipped.push({
+        clientId,
+        client: d.client,
+        reason: "Already invoiced (someone just created it).",
+      });
       continue;
     }
     try {
@@ -298,7 +357,10 @@ export async function createDraftInvoices(args: {
       const prefix = companyPrefix?.trim() ? companyPrefix : (settingRow?.invoicePrefix ?? "INV-");
       const number = suggestNextInvoiceNumber({
         invoices: existing as unknown as Invoice[],
-        clients: clientsForNumber.map((c) => ({ id: c.id, companyId: c.companyId })) as unknown as Client[],
+        clients: clientsForNumber.map((c) => ({
+          id: c.id,
+          companyId: c.companyId,
+        })) as unknown as Client[],
         clientId,
         prefix,
         fallbackNext: settingRow?.nextInvoiceNumber ?? 1,
@@ -335,12 +397,21 @@ export async function createDraftInvoices(args: {
       if (!row) throw new Error("The invoice could not be saved.");
 
       existing.push({ number: row.number, clientId, invoiceDate: row.invoiceDate });
-      await db.execute(sql`UPDATE invoice_draft_runs SET invoice_id = ${row.id} WHERE client_id = ${clientId} AND month = ${month}`);
+      await db.execute(
+        sql`UPDATE invoice_draft_runs SET invoice_id = ${row.id} WHERE client_id = ${clientId} AND month = ${month}`,
+      );
       // Link the Hours screen entry for this month (only when it is not linked to an invoice yet).
       await db
         .update(hoursEntries)
         .set({ invoiceId: row.id })
-        .where(and(eq(hoursEntries.clientId, clientId), eq(hoursEntries.month, month), isNull(hoursEntries.invoiceId), isNull(hoursEntries.deletedAt)));
+        .where(
+          and(
+            eq(hoursEntries.clientId, clientId),
+            eq(hoursEntries.month, month),
+            isNull(hoursEntries.invoiceId),
+            isNull(hoursEntries.deletedAt),
+          ),
+        );
       try {
         await db
           .update(settings)
@@ -361,10 +432,13 @@ export async function createDraftInvoices(args: {
     } catch (err) {
       // Give the claim back so the draft can be tried again.
       await db
-        .execute(sql`DELETE FROM invoice_draft_runs WHERE client_id = ${clientId} AND month = ${month} AND invoice_id IS NULL`)
+        .execute(
+          sql`DELETE FROM invoice_draft_runs WHERE client_id = ${clientId} AND month = ${month} AND invoice_id IS NULL`,
+        )
         .catch(() => undefined);
-      console.error("createDraftInvoices failed for", clientId, err);
-      result.skipped.push({ clientId, client: d.client, reason: "The invoice could not be saved. Nothing was created for it." });
+      throw new Error(
+        "Invoice drafts could not be saved. No drafts from this request were committed.",
+      );
     }
   }
   return result;

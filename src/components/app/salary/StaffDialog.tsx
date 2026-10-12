@@ -284,8 +284,7 @@ export function StaffDialog({
             patch: { ...(companyScoped ? shared : values), notes: form.notes.trim() },
           },
         });
-      }
-      else saved = await addStaff({ data: values });
+      } else saved = await addStaff({ data: values });
       await onSaved?.(saved, !staff);
       await refresh();
       toast.success(staff ? "Staff updated." : "Staff added.");
@@ -493,7 +492,11 @@ export function StaffDialog({
             </Field>
             <Field
               label="Status"
-              hint={companyScoped && staff ? "Change it from the Status button on the row (per company)." : undefined}
+              hint={
+                companyScoped && staff
+                  ? "Change it from the Status button on the row (per company)."
+                  : undefined
+              }
             >
               <Select
                 value={form.contractStatus || NONE}

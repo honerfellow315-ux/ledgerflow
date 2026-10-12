@@ -30,8 +30,7 @@ export const deleteStaff = createServerFn({ method: "POST" })
         action: "deleted",
         module: "staff",
         entityId: data.ids.length === 1 ? data.ids[0] : undefined,
-        label:
-          result.deleted === 1 ? "Staff — 1 profile" : `Staff — ${result.deleted} profiles`,
+        label: result.deleted === 1 ? "Staff — 1 profile" : `Staff — ${result.deleted} profiles`,
         details: "Moved to the Recycle Bin",
       });
     }

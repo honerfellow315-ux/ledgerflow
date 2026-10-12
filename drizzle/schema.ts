@@ -171,58 +171,65 @@ export const clients = pgTable("clients", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
-export const invoices = pgTable("invoices", {
-  id: text("id").primaryKey(),
-  number: text("number").notNull(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "cascade" }),
-  month: text("month"), // yyyy-mm
-  invoiceDate: text("invoice_date").notNull(), // yyyy-mm-dd
-  dueDate: text("due_date").notNull(), // yyyy-mm-dd
-  poReference: text("po_reference"),
-  // Optional "who this was really billed for" — used when one client record
-  // (e.g. a management/agency account) carries invoices for several end
-  // clients. Plain nullable text: existing rows stay NULL (= unassigned) and
-  // are never modified.
-  endClient: text("end_client"),
-  description: text("description").notNull().default(""),
-  // Optional second description line (printed under the main description).
-  description2: text("description_2"),
-  amountExVat: money("amount_ex_vat").notNull(),
-  // Only set when the invoice was billed as Hours × Rate instead of a fixed
-  // amount. `amountExVat` above always holds the final total either way.
-  hours: numeric("hours", { precision: 10, scale: 2, mode: "number" }),
-  rate: money("rate"),
-  // Payroll split: of `hours`, this many were paid through payroll at
-  // `payrollRate` (no VAT). The remaining hours use `rate`. NULL = no split.
-  payrollHours: numeric("payroll_hours", { precision: 10, scale: 2, mode: "number" }),
-  payrollRate: money("payroll_rate"),
-  vatIncluded: boolean("vat_included").notNull().default(false),
-  vatRate: numeric("vat_rate", { precision: 5, scale: 2, mode: "number" }).notNull().default(20),
-  paymentTerms: text("payment_terms").notNull().default(""),
-  notes: text("notes"),
-  // Approval status — deliberately separate from payment status (see below).
-  approved: boolean("approved").notNull().default(false),
-  // 'full' (default) applies VAT to the whole amountExVat, unchanged from
-  // prior behaviour. 'remaining' applies VAT only to the currently
-  // outstanding ex-VAT balance, never retroactively to amounts already paid.
-  vatMode: text("vat_mode").notNull().default("full"),
-  // Only used when vatMode = 'remaining': the ex-VAT amount that had already
-  // been paid (e.g. a payroll payment) at the moment VAT was applied. VAT is
-  // charged on (amountExVat - vatPaidBefore) and that base is FROZEN — payments
-  // recorded afterwards never shrink it. Null = legacy row (falls back to the
-  // old "paid so far" behaviour).
-  vatPaidBefore: money("vat_paid_before"),
-  // Set when this invoice is an "Additional Invoice" against an original —
-  // a separate, independently-tracked invoice that references but never
-  // modifies the original. Several additional invoices may share one.
-  originalInvoiceId: text("original_invoice_id").references((): AnyPgColumn => invoices.id, {
-    onDelete: "set null",
-  }),
-  // See companies.deletedAt above — same recycle-bin pattern.
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: text("id").primaryKey(),
+    number: text("number").notNull(),
+    billingScope: text("billing_scope"),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    month: text("month"), // yyyy-mm
+    invoiceDate: text("invoice_date").notNull(), // yyyy-mm-dd
+    dueDate: text("due_date").notNull(), // yyyy-mm-dd
+    poReference: text("po_reference"),
+    // Optional "who this was really billed for" — used when one client record
+    // (e.g. a management/agency account) carries invoices for several end
+    // clients. Plain nullable text: existing rows stay NULL (= unassigned) and
+    // are never modified.
+    endClient: text("end_client"),
+    description: text("description").notNull().default(""),
+    // Optional second description line (printed under the main description).
+    description2: text("description_2"),
+    amountExVat: money("amount_ex_vat").notNull(),
+    // Only set when the invoice was billed as Hours × Rate instead of a fixed
+    // amount. `amountExVat` above always holds the final total either way.
+    hours: numeric("hours", { precision: 10, scale: 2, mode: "number" }),
+    rate: money("rate"),
+    // Payroll split: of `hours`, this many were paid through payroll at
+    // `payrollRate` (no VAT). The remaining hours use `rate`. NULL = no split.
+    payrollHours: numeric("payroll_hours", { precision: 10, scale: 2, mode: "number" }),
+    payrollRate: money("payroll_rate"),
+    vatIncluded: boolean("vat_included").notNull().default(false),
+    vatRate: numeric("vat_rate", { precision: 5, scale: 2, mode: "number" }).notNull().default(20),
+    paymentTerms: text("payment_terms").notNull().default(""),
+    notes: text("notes"),
+    // Approval status — deliberately separate from payment status (see below).
+    approved: boolean("approved").notNull().default(false),
+    // 'full' (default) applies VAT to the whole amountExVat, unchanged from
+    // prior behaviour. 'remaining' applies VAT only to the currently
+    // outstanding ex-VAT balance, never retroactively to amounts already paid.
+    vatMode: text("vat_mode").notNull().default("full"),
+    // Only used when vatMode = 'remaining': the ex-VAT amount that had already
+    // been paid (e.g. a payroll payment) at the moment VAT was applied. VAT is
+    // charged on (amountExVat - vatPaidBefore) and that base is FROZEN — payments
+    // recorded afterwards never shrink it. Null = legacy row (falls back to the
+    // old "paid so far" behaviour).
+    vatPaidBefore: money("vat_paid_before"),
+    // Set when this invoice is an "Additional Invoice" against an original —
+    // a separate, independently-tracked invoice that references but never
+    // modifies the original. Several additional invoices may share one.
+    originalInvoiceId: text("original_invoice_id").references((): AnyPgColumn => invoices.id, {
+      onDelete: "set null",
+    }),
+    // See companies.deletedAt above — same recycle-bin pattern.
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("invoices_scope_number_uq").on(t.billingScope, sql`lower(btrim(${t.number}))`),
+  ],
+);
 
 export const invoiceLineItems = pgTable("invoice_line_items", {
   id: text("id").primaryKey(),
@@ -547,7 +554,9 @@ export const payrollLines = pgTable(
     comment: text("comment").notNull().default(""),
     rate: numeric("rate", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
     // NULL = Amount is Rate x Total Hours. Set = fixed monthly pay (guards not paid by hours).
-    uniformCost: numeric("uniform_cost", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
+    uniformCost: numeric("uniform_cost", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
     fixedAmount: numeric("fixed_amount", { precision: 10, scale: 2, mode: "number" }),
     // NULL = holiday entitlement is information only. Set = those hours are paid at this rate.
     holidayRate: numeric("holiday_rate", { precision: 10, scale: 2, mode: "number" }),
@@ -685,8 +694,12 @@ export const timesheetSheets = pgTable(
     personNi: text("person_ni").notNull().default(""),
     personKey: text("person_key").notNull(),
     statedHours: numeric("stated_hours", { precision: 10, scale: 2, mode: "number" }),
-    sheetHours: numeric("sheet_hours", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
-    recordHours: numeric("record_hours", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
+    sheetHours: numeric("sheet_hours", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
+    recordHours: numeric("record_hours", { precision: 10, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
     rowCount: integer("row_count").notNull().default(0),
     issueCount: integer("issue_count").notNull().default(0),
     status: text("status").notNull().default("needs_review"), // ready | needs_review | staff_not_found
@@ -728,7 +741,6 @@ export const timesheetRows = pgTable(
   },
   (t) => [index("timesheet_rows_sheet_idx").on(t.sheetId, t.lineNo)],
 );
-
 
 // Tasks: free-text tasks that an admin gives out (or anyone logs for themselves), with an
 // activity history per task. Created by schema/tasks-migration.sql (run it BEFORE deploying).

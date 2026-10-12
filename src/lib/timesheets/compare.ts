@@ -62,7 +62,8 @@ export interface MissingFromSheet {
 const minutes = (h: number) => Math.round(h * 60);
 const fmt = (h: number) => `${Number(round2(h).toFixed(2))} h`;
 
-const within = (a: number, b: number) => Math.abs(minutes(a) - minutes(b)) <= HOURS_TOLERANCE_MINUTES;
+const within = (a: number, b: number) =>
+  Math.abs(minutes(a) - minutes(b)) <= HOURS_TOLERANCE_MINUTES;
 
 function siteKeys(...names: string[]): string[] {
   return names.map((n) => normName(n)).filter((n) => n.length > 0);
@@ -97,7 +98,10 @@ export function compareRows(args: {
         key: r.key,
         result: r.hours === null || r.date === "" ? "check_reading" : "not_in_records",
         recordHours: null,
-        note: r.hours === null || r.date === "" ? withParse(r, "") : withParse(r, "Staff member not found."),
+        note:
+          r.hours === null || r.date === ""
+            ? withParse(r, "")
+            : withParse(r, "Staff member not found."),
       });
     }
     return { answers: args.rows.map((r) => answers.get(r.key)!), missing };
@@ -105,16 +109,30 @@ export function compareRows(args: {
 
   const recordCounts = new Map<string, number>();
   const dayMinutes = new Map<string, number>();
-  const recordKey = (r: RecordShift) => JSON.stringify([r.date, normName(r.clientName), normName(r.siteName), minutes(r.hours), r.rate]);
+  const recordKey = (r: RecordShift) =>
+    JSON.stringify([
+      r.date,
+      normName(r.clientName),
+      normName(r.siteName),
+      minutes(r.hours),
+      r.rate,
+    ]);
   for (const rec of args.records) {
     const key = recordKey(rec);
     recordCounts.set(key, (recordCounts.get(key) ?? 0) + 1);
     dayMinutes.set(rec.date, (dayMinutes.get(rec.date) ?? 0) + minutes(rec.hours));
   }
-  const recordNote = (rec: RecordShift) => [
-    (recordCounts.get(recordKey(rec)) ?? 0) > 1 ? "Possible duplicate in our records: same date, site, client, hours and rate. Review the imported shifts; both records are included." : "",
-    (dayMinutes.get(rec.date) ?? 0) > 1440 ? "Our records total more than 24 hours for this person on this date. Review the imported shifts." : "",
-  ].filter(Boolean).join(" ");
+  const recordNote = (rec: RecordShift) =>
+    [
+      (recordCounts.get(recordKey(rec)) ?? 0) > 1
+        ? "Possible duplicate in our records: same date, site, client, hours and rate. Review the imported shifts; both records are included."
+        : "",
+      (dayMinutes.get(rec.date) ?? 0) > 1440
+        ? "Our records total more than 24 hours for this person on this date. Review the imported shifts."
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
   const linkNote = (rec: RecordShift) =>
     rec.unlinked
       ? "This shift in our records is not linked to the staff member (found by NI, company ID or name). Link it in the Salary Sheet."
@@ -134,7 +152,10 @@ export function compareRows(args: {
         key: r.key,
         result: "check_reading",
         recordHours: null,
-        note: withParse(r, r.date === "" ? "The date could not be read." : "The hours could not be read."),
+        note: withParse(
+          r,
+          r.date === "" ? "The date could not be read." : "The hours could not be read.",
+        ),
       });
       continue;
     }
@@ -175,7 +196,10 @@ export function compareRows(args: {
     }
     // 2. same site, closest hours
     for (const r of free()) {
-      const hit = closest(r, freeRecs().filter((rec) => siteOk(r, rec)));
+      const hit = closest(
+        r,
+        freeRecs().filter((rec) => siteOk(r, rec)),
+      );
       if (hit) pair(r, hit);
     }
     // 3. anything left, closest hours
@@ -219,9 +243,13 @@ export function compareRows(args: {
       const sheetSite = siteKeys(r.site, r.siteAlt);
       if (sheetSite.length > 0 && !siteOk(r, rec)) {
         const where = rec.siteName || rec.clientName;
-        if (where) note = `${note} The site on the sheet differs from our record (${where}).`.trim();
+        if (where)
+          note = `${note} The site on the sheet differs from our record (${where}).`.trim();
         const singleShiftDay = recs.length === 1 && sheetRows.length === 1;
-        if (result === "match" && (!singleShiftDay || SITE_DIFFERENCE_BLOCKS_MATCH_ON_SINGLE_SHIFT_DAY)) {
+        if (
+          result === "match" &&
+          (!singleShiftDay || SITE_DIFFERENCE_BLOCKS_MATCH_ON_SINGLE_SHIFT_DAY)
+        ) {
           result = "check_reading";
         }
       }
@@ -250,7 +278,13 @@ export function compareRows(args: {
           site: rec.siteName || rec.clientName,
           recordHours: rec.hours,
           rate: rec.rate,
-          note: ["Worked per our records, but not listed on the sheet.", recordNote(rec), linkNote(rec)].filter(Boolean).join(" "),
+          note: [
+            "Worked per our records, but not listed on the sheet.",
+            recordNote(rec),
+            linkNote(rec),
+          ]
+            .filter(Boolean)
+            .join(" "),
         });
       }
     }
@@ -265,7 +299,15 @@ export function compareRows(args: {
         site: rec.siteName || rec.clientName,
         recordHours: rec.hours,
         rate: rec.rate,
-        note: [unreadableDates.has(date) ? "Recorded shift could not be compared because the sheet hours are unreadable." : "Worked per our records, but not listed on the sheet.", recordNote(rec), linkNote(rec)].filter(Boolean).join(" "),
+        note: [
+          unreadableDates.has(date)
+            ? "Recorded shift could not be compared because the sheet hours are unreadable."
+            : "Worked per our records, but not listed on the sheet.",
+          recordNote(rec),
+          linkNote(rec),
+        ]
+          .filter(Boolean)
+          .join(" "),
       });
     }
   }

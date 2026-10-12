@@ -7,7 +7,9 @@ export function bankPageToMatrix(pieces: PdfPiece[]): Matrix {
   // Some accessible bank PDFs repeat every cell label at 0.05pt. These are
   // metadata, not visible transactions; including them duplicates table headers.
   const groups: PdfPiece[][] = [];
-  for (const item of [...pieces].filter((p) => p.str.trim() && p.h >= 1).sort((a, b) => b.y - a.y || a.x - b.x)) {
+  for (const item of [...pieces]
+    .filter((p) => p.str.trim() && p.h >= 1)
+    .sort((a, b) => b.y - a.y || a.x - b.x)) {
     const last = groups.at(-1);
     if (!last || Math.abs(item.y - last[0]!.y) > 2) groups.push([item]);
     else last.push(item);
@@ -33,7 +35,12 @@ export function bankPageToMatrix(pieces: PdfPiece[]): Matrix {
       continue;
     }
     if (!columns) continue;
-    if (/^(?:\(?(?:continued|end of)|lloyds bank plc|transaction types|page \d)/i.test(cells[0]?.text ?? "")) break;
+    if (
+      /^(?:\(?(?:continued|end of)|lloyds bank plc|transaction types|page \d)/i.test(
+        cells[0]?.text ?? "",
+      )
+    )
+      break;
     const row: Cell[] = Array.from({ length: columns.length }, () => null);
     for (const p of group) {
       let col = 0;
@@ -42,35 +49,77 @@ export function bankPageToMatrix(pieces: PdfPiece[]): Matrix {
       // edge, which moves into an adjacent column when an amount is large.
       const amount = parseMoney(p.str);
       if (amount !== null && Number.isFinite(amount)) {
-        const numeric = columns.map((c, i) => ({ c, i })).filter(({c}) => /money|credit|debit|paid|amount|balance|value|deposit|withdrawal/i.test(c.text));
-        const nearest = numeric.sort((a, b) => Math.abs(a.c.end - (p.x + p.w)) - Math.abs(b.c.end - (p.x + p.w)))[0];
+        const numeric = columns
+          .map((c, i) => ({ c, i }))
+          .filter(({ c }) =>
+            /money|credit|debit|paid|amount|balance|value|deposit|withdrawal/i.test(c.text),
+          );
+        const nearest = numeric.sort(
+          (a, b) => Math.abs(a.c.end - (p.x + p.w)) - Math.abs(b.c.end - (p.x + p.w)),
+        )[0];
         if (nearest && Math.abs(nearest.c.end - (p.x + p.w)) < 16) col = nearest.i;
       }
       row[col] = `${row[col] ?? ""} ${p.str}`.trim();
     }
     body.push({ y: group[0]!.y, row });
   }
-  if (!columns) throw new Error("No supported bank table was found on this PDF page. Upload a typed bank table or CSV/Excel.");
-  const dateCol = columns.findIndex((c) => /^(date|transactiondate|postingdate|bookingdate)$/.test(key(c.text)));
-  const moneyCols = columns.flatMap((c, i) => /money|credit|debit|paid|amount|value|deposit|withdrawal/i.test(c.text) ? [i] : []);
-  const textCols = columns.flatMap((c, i) => /description|details|reference|narrative|memo/i.test(c.text) ? [i] : []);
+  if (!columns)
+    throw new Error(
+      "No supported bank table was found on this PDF page. Upload a typed bank table or CSV/Excel.",
+    );
+  const dateCol = columns.findIndex((c) =>
+    /^(date|transactiondate|postingdate|bookingdate)$/.test(key(c.text)),
+  );
+  const moneyCols = columns.flatMap((c, i) =>
+    /money|credit|debit|paid|amount|value|deposit|withdrawal/i.test(c.text) ? [i] : [],
+  );
+  const textCols = columns.flatMap((c, i) =>
+    /description|details|reference|narrative|memo/i.test(c.text) ? [i] : [],
+  );
   // Retain any transaction with money even if its date is unreadable; the
   // normal validator must reject it rather than silently dropping payment data.
-  const transactions = body.filter(({row}) => parseUkDate(row[dateCol] ?? null) || moneyCols.some((i) => row[i] !== null));
-  const fragments = new Map(transactions.map((t) => [t, new Map(textCols.map((i) => [i,
-    t.row[i] ? [{ y: t.y, text: String(t.row[i]) }] : [] as { y: number; text: string }[],
-  ]))]));
+  const transactions = body.filter(
+    ({ row }) => parseUkDate(row[dateCol] ?? null) || moneyCols.some((i) => row[i] !== null),
+  );
+  const fragments = new Map(
+    transactions.map((t) => [
+      t,
+      new Map(
+        textCols.map((i) => [
+          i,
+          t.row[i] ? [{ y: t.y, text: String(t.row[i]) }] : ([] as { y: number; text: string }[]),
+        ]),
+      ),
+    ]),
+  );
   for (const line of body) {
     if (transactions.includes(line)) continue;
-    const text = textCols.map((i) => String(line.row[i] ?? "")).join(" ").trim();
+    const text = textCols
+      .map((i) => String(line.row[i] ?? ""))
+      .join(" ")
+      .trim();
     if (!text || line.row[dateCol]) continue;
-    const nearest = [...transactions].sort((a, b) => Math.abs(a.y - line.y) - Math.abs(b.y - line.y))[0];
+    const nearest = [...transactions].sort(
+      (a, b) => Math.abs(a.y - line.y) - Math.abs(b.y - line.y),
+    )[0];
     if (!nearest || Math.abs(nearest.y - line.y) > 18) continue;
-    for (const i of textCols) if (line.row[i]) fragments.get(nearest)?.get(i)?.push({ y: line.y, text: String(line.row[i]) });
+    for (const i of textCols)
+      if (line.row[i])
+        fragments
+          .get(nearest)
+          ?.get(i)
+          ?.push({ y: line.y, text: String(line.row[i]) });
   }
-  for (const t of transactions) for (const i of textCols) {
-    t.row[i] = fragments.get(t)?.get(i)?.sort((a, b) => b.y - a.y).map((f) => f.text).join(" ") || null;
-  }
+  for (const t of transactions)
+    for (const i of textCols) {
+      t.row[i] =
+        fragments
+          .get(t)
+          ?.get(i)
+          ?.sort((a, b) => b.y - a.y)
+          .map((f) => f.text)
+          .join(" ") || null;
+    }
   return [columns.map((c) => c.text), ...transactions.map((t) => t.row)];
 }
 

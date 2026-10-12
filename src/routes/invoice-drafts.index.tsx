@@ -2,7 +2,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, FilePlus, Info, Search } from "@/lib/icons";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  FilePlus,
+  Info,
+  Search,
+} from "@/lib/icons";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
@@ -12,11 +20,22 @@ import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Pill } from "@/components/app/timesheets/badges";
 import { DraftPreviewDialog } from "@/components/app/invoiceDrafts/DraftPreviewDialog";
 import { LinkClientDialog } from "@/components/app/invoiceDrafts/LinkClientDialog";
-import { createDrafts, listDraftMonths, listDrafts, type DraftFilter } from "@/lib/actions/invoiceDrafts";
+import {
+  createDrafts,
+  listDraftMonths,
+  listDrafts,
+  type DraftFilter,
+} from "@/lib/actions/invoiceDrafts";
 import { formatMoney } from "@/lib/ledger/calc";
 import { formatMonthLabel } from "@/lib/payroll/calc";
 import { errorMessage } from "@/lib/payroll/queries";
@@ -27,7 +46,10 @@ export const Route = createFileRoute("/invoice-drafts/")({
   head: () => ({
     meta: [
       { title: "Invoice Drafts — LedgerFlow" },
-      { name: "description", content: "Invoices prepared from the month's shifts, ready to check and create." },
+      {
+        name: "description",
+        content: "Invoices prepared from the month's shifts, ready to check and create.",
+      },
     ],
   }),
   component: InvoiceDraftsPage,
@@ -79,7 +101,11 @@ function InvoiceDraftsContent() {
   const listQ = useQuery({
     queryKey: ["invoiceDrafts", "list", active?.month, filter, search, page],
     queryFn: () =>
-      unwrap(listDrafts({ data: { month: active?.month ?? "", filter, search, page, pageSize: PAGE_SIZE } })),
+      unwrap(
+        listDrafts({
+          data: { month: active?.month ?? "", filter, search, page, pageSize: PAGE_SIZE },
+        }),
+      ),
     enabled: ready && allowed && active !== null,
     placeholderData: keepPreviousData,
   });
@@ -114,7 +140,9 @@ function InvoiceDraftsContent() {
     if (!active || busy || ids.length === 0) return;
     setBusy(true);
     try {
-      const res = await unwrap(createDrafts({ data: { month: active.month, clientIds: ids, allowWarnings } }));
+      const res = await unwrap(
+        createDrafts({ data: { month: active.month, clientIds: ids, allowWarnings } }),
+      );
       if (res.created.length > 0) {
         const first = res.created[0]?.number ?? "";
         const last = res.created[res.created.length - 1]?.number ?? "";
@@ -168,17 +196,26 @@ function InvoiceDraftsContent() {
       </div>
 
       {data && !data.periodFound ? (
-        <div role="note" className="flex items-start gap-2.5 rounded-lg border border-border bg-surface-muted/60 px-4 py-3 text-[13px] text-foreground">
+        <div
+          role="note"
+          className="flex items-start gap-2.5 rounded-lg border border-border bg-surface-muted/60 px-4 py-3 text-[13px] text-foreground"
+        >
           <Info className="mt-0.5 size-4 text-primary" aria-hidden="true" />
           <p>There is no Salary Sheet for this month yet, so there is nothing to bill.</p>
         </div>
       ) : null}
-      {data && data.periodFound && data.periodStatus !== "verified" && data.periodStatus !== "closed" ? (
-        <div role="note" className="flex items-start gap-2.5 rounded-lg border border-warning/25 bg-warning-soft px-4 py-3 text-[13px] text-foreground">
+      {data &&
+      data.periodFound &&
+      data.periodStatus !== "verified" &&
+      data.periodStatus !== "closed" ? (
+        <div
+          role="note"
+          className="flex items-start gap-2.5 rounded-lg border border-warning/25 bg-warning-soft px-4 py-3 text-[13px] text-foreground"
+        >
           <Info className="mt-0.5 size-4 text-warning" aria-hidden="true" />
           <p>
-            The Salary Sheet for this month is still <strong>{data.periodStatus || "draft"}</strong> (not verified yet), so the
-            shifts can still change. Check it before you bill.
+            The Salary Sheet for this month is still <strong>{data.periodStatus || "draft"}</strong>{" "}
+            (not verified yet), so the shifts can still change. Check it before you bill.
           </p>
         </div>
       ) : null}
@@ -190,11 +227,15 @@ function InvoiceDraftsContent() {
           />
           <ul className="divide-y divide-border text-[13px]">
             {data.unmatched.slice(0, 10).map((u) => (
-              <li key={u.name} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+              <li
+                key={u.name}
+                className="flex flex-wrap items-center justify-between gap-2 px-4 py-2"
+              >
                 <span>
                   <span className="font-medium">{u.name}</span>
                   <span className="ml-2 text-muted-foreground">
-                    {u.shifts} shifts, {Number(u.hours.toFixed(2))} h{u.reason === "several" ? " (matches several clients)" : ""}
+                    {u.shifts} shifts, {Number(u.hours.toFixed(2))} h
+                    {u.reason === "several" ? " (matches several clients)" : ""}
                   </span>
                 </span>
                 {canCreate && u.name !== "(no client name)" ? (
@@ -205,15 +246,28 @@ function InvoiceDraftsContent() {
               </li>
             ))}
             {data.unmatchedCount > 10 ? (
-              <li className="px-4 py-2 text-muted-foreground">And {data.unmatchedCount - 10} more (biggest first is shown).</li>
+              <li className="px-4 py-2 text-muted-foreground">
+                And {data.unmatchedCount - 10} more (biggest first is shown).
+              </li>
             ) : null}
           </ul>
         </Panel>
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard label="Drafts" value={String(sum?.count ?? 0)} sublabel={active ? formatMonthLabel(active.month) : ""} icon={FilePlus} />
-        <SummaryCard label="Ready" value={String(sum?.ready ?? 0)} sublabel="Nothing to fix" icon={CheckCircle2} tone="success" />
+        <SummaryCard
+          label="Drafts"
+          value={String(sum?.count ?? 0)}
+          sublabel={active ? formatMonthLabel(active.month) : ""}
+          icon={FilePlus}
+        />
+        <SummaryCard
+          label="Ready"
+          value={String(sum?.ready ?? 0)}
+          sublabel="Nothing to fix"
+          icon={CheckCircle2}
+          tone="success"
+        />
         <SummaryCard
           label="Need a look"
           value={String(sum?.check ?? 0)}
@@ -267,7 +321,12 @@ function InvoiceDraftsContent() {
               </Select>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
-                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clients" className="h-9 w-44 pl-8" />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search clients"
+                  className="h-9 w-44 pl-8"
+                />
               </div>
             </div>
           }
@@ -280,11 +339,18 @@ function InvoiceDraftsContent() {
             description={errorMessage(monthsQ.error ?? listQ.error, "Please try again.")}
           />
         ) : active === null ? (
-          <EmptyState title="No Salary Sheet months yet" description="Import shifts into a Salary Sheet month first, then come back here." />
+          <EmptyState
+            title="No Salary Sheet months yet"
+            description="Import shifts into a Salary Sheet month first, then come back here."
+          />
         ) : rows.length === 0 ? (
           <EmptyState
             title={(sum?.count ?? 0) === 0 ? "No billable shifts this month" : "No clients found"}
-            description={(sum?.count ?? 0) === 0 ? "There are no shifts matched to a client for this month." : "Try another name or filter."}
+            description={
+              (sum?.count ?? 0) === 0
+                ? "There are no shifts matched to a client for this month."
+                : "Try another name or filter."
+            }
           />
         ) : (
           <>
@@ -351,7 +417,13 @@ function InvoiceDraftsContent() {
                           {formatMoney(t.total)}
                         </TD>
                         <TD>
-                          <Pill tone={s.state === "ready" ? "good" : s.state === "done" ? "mute" : "warn"}>{s.text}</Pill>
+                          <Pill
+                            tone={
+                              s.state === "ready" ? "good" : s.state === "done" ? "mute" : "warn"
+                            }
+                          >
+                            {s.text}
+                          </Pill>
                         </TD>
                         <TD align="right">
                           <div onClick={(e) => e.stopPropagation()}>
@@ -372,10 +444,20 @@ function InvoiceDraftsContent() {
                   Page {page} of {pages}
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
                     <ChevronLeft className="size-4" /> Previous
                   </Button>
-                  <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page >= pages}
+                    onClick={() => setPage((p) => Math.min(pages, p + 1))}
+                  >
                     Next <ChevronRight className="size-4" />
                   </Button>
                 </div>
@@ -392,7 +474,11 @@ function InvoiceDraftsContent() {
         onClose={() => setOpen(null)}
         onCreate={(d, allow) => void create([d.clientId], allow)}
       />
-      <LinkClientDialog item={linking} onClose={() => setLinking(null)} onLinked={() => void refresh()} />
+      <LinkClientDialog
+        item={linking}
+        onClose={() => setLinking(null)}
+        onLinked={() => void refresh()}
+      />
       <ConfirmDialog
         open={confirmBulk}
         onOpenChange={setConfirmBulk}

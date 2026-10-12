@@ -18,7 +18,12 @@ export interface TaskMove {
 
 export const TASK_MOVES: readonly TaskMove[] = [
   { from: ["todo"], to: "in_progress", text: "Started the task", adminOnly: false },
-  { from: ["todo", "in_progress"], to: "completed", text: "Marked the task as done", adminOnly: false },
+  {
+    from: ["todo", "in_progress"],
+    to: "completed",
+    text: "Marked the task as done",
+    adminOnly: false,
+  },
   { from: ["completed"], to: "verified", text: "Verified as correct", adminOnly: true },
   { from: ["completed"], to: "in_progress", text: "Sent back for more work", adminOnly: true },
 ];
@@ -31,5 +36,10 @@ export function findMove(from: TaskStatus, to: TaskStatus): TaskMove | undefined
 export function isRealDay(s: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s && s >= "2000-01-01" && s <= "2100-12-31";
+  return (
+    !Number.isNaN(d.getTime()) &&
+    d.toISOString().slice(0, 10) === s &&
+    s >= "2000-01-01" &&
+    s <= "2100-12-31"
+  );
 }

@@ -259,7 +259,8 @@ export async function exportSalarySheet(
     outstanding,
   ];
   for (const c of moneyCols) ws.getColumn(c).numFmt = money;
-  for (const c of [C.rssHrs, C.essHrs, C.totHrs, ...extraCodes.map((_, k) => xHrs(k))]) ws.getColumn(c).numFmt = "#,##0.00";
+  for (const c of [C.rssHrs, C.essHrs, C.totHrs, ...extraCodes.map((_, k) => xHrs(k))])
+    ws.getColumn(c).numFmt = "#,##0.00";
   ws.getColumn(1).width = 2;
   ws.getColumn(C.ni).width = 15;
   ws.getColumn(C.tag).width = 14;

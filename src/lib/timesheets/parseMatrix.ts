@@ -249,8 +249,7 @@ function findHeader(m: TsMatrix): { row: number; cols: Partial<Record<Col, numbe
 
 /* ------------------------------ name / NI above the table ------------------------------ */
 
-const NAME_LABEL =
-  /^(?:(?:staff|employee|guard|officer|full|your|sia)\s+)?name\b\s*[:\-]?\s*(.*)$/i;
+const NAME_LABEL = /^(?:(?:staff|employee|guard|officer|full|your|sia)\s+)?name\b\s*[:-]?\s*(.*)$/i;
 const NI_LABEL =
   /^(?:n\.?\s?i\.?n?\.?(?:\s*(?:number|no\.?|num))?|national\s+insurance(?:\s*(?:number|no\.?))?)(?=$|[\s:#\-.])\s*[:#\-.]?\s*(.*)$/i;
 
@@ -376,7 +375,7 @@ export function parseTimesheetMatrix(matrix: TsMatrix, sheetLabel: string): Pars
     const labelAt = row.findIndex((c) => textOf(c) !== "");
     const tl = dateR.kind === "ok" ? null : TOTAL_LABEL.exec(firstText);
     if (tl) {
-      const rest = (tl[1] ?? "").trim().replace(/^[:\-]\s*/, "");
+      const rest = (tl[1] ?? "").trim().replace(/^[:-]\s*/, "");
       const moneyLabel = /amount|pay|£|expense/i.test(rest);
       if (!moneyLabel && labelledTotal === null) {
         labelledTotal = totalHoursFrom(row, labelAt, /^\d/.test(rest) ? rest : "", cols.duration);

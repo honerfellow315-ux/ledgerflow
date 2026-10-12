@@ -50,7 +50,10 @@ export function payslipTotals(p: PayslipRow) {
  * never end up a penny away from the sheet's figure.
  */
 export function earningLines(p: PayslipRow): EarningLine[] {
-  const uniform: EarningLine[] = (p.uniformCost ?? 0) > 0 ? [{ label: "Uniform cost", hours: null, rate: null, amount: r2(p.uniformCost!) }] : [];
+  const uniform: EarningLine[] =
+    (p.uniformCost ?? 0) > 0
+      ? [{ label: "Uniform cost", hours: null, rate: null, amount: r2(p.uniformCost!) }]
+      : [];
   return [...baseEarningLines({ ...p, uniformCost: 0 }), ...uniform];
 }
 
@@ -62,7 +65,8 @@ function baseEarningLines(p: PayslipRow): EarningLine[] {
   const workedPay = r2(p.unitsHours * p.rate);
   // Same order as the sheet: round the total hours first, then multiply by the rate.
   const withBankHoliday = r2(payslipTotals(p).totalHours * p.rate);
-  if (p.unitsHours > 0) out.push({ label: "Hours worked", hours: p.unitsHours, rate: p.rate, amount: workedPay });
+  if (p.unitsHours > 0)
+    out.push({ label: "Hours worked", hours: p.unitsHours, rate: p.rate, amount: workedPay });
   if (p.bankHolidayHours > 0)
     out.push({
       label: "Bank holiday hours",

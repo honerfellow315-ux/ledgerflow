@@ -232,9 +232,14 @@ function BankMatchContent() {
 
   return (
     <div className="space-y-5">
-      <AiDocumentDialog kind="bank" open={aiOpen} onOpenChange={setAiOpen} onReviewed={async (doc) => {
-        if(doc.kind==='bank') await saveStatement(doc.parsed);
-      }}/>
+      <AiDocumentDialog
+        kind="bank"
+        open={aiOpen}
+        onOpenChange={setAiOpen}
+        onReviewed={async (doc) => {
+          if (doc.kind === "bank") await saveStatement(doc.parsed);
+        }}
+      />
       {pendingStatement ? (
         <StatementReview
           key={pendingStatement.fileHash}
@@ -272,7 +277,9 @@ function BankMatchContent() {
                 <Download className="size-4" /> ESS sample format
               </a>
             </Button>
-            <Button variant="outline" disabled={busy} onClick={()=>setAiOpen(true)}>Read photo / scanned PDF with AI</Button>
+            <Button variant="outline" disabled={busy} onClick={() => setAiOpen(true)}>
+              Read photo / scanned PDF with AI
+            </Button>
             <Button disabled={busy} onClick={() => fileRef.current?.click()}>
               <Upload className="size-4" /> Upload bank statement
             </Button>

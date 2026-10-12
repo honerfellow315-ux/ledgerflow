@@ -30,7 +30,9 @@ export function guessShiftCompany(
 ): string | null {
   const hit = (text: string, c: { code: string; name: string }) =>
     [c.code, c.name].some(
-      (t) => t.trim() && new RegExp(`(^|[^A-Za-z0-9])${escapeRe(t.trim())}([^A-Za-z0-9]|$)`, "i").test(text),
+      (t) =>
+        t.trim() &&
+        new RegExp(`(^|[^A-Za-z0-9])${escapeRe(t.trim())}([^A-Za-z0-9]|$)`, "i").test(text),
     );
   const base = fileName.replace(/\.[^.]+$/, "");
   const byName = companies.filter((c) => hit(base, c));

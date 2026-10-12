@@ -90,15 +90,23 @@ export function draftTotals(
 
 export function draftIssues(d: Draft): DraftIssue[] {
   const out: DraftIssue[] = [];
-  if (d.rate === null || d.rate <= 0) out.push({ kind: "hard", text: "No rate set for this client" });
+  if (d.rate === null || d.rate <= 0)
+    out.push({ kind: "hard", text: "No rate set for this client" });
   if (d.hours <= 0) out.push({ kind: "hard", text: "No hours this month" });
   if (d.payrollHours > 0 && (d.payrollRate ?? 0) <= 0) {
-    out.push({ kind: "hard", text: "Payroll hours have no payroll rate (set it on the Hours screen)" });
+    out.push({
+      kind: "hard",
+      text: "Payroll hours have no payroll rate (set it on the Hours screen)",
+    });
   }
-  if (d.payrollHours > d.hours + 0.001) out.push({ kind: "hard", text: "Payroll hours are more than shift hours" });
+  if (d.payrollHours > d.hours + 0.001)
+    out.push({ kind: "hard", text: "Payroll hours are more than shift hours" });
   if (d.hoursEntry !== null && Math.abs(d.hoursEntry - d.hours) > 0.001) {
     const diff = round2(d.hours - d.hoursEntry);
-    out.push({ kind: "soft", text: `Shifts differ from the Hours screen by ${diff > 0 ? "+" : ""}${h2(diff)} h` });
+    out.push({
+      kind: "soft",
+      text: `Shifts differ from the Hours screen by ${diff > 0 ? "+" : ""}${h2(diff)} h`,
+    });
   }
   if (d.duplicateShifts > 0) {
     out.push({

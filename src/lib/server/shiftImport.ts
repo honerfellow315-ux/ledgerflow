@@ -77,6 +77,8 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
   // Lookup tables for matching: company ID first, then NI, then unique name.
   const staffRows = await db.select().from(payrollStaff);
   const byId = new Map<string, string>();
+  const ambiguousIds = new Set<string>();
+  const ambiguousNis = new Set<string>();
   const byNi = new Map<string, string>();
   const nameCount = new Map<string, number>();
   const byName = new Map<string, string>();
@@ -90,8 +92,15 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
     name: string;
   }) => {
     const sid = staffIdFor(s, data.source);
-    if (sid) byId.set(sid, s.id);
-    if (s.ni) byNi.set(normNi(s.ni), s.id);
+    if (sid) {
+      if (byId.has(sid) && byId.get(sid) !== s.id) ambiguousIds.add(sid);
+      byId.set(sid, s.id);
+    }
+    if (s.ni) {
+      const ni = normNi(s.ni);
+      if (byNi.has(ni) && byNi.get(ni) !== s.id) ambiguousNis.add(ni);
+      byNi.set(ni, s.id);
+    }
     const n = normName(s.name);
     nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
     byName.set(n, s.id);
@@ -108,6 +117,10 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
 
   const shiftValues = data.rows.map((r) => {
     let staffId: string | null = null;
+    if (ambiguousIds.has(r.employeeId) || ambiguousNis.has(normNi(r.ni)))
+      throw new Error(
+        "Duplicate staff ID or NI found. Resolve the staff records before importing.",
+      );
     if (r.employeeId && byId.has(r.employeeId)) staffId = byId.get(r.employeeId) ?? null;
     else if (r.ni && byNi.has(normNi(r.ni))) staffId = byNi.get(normNi(r.ni)) ?? null;
     else if (r.employeeName && nameCount.get(normName(r.employeeName)) === 1) {
@@ -118,6 +131,19 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
       if (cand && !(candNi && rowNi && candNi !== rowNi)) staffId = cand;
     }
 
+    if (staffId) {
+      const found = have.get(staffId);
+      if (
+        found &&
+        ((normNi(found.ni) && normNi(r.ni) && normNi(found.ni) !== normNi(r.ni)) ||
+          (found.sid && r.employeeId && found.sid !== r.employeeId))
+      )
+        throw new Error("Staff ID and NI disagree. Review the source file before importing.");
+    }
+    if (!staffId && nameCount.get(normName(r.employeeName))! > 1)
+      throw new Error(
+        "More than one staff record has this name. Add a unique ID or NI before importing.",
+      );
     if (!staffId && data.createMissingStaff && (r.employeeId || r.employeeName)) {
       const id = uid("st");
       const fresh = {

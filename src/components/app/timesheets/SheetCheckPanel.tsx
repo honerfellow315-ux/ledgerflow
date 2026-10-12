@@ -177,7 +177,11 @@ export function SheetCheckPanel({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Hours on the sheet" value={fmtHours(t.sheetHours)} />
-        <SummaryCard label="Hours in our records" value={fmtHours(t.recordHours)} sublabel="Includes shifts not listed on this sheet" />
+        <SummaryCard
+          label="Hours in our records"
+          value={fmtHours(t.recordHours)}
+          sublabel="Includes shifts not listed on this sheet"
+        />
         <SummaryCard
           label="Difference"
           value={fmtDiff(t.diff)}
@@ -193,7 +197,11 @@ export function SheetCheckPanel({
       </div>
 
       {sheet.rows.some((row) => /Possible duplicate|more than 24 hours/.test(row.note ?? "")) ? (
-        <Notice tone="warn">Some stored shifts may be duplicated or exceed 24 hours on one date. Review the flagged rows and the source shift imports. No records have been removed or excluded from the total.</Notice>
+        <Notice tone="warn">
+          Some stored shifts may be duplicated or exceed 24 hours on one date. Review the flagged
+          rows and the source shift imports. No records have been removed or excluded from the
+          total.
+        </Notice>
       ) : null}
       <Panel>
         <PanelHeader

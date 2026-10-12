@@ -74,7 +74,11 @@ export async function downloadStatementXlsx(input: StatementXlsxInput): Promise<
     { width: 38 },
   ];
 
-  const head = { type: "pattern" as const, pattern: "solid" as const, fgColor: { argb: "FFE8EDF3" } };
+  const head = {
+    type: "pattern" as const,
+    pattern: "solid" as const,
+    fgColor: { argb: "FFE8EDF3" },
+  };
   const headerRow = (labels: string[]) => {
     const row = ws.addRow(labels);
     row.font = { bold: true };
@@ -136,7 +140,17 @@ export async function downloadStatementXlsx(input: StatementXlsxInput): Promise<
   // Outstanding invoices
   if (input.outstandingInvoices.length > 0) {
     section("Outstanding invoices");
-    headerRow(["Invoice date", "Invoice", "Status", "Description", "Due date", "Days overdue", "PO reference", "Outstanding", "Note"]);
+    headerRow([
+      "Invoice date",
+      "Invoice",
+      "Status",
+      "Description",
+      "Due date",
+      "Days overdue",
+      "PO reference",
+      "Outstanding",
+      "Note",
+    ]);
     for (const o of input.outstandingInvoices) {
       const row = ws.addRow([
         formatDate(o.invoiceDate),
@@ -167,7 +181,16 @@ export async function downloadStatementXlsx(input: StatementXlsxInput): Promise<
   section("Account activity");
   headerRow(["Date", "Reference", "Type", "Description", "", "Debit", "Credit", "Balance"]);
   if (input.openingBalance !== undefined) {
-    const row = ws.addRow(["", "", "", "Opening balance (balance brought forward)", "", "", "", input.openingBalance]);
+    const row = ws.addRow([
+      "",
+      "",
+      "",
+      "Opening balance (balance brought forward)",
+      "",
+      "",
+      "",
+      input.openingBalance,
+    ]);
     row.font = { italic: true };
     money(row.getCell(8));
   }

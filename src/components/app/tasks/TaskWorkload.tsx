@@ -14,18 +14,20 @@ export function TaskWorkload({ compact = false }: { compact?: boolean }) {
     return <p className="text-xs text-destructive">Task totals could not be loaded.</p>;
   if (query.isPending) return <p className="text-xs text-muted-foreground">Loading task totals…</p>;
   if (!query.data.length) return null;
-  if (compact) return (
-    <ul className="max-h-40 space-y-2 overflow-auto text-xs">
-      {query.data.map((row) => (
-        <li key={`${row.id}:${row.name}`} className="rounded-lg border p-2">
-          <p className="font-medium">{row.name}</p>
-          <p className="mt-1 leading-relaxed text-muted-foreground">
-            {row.todo} to do · {row.inProgress} working · {row.completed} done · {row.verified} verified
-          </p>
-        </li>
-      ))}
-    </ul>
-  );
+  if (compact)
+    return (
+      <ul className="max-h-40 space-y-2 overflow-auto text-xs">
+        {query.data.map((row) => (
+          <li key={`${row.id}:${row.name}`} className="rounded-lg border p-2">
+            <p className="font-medium">{row.name}</p>
+            <p className="mt-1 leading-relaxed text-muted-foreground">
+              {row.todo} to do · {row.inProgress} working · {row.completed} done · {row.verified}{" "}
+              verified
+            </p>
+          </li>
+        ))}
+      </ul>
+    );
   return (
     <div className="max-h-64 overflow-auto">
       <p className="mb-2 text-xs text-muted-foreground">

@@ -62,9 +62,7 @@ export function DeleteStaffDialog({
         res.skipped > 0
           ? ` ${res.skipped} skipped (in a closed month): ${res.skippedNames.join(", ")}.`
           : "";
-      toast.success(
-        `${res.deleted} staff moved to the Recycle Bin.${skipped}`,
-      );
+      toast.success(`${res.deleted} staff moved to the Recycle Bin.${skipped}`);
       onDone();
     },
     onError: (err: unknown) => toast.error(errorMessage(err, "Could not delete.")),
@@ -95,15 +93,23 @@ export function DeleteStaffDialog({
                     Their lines are removed from the sheets until you restore them:
                   </p>
                   <ul className="list-disc space-y-0.5 pl-5">
-                    <li>{i.salaryLines} salary sheet line{i.salaryLines === 1 ? "" : "s"}</li>
-                    <li>{i.payrollLines} payroll sheet line{i.payrollLines === 1 ? "" : "s"}</li>
-                    <li>{i.payments} cash payment{i.payments === 1 ? "" : "s"} recorded on those lines</li>
-                    <li>{i.shifts} imported shift row{i.shifts === 1 ? "" : "s"} un-linked</li>
+                    <li>
+                      {i.salaryLines} salary sheet line{i.salaryLines === 1 ? "" : "s"}
+                    </li>
+                    <li>
+                      {i.payrollLines} payroll sheet line{i.payrollLines === 1 ? "" : "s"}
+                    </li>
+                    <li>
+                      {i.payments} cash payment{i.payments === 1 ? "" : "s"} recorded on those lines
+                    </li>
+                    <li>
+                      {i.shifts} imported shift row{i.shifts === 1 ? "" : "s"} un-linked
+                    </li>
                   </ul>
                   {i.blocked > 0 ? (
                     <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-warning">
-                      {i.blocked} {i.blocked === 1 ? "person is" : "people are"} in a closed month and
-                      will be skipped: {i.blockedNames.join(", ")}
+                      {i.blocked} {i.blocked === 1 ? "person is" : "people are"} in a closed month
+                      and will be skipped: {i.blockedNames.join(", ")}
                       {i.blocked > i.blockedNames.length ? "…" : ""}
                     </p>
                   ) : null}

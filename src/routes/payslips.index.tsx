@@ -20,7 +20,13 @@ import { SummaryCard } from "@/components/app/SummaryCard";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Pill } from "@/components/app/timesheets/badges";
 import { PayslipPreviewDialog } from "@/components/app/payslips/PayslipPreviewDialog";
 import { getPayslipsForPrint, listPayslips, listPayslipSheets } from "@/lib/actions/payslips";
@@ -82,21 +88,27 @@ function PayslipsContent() {
     queryFn: () => unwrap(listPayslipSheets()),
     enabled: ready && allowed,
   });
-  const options = sheetsQ.data ?? [];
+  const options = useMemo(() => sheetsQ.data ?? [], [sheetsQ.data]);
 
   const companies = useMemo(() => {
     const seen = new Map<string, string>();
     for (const o of options) if (!seen.has(o.companyId)) seen.set(o.companyId, o.companyName);
     return [...seen].map(([id, name]) => ({ id, name }));
   }, [options]);
-  const activeCompany = companies.some((c) => c.id === companyId) ? companyId : (options[0]?.companyId ?? "");
+  const activeCompany = companies.some((c) => c.id === companyId)
+    ? companyId
+    : (options[0]?.companyId ?? "");
   const months = options.filter((o) => o.companyId === activeCompany);
   const activeSheet = months.find((o) => o.month === month) ?? months[0] ?? null;
 
   const listQ = useQuery({
     queryKey: ["payslips", "list", activeSheet?.sheetId, search, page],
     queryFn: () =>
-      unwrap(listPayslips({ data: { sheetId: activeSheet?.sheetId ?? "", search, page, pageSize: PAGE_SIZE } })),
+      unwrap(
+        listPayslips({
+          data: { sheetId: activeSheet?.sheetId ?? "", search, page, pageSize: PAGE_SIZE },
+        }),
+      ),
     enabled: ready && allowed && activeSheet !== null,
     placeholderData: keepPreviousData,
   });
@@ -143,7 +155,8 @@ function PayslipsContent() {
     }
   }
 
-  const titleOf = () => `Payslips ${activeSheet?.companyName ?? ""} ${formatMonthLabel(activeSheet?.month ?? "")}`.trim();
+  const titleOf = () =>
+    `Payslips ${activeSheet?.companyName ?? ""} ${formatMonthLabel(activeSheet?.month ?? "")}`.trim();
 
   const printOne = (row: PayslipRow) =>
     run(async () => {
@@ -157,7 +170,13 @@ function PayslipsContent() {
       const all: PayslipRow[] = [];
       for (let i = 0; i < ids.length; i += 100) {
         setProgress(`Getting payslips ${Math.min(i + 100, ids.length)} of ${ids.length}…`);
-        all.push(...(await unwrap(getPayslipsForPrint({ data: { sheetId: activeSheet.sheetId, ids: ids.slice(i, i + 100) } }))));
+        all.push(
+          ...(await unwrap(
+            getPayslipsForPrint({
+              data: { sheetId: activeSheet.sheetId, ids: ids.slice(i, i + 100) },
+            }),
+          )),
+        );
       }
       await printPayslips(all, titleOf());
     }, "The payslips could not be made.");
@@ -169,15 +188,24 @@ function PayslipsContent() {
       const all: PayslipRow[] = [];
       for (let offset = 0; offset < count; offset += PRINT_STEP) {
         setProgress(`Getting payslips ${Math.min(offset + PRINT_STEP, count)} of ${count}…`);
-        all.push(...(await unwrap(getPayslipsForPrint({ data: { sheetId: activeSheet.sheetId, ids: [], offset, limit: PRINT_STEP } }))));
+        all.push(
+          ...(await unwrap(
+            getPayslipsForPrint({
+              data: { sheetId: activeSheet.sheetId, ids: [], offset, limit: PRINT_STEP },
+            }),
+          )),
+        );
       }
       await printPayslips(all, titleOf());
       if ((sum?.count ?? 0) > PRINT_MAX) {
-        toast.info(`Only the first ${PRINT_MAX} payslips were printed. Pick the rest with the tick boxes.`);
+        toast.info(
+          `Only the first ${PRINT_MAX} payslips were printed. Pick the rest with the tick boxes.`,
+        );
       }
     }, "The payslips could not be made.");
 
-  const notFinal = activeSheet !== null && activeSheet.status !== "verified" && activeSheet.status !== "closed";
+  const notFinal =
+    activeSheet !== null && activeSheet.status !== "verified" && activeSheet.status !== "closed";
 
   return (
     <div className="space-y-5">
@@ -189,11 +217,16 @@ function PayslipsContent() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" disabled={busy || (sum?.count ?? 0) === 0} onClick={() => void printAll()}>
+          <Button
+            variant="outline"
+            disabled={busy || (sum?.count ?? 0) === 0}
+            onClick={() => void printAll()}
+          >
             <Download className="size-4" /> Download all
           </Button>
           <Button disabled={busy || picked.size === 0} onClick={() => void printSelected()}>
-            <Download className="size-4" /> Download selected{picked.size ? ` (${picked.size})` : ""}
+            <Download className="size-4" /> Download selected
+            {picked.size ? ` (${picked.size})` : ""}
           </Button>
         </div>
       </div>
@@ -207,8 +240,8 @@ function PayslipsContent() {
         >
           <Info className="mt-0.5 size-4 text-warning" aria-hidden="true" />
           <p>
-            This Payroll sheet is still <strong>{activeSheet?.status}</strong> (not verified yet), so the figures can still
-            change. Check it before you give payslips out.
+            This Payroll sheet is still <strong>{activeSheet?.status}</strong> (not verified yet),
+            so the figures can still change. Check it before you give payslips out.
           </p>
         </div>
       ) : null}
@@ -275,7 +308,12 @@ function PayslipsContent() {
               </Select>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
-                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search staff" className="h-9 w-40 pl-8" />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search staff"
+                  className="h-9 w-40 pl-8"
+                />
               </div>
             </div>
           }
@@ -288,11 +326,18 @@ function PayslipsContent() {
             description={errorMessage(sheetsQ.error ?? listQ.error, "Please try again.")}
           />
         ) : activeSheet === null ? (
-          <EmptyState title="No payroll sheets yet" description="Create a month in the Payroll Sheet first, then come back here." />
+          <EmptyState
+            title="No payroll sheets yet"
+            description="Create a month in the Payroll Sheet first, then come back here."
+          />
         ) : rows.length === 0 ? (
           <EmptyState
             title={(sum?.count ?? 0) === 0 ? "This sheet has no staff" : "No staff found"}
-            description={(sum?.count ?? 0) === 0 ? "Add staff to the Payroll sheet first." : "Try another name."}
+            description={
+              (sum?.count ?? 0) === 0
+                ? "Add staff to the Payroll sheet first."
+                : "Try another name."
+            }
           />
         ) : (
           <>
@@ -332,20 +377,35 @@ function PayslipsContent() {
                       <TR key={p.id} onClick={() => setOpenIndex(i)}>
                         <TD>
                           <div onClick={(e) => e.stopPropagation()}>
-                            <Checkbox aria-label={`Select ${p.name}`} checked={picked.has(p.id)} onCheckedChange={() => toggle(p.id)} />
+                            <Checkbox
+                              aria-label={`Select ${p.name}`}
+                              checked={picked.has(p.id)}
+                              onCheckedChange={() => toggle(p.id)}
+                            />
                           </div>
                         </TD>
                         <TD className="font-medium">{p.name}</TD>
                         <TD mono>{maskNi(p.ni)}</TD>
                         <TD align="right" mono>
-                          {p.fixedAmount !== null ? "Fixed" : `${Number(t.totalHours.toFixed(2))} h`}
+                          {p.fixedAmount !== null
+                            ? "Fixed"
+                            : `${Number(t.totalHours.toFixed(2))} h`}
                         </TD>
                         <TD align="right" mono>
                           {formatMoney(t.amount)}
                         </TD>
-                        <TD>{issue ? <Pill tone="warn">{issue}</Pill> : <Pill tone="good">Ready</Pill>}</TD>
+                        <TD>
+                          {issue ? (
+                            <Pill tone="warn">{issue}</Pill>
+                          ) : (
+                            <Pill tone="good">Ready</Pill>
+                          )}
+                        </TD>
                         <TD align="right">
-                          <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                          <div
+                            className="flex justify-end gap-2"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <Button size="sm" variant="outline" onClick={() => setOpenIndex(i)}>
                               View
                             </Button>
@@ -372,10 +432,20 @@ function PayslipsContent() {
                   Page {page} of {pages}
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
                     <ChevronLeft className="size-4" /> Previous
                   </Button>
-                  <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page >= pages}
+                    onClick={() => setPage((p) => Math.min(pages, p + 1))}
+                  >
                     Next <ChevronRight className="size-4" />
                   </Button>
                 </div>

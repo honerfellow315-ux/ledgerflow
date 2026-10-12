@@ -30,28 +30,56 @@ export async function loadOverdue(): Promise<OverdueSet> {
   // loaded so payments, credit notes and carried-forward credit are exact.
   const owing = sql`SELECT DISTINCT client_id FROM invoices WHERE deleted_at IS NULL AND due_date < ${today}`;
   const invRows = stripNullsAll(
-    await db.select().from(invoices).where(and(isNull(invoices.deletedAt), sql`${invoices.clientId} IN (${owing})`)),
+    await db
+      .select()
+      .from(invoices)
+      .where(and(isNull(invoices.deletedAt), sql`${invoices.clientId} IN (${owing})`)),
   ) as unknown as Invoice[];
   if (invRows.length === 0) return { today, clients: [], buckets: BUCKETS.map(() => 0) };
   const payRows = stripNullsAll(
-    await db.select().from(payments).where(and(isNull(payments.deletedAt), sql`${payments.clientId} IN (${owing})`)),
+    await db
+      .select()
+      .from(payments)
+      .where(and(isNull(payments.deletedAt), sql`${payments.clientId} IN (${owing})`)),
   ) as unknown as Payment[];
   const cnRows = stripNullsAll(
-    await db.select().from(creditNotes).where(and(isNull(creditNotes.deletedAt), sql`${creditNotes.clientId} IN (${owing})`)),
+    await db
+      .select()
+      .from(creditNotes)
+      .where(and(isNull(creditNotes.deletedAt), sql`${creditNotes.clientId} IN (${owing})`)),
   ) as unknown as CreditNote[];
   const clientRows = stripNullsAll(
-    await db.select().from(clients).where(and(isNull(clients.deletedAt), sql`${clients.id} IN (${owing})`)),
+    await db
+      .select()
+      .from(clients)
+      .where(and(isNull(clients.deletedAt), sql`${clients.id} IN (${owing})`)),
   ) as unknown as Client[];
-  const stateRes = await db.execute(sql`SELECT client_id, next_follow_up, promised_date FROM follow_up_state`);
+  const stateRes = await db.execute(
+    sql`SELECT client_id, next_follow_up, promised_date FROM follow_up_state`,
+  );
   const stateBy = new Map(
-    (stateRes.rows as { client_id: string; next_follow_up: string | null; promised_date: string | null }[]).map((r) => [r.client_id, r]),
+    (
+      stateRes.rows as {
+        client_id: string;
+        next_follow_up: string | null;
+        promised_date: string | null;
+      }[]
+    ).map((r) => [r.client_id, r]),
   );
   const contactRes = await db.execute(sql`
     SELECT DISTINCT ON (client_id) client_id, method, note, at,
            count(*) OVER (PARTITION BY client_id)::int AS n
     FROM follow_up_contacts WHERE client_id IN (${owing}) ORDER BY client_id, at DESC`);
   const contactBy = new Map(
-    (contactRes.rows as { client_id: string; method: string; note: string; at: Date | string; n: number }[]).map((r) => [r.client_id, r]),
+    (
+      contactRes.rows as {
+        client_id: string;
+        method: string;
+        note: string;
+        at: Date | string;
+        n: number;
+      }[]
+    ).map((r) => [r.client_id, r]),
   );
 
   const views = buildInvoiceViews(invRows, payRows, clientRows, cnRows);
@@ -80,14 +108,24 @@ export async function loadOverdue(): Promise<OverdueSet> {
       promiseMissed: promised !== null && promised < today,
       state: followState(st?.next_follow_up ?? null, today),
       contactCount: ct?.n ?? 0,
-      lastContact: ct ? { method: ct.method, note: ct.note, at: new Date(ct.at).toISOString() } : null,
+      lastContact: ct
+        ? { method: ct.method, note: ct.note, at: new Date(ct.at).toISOString() }
+        : null,
       invoices: late
         .sort((a, b) => b.ageing - a.ageing)
-        .map((v) => ({ id: v.id, number: v.number, dueDate: v.dueDate, outstanding: v.effectiveOutstanding, daysLate: v.ageing })),
+        .map((v) => ({
+          id: v.id,
+          number: v.number,
+          dueDate: v.dueDate,
+          outstanding: v.effectiveOutstanding,
+          daysLate: v.ageing,
+        })),
     });
   }
   const buckets = BUCKETS.map((b) =>
-    round2(allLate.filter(([age]) => age! >= b.min && age! <= b.max).reduce((a, [, amt]) => a + amt!, 0)),
+    round2(
+      allLate.filter(([age]) => age! >= b.min && age! <= b.max).reduce((a, [, amt]) => a + amt!, 0),
+    ),
   );
   return { today, clients: out, buckets };
 }

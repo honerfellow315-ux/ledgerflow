@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLedger } from "@/lib/ledger/store";
 import { RequireView } from "@/components/app/RequireView";
 import {
@@ -62,11 +62,21 @@ function ReportsPageContent() {
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const clients = data.clients.filter(
-    (c) => !companyId || (companyId === "default" ? !c.companyId : c.companyId === companyId),
+  const clients = useMemo(
+    () =>
+      data.clients.filter(
+        (c) => !companyId || (companyId === "default" ? !c.companyId : c.companyId === companyId),
+      ),
+    [data.clients, companyId],
   );
-  const scopedIds = new Set(clients.filter((c) => !clientId || c.id === clientId).map((c) => c.id));
-  const inDates = (date: string) => (!from || date >= from) && (!to || date <= to);
+  const scopedIds = useMemo(
+    () => new Set(clients.filter((c) => !clientId || c.id === clientId).map((c) => c.id)),
+    [clients, clientId],
+  );
+  const inDates = useCallback(
+    (date: string) => (!from || date >= from) && (!to || date <= to),
+    [from, to],
+  );
   const invalidDates = !!from && !!to && from > to;
   const invoiceViewsWithCredit = allCreditInvoices.filter(
     (i) =>
@@ -82,7 +92,10 @@ function ReportsPageContent() {
           .toLowerCase()
           .includes(search.trim().toLowerCase())),
   );
-  const filteredIds = new Set(invoiceViewsWithCredit.map((i) => i.id));
+  const filteredIds = useMemo(
+    () => new Set(invoiceViewsWithCredit.map((i) => i.id)),
+    [invoiceViewsWithCredit],
+  );
   const invoiceViews = allInvoices.filter((i) => filteredIds.has(i.id));
   const [statementClient, setStatementClient] = useState(data.clients[0]?.id ?? "");
 
@@ -90,7 +103,7 @@ function ReportsPageContent() {
     const available = clients.filter((c) => !clientId || c.id === clientId);
     if (!available.some((c) => c.id === statementClient))
       setStatementClient(available[0]?.id ?? "");
-  }, [companyId, clientId, data.clients, statementClient]);
+  }, [clients, clientId, statementClient]);
 
   const outstanding = useMemo(
     () =>
@@ -192,13 +205,12 @@ function ReportsPageContent() {
     data.payments,
     data.creditNotes,
     statementClient,
-    companyId,
-    clientId,
     from,
-    to,
     status,
     search,
     invalidDates,
+    scopedIds,
+    inDates,
   ]);
 
   const paymentHistory = useMemo(() => {
@@ -222,13 +234,12 @@ function ReportsPageContent() {
     data.payments,
     data.clients,
     allInvoices,
-    companyId,
-    clientId,
-    from,
-    to,
     status,
     search,
     invalidDates,
+    scopedIds,
+    inDates,
+    filteredIds,
   ]);
 
   return (
@@ -241,29 +252,59 @@ function ReportsPageContent() {
         <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
           <label className="text-xs">
             Company
-            <Select value={companyId || "all"} onValueChange={(value) => { setCompanyId(value === "all" ? "" : value); setClientId(""); }}>
-              <SelectTrigger aria-label="Company" className="mt-1"><SelectValue /></SelectTrigger>
+            <Select
+              value={companyId || "all"}
+              onValueChange={(value) => {
+                setCompanyId(value === "all" ? "" : value);
+                setClientId("");
+              }}
+            >
+              <SelectTrigger aria-label="Company" className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All companies</SelectItem>
                 <SelectItem value="default">Default business</SelectItem>
-                {data.companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                {data.companies.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </label>
           <label className="text-xs">
             Client
-            <Select value={clientId || "all"} onValueChange={(value) => { const id = value === "all" ? "" : value; setClientId(id); if (id) setStatementClient(id); }}>
-              <SelectTrigger aria-label="Client" className="mt-1"><SelectValue /></SelectTrigger>
+            <Select
+              value={clientId || "all"}
+              onValueChange={(value) => {
+                const id = value === "all" ? "" : value;
+                setClientId(id);
+                if (id) setStatementClient(id);
+              }}
+            >
+              <SelectTrigger aria-label="Client" className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All clients</SelectItem>
-                {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.company} · {c.name}</SelectItem>)}
+                {clients.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.company} · {c.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </label>
           <label className="text-xs">
             Invoice status
-            <Select value={status || "all"} onValueChange={(value) => setStatus(value === "all" ? "" : value)}>
-              <SelectTrigger aria-label="Invoice status" className="mt-1"><SelectValue /></SelectTrigger>
+            <Select
+              value={status || "all"}
+              onValueChange={(value) => setStatus(value === "all" ? "" : value)}
+            >
+              <SelectTrigger aria-label="Invoice status" className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All statuses</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>

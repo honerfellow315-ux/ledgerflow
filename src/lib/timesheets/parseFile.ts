@@ -41,7 +41,12 @@ function csvToMatrix(text: string): TsMatrix {
   const clean = text.replace(/^\uFEFF/, "");
   const firstLine = clean.split(/\r\n|\n|\r/, 1)[0] ?? "";
   const count = (ch: string) => firstLine.split(ch).length - 1;
-  const delim = count("\t") > count(",") && count("\t") > count(";") ? "\t" : count(";") > count(",") ? ";" : ",";
+  const delim =
+    count("\t") > count(",") && count("\t") > count(";")
+      ? "\t"
+      : count(";") > count(",")
+        ? ";"
+        : ",";
   const rows: TsMatrix = [];
   let row: TsCell[] = [];
   let field = "";
@@ -164,7 +169,9 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
       const sheets = await excelSheets(buf);
       grids = sheets.map((s) => ({ ...s, single: sheets.length === 1 }));
     } catch {
-      result.problems.push("This file could not be opened. Is it a damaged or password protected Excel file?");
+      result.problems.push(
+        "This file could not be opened. Is it a damaged or password protected Excel file?",
+      );
       return result;
     }
   } else if (ext === "pdf") {
@@ -175,7 +182,9 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
     } catch (e) {
       const why = e instanceof Error ? `${e.name} ${e.message}` : "";
       result.problems.push(
-        /password/i.test(why) ? "This PDF is password protected." : "This PDF could not be opened. Is the file damaged?",
+        /password/i.test(why)
+          ? "This PDF is password protected."
+          : "This PDF could not be opened. Is the file damaged?",
       );
       return result;
     }
@@ -206,7 +215,9 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
     }
     grids = [{ name: "", matrix, single: true }];
   } else if (ext === "xls") {
-    result.problems.push("Old .xls files are not supported. Open it in Excel and save it as .xlsx.");
+    result.problems.push(
+      "Old .xls files are not supported. Open it in Excel and save it as .xlsx.",
+    );
     return result;
   } else if (ext === "doc") {
     result.problems.push("Old .doc files are not supported. Open it in Word and save it as .docx.");
@@ -247,12 +258,16 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
   }
 
   if (found.length > MAX_SHEETS_PER_FILE) {
-    result.problems.push(`The file has more than ${MAX_SHEETS_PER_FILE} timesheets. Only the first ${MAX_SHEETS_PER_FILE} were read.`);
+    result.problems.push(
+      `The file has more than ${MAX_SHEETS_PER_FILE} timesheets. Only the first ${MAX_SHEETS_PER_FILE} were read.`,
+    );
     found.length = MAX_SHEETS_PER_FILE;
   }
   result.sheets = found;
   if (found.length === 0 && result.problems.length === 0) {
-    result.problems.push(skipped.length > 0 ? "The timesheet table has no shifts with hours in it." : NO_TABLE);
+    result.problems.push(
+      skipped.length > 0 ? "The timesheet table has no shifts with hours in it." : NO_TABLE,
+    );
   } else if (skipped.length > 0 && found.length > 0) {
     result.problems.push(`Skipped (no shifts found): ${skipped.join(", ")}.`);
   }

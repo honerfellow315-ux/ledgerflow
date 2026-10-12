@@ -532,7 +532,9 @@ function DashboardContent() {
                         tickLine={false}
                         axisLine={false}
                         width={52}
-                        tickFormatter={(v: number) => Math.abs(v) < 1000 ? `£${v}` : `£${Number((v / 1000).toFixed(1))}k`}
+                        tickFormatter={(v: number) =>
+                          Math.abs(v) < 1000 ? `£${v}` : `£${Number((v / 1000).toFixed(1))}k`
+                        }
                       />
                       <Tooltip
                         formatter={(v: number) => formatMoney(v)}
@@ -859,8 +861,6 @@ function DashboardContent() {
               </ul>
             )}
           </Panel>
-
-
         </div>
       </div>
 

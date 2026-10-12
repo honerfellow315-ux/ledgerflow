@@ -48,7 +48,11 @@ export function wordXmlToBlocks(xml: string, parse: (xml: string) => Document): 
       const rows: string[][] = [];
       for (const r of kids(el)) {
         if (r.localName !== "tr") continue;
-        rows.push(kids(r).filter((c) => c.localName === "tc").map((c) => clean(textOf(c))));
+        rows.push(
+          kids(r)
+            .filter((c) => c.localName === "tc")
+            .map((c) => clean(textOf(c))),
+        );
       }
       blocks.push({ kind: "table", rows });
     }
@@ -67,13 +71,21 @@ const asCells = (cells: string[]): TsCell[] => cells.map((c) => (c === "" ? null
 export function blocksToMatrix(blocks: WordBlock[]): TsMatrix | null {
   const main = blocks.findIndex((b) => b.kind === "table" && b.rows.some(isHeaderRow));
   if (main < 0) {
-    const lines = blocks.flatMap((b) => (b.kind === "p" ? [b.text] : b.rows.map((r) => r.filter(Boolean).join(" "))));
+    const lines = blocks.flatMap((b) =>
+      b.kind === "p" ? [b.text] : b.rows.map((r) => r.filter(Boolean).join(" ")),
+    );
     return linesToMatrix(lines);
   }
   const before = blocks.slice(0, main);
   const after = blocks.slice(main + 1);
   const out: TsMatrix = [];
-  out.push(...topRows(before.flatMap((b) => (b.kind === "p" ? [b.text] : b.rows.map((r) => r.filter(Boolean).join(" "))))));
+  out.push(
+    ...topRows(
+      before.flatMap((b) =>
+        b.kind === "p" ? [b.text] : b.rows.map((r) => r.filter(Boolean).join(" ")),
+      ),
+    ),
+  );
   for (const b of before) {
     // A small table above the main one (Name | value, NI | value): keep its cells as they are.
     if (b.kind === "table") for (const r of b.rows) out.push(asCells(r), []);

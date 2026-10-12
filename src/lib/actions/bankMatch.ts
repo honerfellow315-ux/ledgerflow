@@ -22,7 +22,14 @@ import {
   saveStatement,
   type UploadResult,
 } from "../server/bankMatch";
-import { matchLine, payerKey, type BankLine, type LineStatus, type OpenInvoice, type StatementInfo } from "../bankMatch/data";
+import {
+  matchLine,
+  payerKey,
+  type BankLine,
+  type LineStatus,
+  type OpenInvoice,
+  type StatementInfo,
+} from "../bankMatch/data";
 import { MAX_BANK_LINES } from "../bankMatch/parse";
 
 async function requireBankAccess() {
@@ -43,7 +50,13 @@ export interface BankPage {
   waitingTotal: number;
 }
 
-const ORDER: Record<LineStatus, number> = { review: 0, none: 1, matched: 2, confirmed: 3, ignored: 4 };
+const ORDER: Record<LineStatus, number> = {
+  review: 0,
+  none: 1,
+  matched: 2,
+  confirmed: 3,
+  ignored: 4,
+};
 
 export const listBank = createServerFn({ method: "GET" })
   .validator(
@@ -64,8 +77,19 @@ export const listBank = createServerFn({ method: "GET" })
       .sort((a, b) => ORDER[a.status] - ORDER[b.status] || b.date.localeCompare(a.date));
     const start = (data.page - 1) * data.pageSize;
     const rows = filtered.slice(start, start + data.pageSize);
-    const labels = await invoiceLabels(rows.flatMap((r) => [r.invoiceId ?? "", ...r.candidateIds.slice(0, 3)]));
-    return { rows, total: filtered.length, page: data.page, pageSize: data.pageSize, labels, statements, counts, waitingTotal };
+    const labels = await invoiceLabels(
+      rows.flatMap((r) => [r.invoiceId ?? "", ...r.candidateIds.slice(0, 3)]),
+    );
+    return {
+      rows,
+      total: filtered.length,
+      page: data.page,
+      pageSize: data.pageSize,
+      labels,
+      statements,
+      counts,
+      waitingTotal,
+    };
   });
 
 /** The invoices a person can choose from for one line (fresh, only those with money owed). */
@@ -73,16 +97,26 @@ export const listChoices = createServerFn({ method: "POST" })
   .validator(z.object({ lineId: z.string().min(1).max(100) }))
   .handler(async ({ data }): Promise<{ invoices: OpenInvoice[]; candidateIds: string[] }> => {
     await requireBankAccess();
-    const [line] = (await db.execute(sql`SELECT date, description, amount FROM bank_lines WHERE id = ${data.lineId} AND status = 'open'`)).rows as {
+    const [line] = (
+      await db.execute(
+        sql`SELECT date, description, amount FROM bank_lines WHERE id = ${data.lineId} AND status = 'open'`,
+      )
+    ).rows as {
       date: string;
       description: string;
       amount: string;
     }[];
     if (!line) throw new Error("This line is not waiting any more.");
     const open = await loadOpenInvoices();
-    const linkRes = await db.execute(sql`SELECT client_id FROM bank_payer_links WHERE payer_key = ${payerKey(line.description)}`);
+    const linkRes = await db.execute(
+      sql`SELECT client_id FROM bank_payer_links WHERE payer_key = ${payerKey(line.description)}`,
+    );
     const linked = (linkRes.rows[0] as { client_id: string } | undefined)?.client_id ?? null;
-    const m = matchLine({ date: line.date, description: line.description, amount: Number(line.amount) }, open, linked);
+    const m = matchLine(
+      { date: line.date, description: line.description, amount: Number(line.amount) },
+      open,
+      linked,
+    );
     return { invoices: open, candidateIds: m.candidateIds };
   });
 
@@ -143,22 +177,41 @@ export const confirmMatched = createServerFn({ method: "POST" })
     await requirePermission("invoices", "view");
     const ids = [...new Set(data.lineIds)];
     const res = await db.execute(
-      sql`SELECT id, date, description, amount FROM bank_lines WHERE status = 'open' AND id IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})`,
+      sql`SELECT id, date, description, amount FROM bank_lines WHERE status = 'open' AND id IN (${sql.join(
+        ids.map((i) => sql`${i}`),
+        sql`, `,
+      )})`,
     );
     const lines = res.rows as { id: string; date: string; description: string; amount: string }[];
     const open = await loadOpenInvoices();
     const out: BulkResult = { confirmed: 0, skipped: [] };
     const found = new Set(lines.map((l) => l.id));
-    for (const id of ids) if (!found.has(id)) out.skipped.push({ lineId: id, reason: "This line was already dealt with." });
+    for (const id of ids)
+      if (!found.has(id))
+        out.skipped.push({ lineId: id, reason: "This line was already dealt with." });
     for (const l of lines) {
-      const linkRes = await db.execute(sql`SELECT client_id FROM bank_payer_links WHERE payer_key = ${payerKey(l.description)}`);
+      const linkRes = await db.execute(
+        sql`SELECT client_id FROM bank_payer_links WHERE payer_key = ${payerKey(l.description)}`,
+      );
       const linked = (linkRes.rows[0] as { client_id: string } | undefined)?.client_id ?? null;
-      const m = matchLine({ date: l.date, description: l.description, amount: Number(l.amount) }, open, linked);
+      const m = matchLine(
+        { date: l.date, description: l.description, amount: Number(l.amount) },
+        open,
+        linked,
+      );
       if (m.status !== "matched" || !m.invoiceId) {
-        out.skipped.push({ lineId: l.id, reason: "It is no longer a sure match. Check it by hand." });
+        out.skipped.push({
+          lineId: l.id,
+          reason: "It is no longer a sure match. Check it by hand.",
+        });
         continue;
       }
-      const r = await confirmOne(actor, { lineId: l.id, invoiceId: m.invoiceId, recordAnyway: false, learn: false });
+      const r = await confirmOne(actor, {
+        lineId: l.id,
+        invoiceId: m.invoiceId,
+        recordAnyway: false,
+        learn: false,
+      });
       if (r.ok) {
         out.confirmed++;
         // The next line may be for the same invoice: its owed amount changed.

@@ -1,8 +1,9 @@
+import { stageImport, finishImport, lockImportPeriod } from "../server/importJobs";
 import { createServerFn } from "@tanstack/react-start";
 import { and, asc, desc, eq, inArray, lt, gt, sql } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { db } from "../server/db";
+import { db, withTransaction } from "../server/db";
 import {
   payrollCompanies,
   payrollStaff,
@@ -1065,7 +1066,8 @@ async function assertShiftCompany(code: string) {
     .where(eq(shiftCompanies.code, code))
     .limit(1);
   if (!row) throw new Error(`"${code}" is not a shift company. Add it first.`);
-  if (!row.active) throw new Error(`Shift company ${code} is switched off. Switch it on to import.`);
+  if (!row.active)
+    throw new Error(`Shift company ${code} is switched off. Switch it on to import.`);
 }
 
 const shiftCode = z
@@ -1186,22 +1188,61 @@ const shiftRow = z.object({
  * is called once after the last chunk. The matching itself lives in
  * server/shiftImport.ts.
  */
+const uploadPart = {
+  uploadId: z.string().uuid(),
+  chunkIndex: z.number().int().min(0),
+  totalChunks: z.number().int().min(1).max(100),
+};
 export const importShiftsChunk = createServerFn({ method: "POST" })
   .validator(
     z.object({
       periodId: z.string(),
       source: z.string().trim().min(1).max(20),
-      rows: z.array(shiftRow).max(1500),
+      rows: z.array(shiftRow).min(1).max(1500),
       reset: z.boolean(),
       createMissingStaff: z.boolean(),
+      ...uploadPart,
     }),
   )
   .handler(async ({ data }) => {
-    await requirePermission("salary", "edit");
-    await assertOpen(data.periodId);
+    const actor = await requirePermission("salary", "edit");
     if (data.createMissingStaff) await requirePermission("staff", "create");
     await assertShiftCompany(data.source);
-    return importShiftRows(db, data);
+    return withTransaction(async () => {
+      await lockImportPeriod(data.periodId);
+      const staged = await stageImport(
+        actor.id,
+        "shifts",
+        `${data.periodId}:${data.source}:${data.createMissingStaff}`,
+        data,
+        data.rows,
+      );
+      if (staged.result)
+        return staged.result as {
+          received: number;
+          matched: number;
+          created: number;
+          unmatched: number;
+          complete: boolean;
+        };
+      if (!staged.complete)
+        return {
+          received: data.rows.length,
+          matched: 0,
+          created: 0,
+          unmatched: 0,
+          complete: false,
+        };
+      const result = await importShiftRows(db, {
+        ...data,
+        reset: true,
+        rows: z.array(shiftRow).parse(staged.rows),
+      });
+      await recomputeFromShifts(db, data.periodId);
+      const done = { ...result, complete: true };
+      await finishImport(data.uploadId, done);
+      return done;
+    });
   });
 
 /** Call once after the last `importShiftsChunk`. */
@@ -1216,7 +1257,7 @@ export const recomputeSheetFromShifts = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const actor = await requirePermission("salary", "edit");
     const period = await assertOpen(data.periodId);
-    await recomputeFromShifts(db, data.periodId);
+    // Staged import already rebuilt totals in its transaction. This action only reports completion.
     const counts = await db.execute(sql`
       SELECT count(*)::int AS total, count(*) FILTER (WHERE staff_id IS NULL)::int AS unmatched
       FROM salary_shifts WHERE period_id = ${data.periodId} AND source = ${data.source}`);
@@ -1298,6 +1339,7 @@ const masterRow = z.object({
 export const importMasterSheet = createServerFn({ method: "POST" })
   .validator(
     z.object({
+      ...uploadPart,
       periodId: z.string(),
       rows: z.array(masterRow).max(1500),
       fileName: z.string().default(""),
@@ -1306,99 +1348,153 @@ export const importMasterSheet = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const actor = await requirePermission("salary", "edit");
     await requirePermission("staff", "create");
-    const period = await assertOpen(data.periodId);
-
-    // 1) payroll companies named in the file's headers
-    const companyRows = await db.select().from(payrollCompanies);
-    const companyIdByName = new Map(companyRows.map((c) => [c.name.toLowerCase(), c.id]));
-    let nextOrder = companyRows.reduce((m, c) => Math.max(m, c.orderIndex), -1) + 1;
-    const wantedNames = [...new Set(data.rows.flatMap((r) => Object.keys(r.payroll)))];
-    for (const name of wantedNames) {
-      const existing = companyRows.find((c) => c.name.toLowerCase() === name.toLowerCase());
-      if (existing) {
-        if (!existing.active) {
-          await db
-            .update(payrollCompanies)
-            .set({ active: true })
-            .where(eq(payrollCompanies.id, existing.id));
-        }
-        continue;
-      }
-      const id = uid("pc");
-      await db.insert(payrollCompanies).values({ id, name, orderIndex: nextOrder++ });
-      companyIdByName.set(name.toLowerCase(), id);
-    }
-
-    // 2) staff: match by NI, then RSS ID, ESS ID, then unique name
-    const staffRows = await db.select().from(payrollStaff);
-    const byNi = new Map<string, string>();
-    const byRss = new Map<string, string>();
-    const byEss = new Map<string, string>();
-    const nameCount = new Map<string, number>();
-    const byName = new Map<string, string>();
-    const reg = (s: { id: string; rssId: string; essId: string; ni: string; name: string }) => {
-      if (s.ni) byNi.set(normNi(s.ni), s.id);
-      if (s.rssId) byRss.set(s.rssId, s.id);
-      if (s.essId) byEss.set(s.essId, s.id);
-      const n = normName(s.name);
-      nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
-      byName.set(n, s.id);
-    };
-    staffRows.forEach(reg);
-
-    const fresh: (typeof payrollStaff.$inferInsert)[] = [];
-    const fills: { id: string; r: (typeof data.rows)[number] }[] = [];
-    const rowStaff: { staffId: string; r: (typeof data.rows)[number] }[] = [];
-    const seen = new Set<string>();
-    let skipped = 0;
-    for (const r of data.rows) {
-      if (!r.name.trim()) {
-        skipped++;
-        continue;
-      }
-      let id =
-        (r.ni && byNi.get(normNi(r.ni))) ||
-        (r.rssId && r.rssId !== "0" ? byRss.get(r.rssId) : undefined) ||
-        (r.essId && r.essId !== "0" ? byEss.get(r.essId) : undefined) ||
-        (nameCount.get(normName(r.name)) === 1 ? byName.get(normName(r.name)) : undefined) ||
-        undefined;
-      if (id) {
-        fills.push({ id, r });
-      } else {
-        id = uid("st");
-        const s = {
-          id,
-          rssId: r.rssId && r.rssId !== "0" ? r.rssId : "",
-          essId: r.essId && r.essId !== "0" ? r.essId : "",
-          ni: formatNi(r.ni),
-          name: r.name.trim(),
-          tag: r.tag,
-          accountDetail: r.accountDetail,
-          area: r.area,
+    return withTransaction(async () => {
+      await lockImportPeriod(data.periodId);
+      const staged = await stageImport(actor.id, "master", data.periodId, data, data.rows);
+      if (staged.result)
+        return staged.result as {
+          lines: number;
+          newStaff: number;
+          existingStaff: number;
+          skipped: number;
+          payments: number;
+          complete: boolean;
         };
-        fresh.push(s);
-        reg(s);
-      }
-      if (seen.has(id)) {
-        skipped++; // same person twice in the file — keep the first line
-        continue;
-      }
-      seen.add(id);
-      rowStaff.push({ staffId: id, r });
-    }
-    for (const part of chunk(fresh, 500)) await db.insert(payrollStaff).values(part);
+      if (!staged.complete)
+        return {
+          lines: 0,
+          newStaff: 0,
+          existingStaff: 0,
+          skipped: 0,
+          payments: 0,
+          complete: false,
+        };
+      data = { ...data, rows: z.array(masterRow).parse(staged.rows) };
+      const period = await assertOpen(data.periodId);
 
-    // existing staff: only fill fields that are still empty
-    for (const part of chunk(fills, 400)) {
-      const list = sql.join(
-        part.map(
-          ({ id, r }) =>
-            sql`(${id}::text, ${r.rssId && r.rssId !== "0" ? r.rssId : ""}::text, ${r.essId && r.essId !== "0" ? r.essId : ""}::text,
+      // 1) payroll companies named in the file's headers
+      const companyRows = await db.select().from(payrollCompanies);
+      const companyIdByName = new Map(companyRows.map((c) => [c.name.toLowerCase(), c.id]));
+      let nextOrder = companyRows.reduce((m, c) => Math.max(m, c.orderIndex), -1) + 1;
+      const wantedNames = [...new Set(data.rows.flatMap((r) => Object.keys(r.payroll)))];
+      for (const name of wantedNames) {
+        const existing = companyRows.find((c) => c.name.toLowerCase() === name.toLowerCase());
+        if (existing) {
+          if (!existing.active) {
+            await db
+              .update(payrollCompanies)
+              .set({ active: true })
+              .where(eq(payrollCompanies.id, existing.id));
+          }
+          continue;
+        }
+        const id = uid("pc");
+        await db.insert(payrollCompanies).values({ id, name, orderIndex: nextOrder++ });
+        companyIdByName.set(name.toLowerCase(), id);
+      }
+
+      // 2) staff: match by NI, then RSS ID, ESS ID, then unique name
+      const staffRows = await db.select().from(payrollStaff);
+      const byNi = new Map<string, string>();
+      const byRss = new Map<string, string>();
+      const byEss = new Map<string, string>();
+      const nameCount = new Map<string, number>();
+      const byName = new Map<string, string>();
+      const identities = new Map<string, Set<string>>();
+      const knownNi = new Map<string, string>();
+      const reg = (s: { id: string; rssId: string; essId: string; ni: string; name: string }) => {
+        knownNi.set(s.id, normNi(s.ni));
+        for (const [kind, value] of [
+          ["ni", normNi(s.ni)],
+          ["rss", s.rssId],
+          ["ess", s.essId],
+        ]) {
+          if (!value || value === "0") continue;
+          const key = kind + ":" + value;
+          const ids = identities.get(key) ?? new Set<string>();
+          ids.add(s.id);
+          identities.set(key, ids);
+        }
+        if (s.ni) byNi.set(normNi(s.ni), s.id);
+        if (s.rssId) byRss.set(s.rssId, s.id);
+        if (s.essId) byEss.set(s.essId, s.id);
+        const n = normName(s.name);
+        nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
+        byName.set(n, s.id);
+      };
+      staffRows.forEach(reg);
+
+      const fresh: (typeof payrollStaff.$inferInsert)[] = [];
+      const fills: { id: string; r: (typeof data.rows)[number] }[] = [];
+      const rowStaff: { staffId: string; r: (typeof data.rows)[number] }[] = [];
+      const seen = new Set<string>();
+      let skipped = 0;
+      for (const r of data.rows) {
+        if (!r.name.trim()) {
+          skipped++;
+          continue;
+        }
+        const candidates = new Set<string>();
+        for (const [kind, value] of [
+          ["ni", normNi(r.ni)],
+          ["rss", r.rssId],
+          ["ess", r.essId],
+        ]) {
+          if (!value || value === "0") continue;
+          const ids = identities.get(kind + ":" + value);
+          if (ids && ids.size > 1)
+            throw new Error("Duplicate staff identity. Resolve duplicate NI/IDs before importing.");
+          ids?.forEach((id) => candidates.add(id));
+        }
+        if (candidates.size > 1)
+          throw new Error("Staff IDs refer to different people. Review the file before importing.");
+        if (candidates.size === 0 && (nameCount.get(normName(r.name)) ?? 0) > 1)
+          throw new Error("Staff name is ambiguous. Supply a unique NI or company ID.");
+        let id =
+          (r.ni && byNi.get(normNi(r.ni))) ||
+          (r.rssId && r.rssId !== "0" ? byRss.get(r.rssId) : undefined) ||
+          (r.essId && r.essId !== "0" ? byEss.get(r.essId) : undefined) ||
+          (nameCount.get(normName(r.name)) === 1 ? byName.get(normName(r.name)) : undefined) ||
+          undefined;
+        if (id && normNi(r.ni) && knownNi.get(id) && knownNi.get(id) !== normNi(r.ni))
+          throw new Error("Staff name/ID conflicts with NI. Review the file before importing.");
+        if (id) {
+          fills.push({ id, r });
+        } else {
+          id = uid("st");
+          const s = {
+            id,
+            rssId: r.rssId && r.rssId !== "0" ? r.rssId : "",
+            essId: r.essId && r.essId !== "0" ? r.essId : "",
+            ni: formatNi(r.ni),
+            name: r.name.trim(),
+            tag: r.tag,
+            accountDetail: r.accountDetail,
+            area: r.area,
+          };
+          fresh.push(s);
+          reg(s);
+        }
+        if (seen.has(id)) {
+          skipped++; // same person twice in the file — keep the first line
+          continue;
+        }
+        seen.add(id);
+        rowStaff.push({ staffId: id, r });
+      }
+      for (const part of chunk(fresh, 500)) await db.insert(payrollStaff).values(part);
+
+      // existing staff: only fill fields that are still empty
+      for (const part of chunk(fills, 400)) {
+        const list = sql.join(
+          part.map(
+            ({ id, r }) =>
+              sql`(${id}::text, ${r.rssId && r.rssId !== "0" ? r.rssId : ""}::text, ${r.essId && r.essId !== "0" ? r.essId : ""}::text,
                  ${formatNi(r.ni)}::text, ${r.tag}::text, ${r.accountDetail}::text, ${r.area}::text)`,
-        ),
-        sql`, `,
-      );
-      await db.execute(sql`
+          ),
+          sql`, `,
+        );
+        await db.execute(sql`
         UPDATE payroll_staff s SET
           rss_id = CASE WHEN s.rss_id = '' THEN v.rss_id ELSE s.rss_id END,
           ess_id = CASE WHEN s.ess_id = '' THEN v.ess_id ELSE s.ess_id END,
@@ -1408,99 +1504,103 @@ export const importMasterSheet = createServerFn({ method: "POST" })
           area = CASE WHEN s.area = '' THEN v.area ELSE s.area END
         FROM (VALUES ${list}) AS v(id, rss_id, ess_id, ni, tag, account_detail, area)
         WHERE s.id = v.id`);
-    }
+      }
 
-    // 3) salary lines (upsert on period + staff)
-    const entryIdByStaff = new Map<string, string>();
-    for (const part of chunk(rowStaff, 300)) {
-      const values = part.map(({ staffId, r }) => ({
-        id: uid("se"),
-        periodId: data.periodId,
-        staffId,
-        rssAmount: r.rssAmount,
-        rssHours: r.rssHours,
-        essAmount: r.essAmount,
-        essHours: r.essHours,
-        carryForward: r.carryForward,
-        taxDeduction: r.taxDeduction,
-        deduction: r.deduction,
-        checkStatus: r.checkStatus,
-        flag: r.flag,
-        payroll: Object.fromEntries(
-          Object.entries(r.payroll)
-            .map(([name, v]) => [companyIdByName.get(name.toLowerCase()) ?? "", v] as const)
-            .filter(([id, v]) => id && v !== 0),
-        ),
-      }));
-      const saved = await db
-        .insert(salaryEntries)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [salaryEntries.periodId, salaryEntries.staffId],
-          set: {
-            rssAmount: sql`excluded.rss_amount`,
-            rssHours: sql`excluded.rss_hours`,
-            essAmount: sql`excluded.ess_amount`,
-            essHours: sql`excluded.ess_hours`,
-            carryForward: sql`excluded.carry_forward`,
-            taxDeduction: sql`excluded.tax_deduction`,
-            deduction: sql`excluded.deduction`,
-            checkStatus: sql`excluded.check_status`,
-            flag: sql`excluded.flag`,
-            payroll: sql`salary_entries.payroll || excluded.payroll`,
-          },
-        })
-        .returning({ id: salaryEntries.id, staffId: salaryEntries.staffId });
-      for (const s of saved) entryIdByStaff.set(s.staffId, s.id);
-    }
-
-    // 4) cash payments P1..Pn — replace the ones a previous Excel import
-    // made for these lines, never anything typed in by hand
-    const entryIds = [...entryIdByStaff.values()];
-    for (const part of chunk(entryIds, 500)) {
-      await db
-        .delete(salaryPayments)
-        .where(
-          and(
-            inArray(salaryPayments.entryId, part),
-            sql`${salaryPayments.notes} LIKE 'Imported from Excel%'`,
+      // 3) salary lines (upsert on period + staff)
+      const entryIdByStaff = new Map<string, string>();
+      for (const part of chunk(rowStaff, 300)) {
+        const values = part.map(({ staffId, r }) => ({
+          id: uid("se"),
+          periodId: data.periodId,
+          staffId,
+          rssAmount: r.rssAmount,
+          rssHours: r.rssHours,
+          essAmount: r.essAmount,
+          essHours: r.essHours,
+          carryForward: r.carryForward,
+          taxDeduction: r.taxDeduction,
+          deduction: r.deduction,
+          checkStatus: r.checkStatus,
+          flag: r.flag,
+          payroll: Object.fromEntries(
+            Object.entries(r.payroll)
+              .map(([name, v]) => [companyIdByName.get(name.toLowerCase()) ?? "", v] as const)
+              .filter(([id, v]) => id && v !== 0),
           ),
-        );
-    }
-    const payValues: (typeof salaryPayments.$inferInsert)[] = [];
-    for (const { staffId, r } of rowStaff) {
-      const entryId = entryIdByStaff.get(staffId);
-      if (!entryId) continue;
-      r.payments.forEach((amount, i) => {
-        if (!amount) return;
-        payValues.push({
-          id: uid("sy"),
-          entryId,
-          date: today(),
-          amount,
-          method: "Bank Transfer",
-          reference: `P${i + 1}`,
-          notes: `Imported from Excel (P${i + 1})`,
-        });
-      });
-    }
-    for (const part of chunk(payValues, 800)) await db.insert(salaryPayments).values(part);
+        }));
+        const saved = await db
+          .insert(salaryEntries)
+          .values(values)
+          .onConflictDoUpdate({
+            target: [salaryEntries.periodId, salaryEntries.staffId],
+            set: {
+              rssAmount: sql`excluded.rss_amount`,
+              rssHours: sql`excluded.rss_hours`,
+              essAmount: sql`excluded.ess_amount`,
+              essHours: sql`excluded.ess_hours`,
+              carryForward: sql`excluded.carry_forward`,
+              taxDeduction: sql`excluded.tax_deduction`,
+              deduction: sql`excluded.deduction`,
+              checkStatus: sql`excluded.check_status`,
+              flag: sql`excluded.flag`,
+              payroll: sql`salary_entries.payroll || excluded.payroll`,
+            },
+          })
+          .returning({ id: salaryEntries.id, staffId: salaryEntries.staffId });
+        for (const s of saved) entryIdByStaff.set(s.staffId, s.id);
+      }
 
-    await recordActivity({
-      actor,
-      action: "updated",
-      module: "salary",
-      entityId: period.id,
-      label: `Salary period — ${formatMonthLabel(period.month)}`,
-      details: `Imported Excel salary sheet${data.fileName ? ` ${data.fileName}` : ""}: ${rowStaff.length} lines, ${fresh.length} new staff`,
+      // 4) cash payments P1..Pn — replace the ones a previous Excel import
+      // made for these lines, never anything typed in by hand
+      const entryIds = [...entryIdByStaff.values()];
+      for (const part of chunk(entryIds, 500)) {
+        await db
+          .delete(salaryPayments)
+          .where(
+            and(
+              inArray(salaryPayments.entryId, part),
+              sql`${salaryPayments.notes} LIKE 'Imported from Excel%'`,
+            ),
+          );
+      }
+      const payValues: (typeof salaryPayments.$inferInsert)[] = [];
+      for (const { staffId, r } of rowStaff) {
+        const entryId = entryIdByStaff.get(staffId);
+        if (!entryId) continue;
+        r.payments.forEach((amount, i) => {
+          if (!amount) return;
+          payValues.push({
+            id: uid("sy"),
+            entryId,
+            date: today(),
+            amount,
+            method: "Bank Transfer",
+            reference: `P${i + 1}`,
+            notes: `Imported from Excel (P${i + 1})`,
+          });
+        });
+      }
+      for (const part of chunk(payValues, 800)) await db.insert(salaryPayments).values(part);
+
+      await recordActivity({
+        actor,
+        action: "updated",
+        module: "salary",
+        entityId: period.id,
+        label: `Salary period — ${formatMonthLabel(period.month)}`,
+        details: `Imported Excel salary sheet${data.fileName ? ` ${data.fileName}` : ""}: ${rowStaff.length} lines, ${fresh.length} new staff`,
+      });
+      const result = {
+        complete: true,
+        lines: rowStaff.length,
+        newStaff: fresh.length,
+        existingStaff: fills.length,
+        skipped,
+        payments: payValues.length,
+      };
+      await finishImport(data.uploadId, result);
+      return result;
     });
-    return {
-      lines: rowStaff.length,
-      newStaff: fresh.length,
-      existingStaff: fills.length,
-      skipped,
-      payments: payValues.length,
-    };
   });
 
 /* ------------------------------------------------------------------ */
@@ -1510,6 +1610,7 @@ export const importMasterSheet = createServerFn({ method: "POST" })
 export const importPayrollAmounts = createServerFn({ method: "POST" })
   .validator(
     z.object({
+      uploadId: z.string().uuid(),
       periodId: z.string(),
       companyId: z.string(),
       keyKind: z.enum(["ni", "rssId", "essId", "name"]),
@@ -1520,87 +1621,101 @@ export const importPayrollAmounts = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const actor = await requirePermission("salary", "edit");
-    const period = await assertOpen(data.periodId);
-    const [company] = await db
-      .select()
-      .from(payrollCompanies)
-      .where(eq(payrollCompanies.id, data.companyId))
-      .limit(1);
-    if (!company) throw new Error("That payroll company no longer exists.");
-
-    const staffRows = await db.select().from(payrollStaff);
-    const lookup = new Map<string, string>();
-    const dupName = new Set<string>();
-    for (const s of staffRows) {
-      const k =
-        data.keyKind === "ni"
-          ? normNi(s.ni)
-          : data.keyKind === "rssId"
-            ? s.rssId
-            : data.keyKind === "essId"
-              ? s.essId
-              : normName(s.name);
-      if (!k) continue;
-      if (lookup.has(k)) dupName.add(k);
-      lookup.set(k, s.id);
-    }
-
-    const perStaff = new Map<string, { amount: number; tax: number }>();
-    const notFound: string[] = [];
-    for (const r of data.rows) {
-      const k =
-        data.keyKind === "ni"
-          ? normNi(r.key)
-          : data.keyKind === "name"
-            ? normName(r.key)
-            : r.key.trim();
-      if (!k) continue;
-      const sid = lookup.get(k);
-      if (!sid || dupName.has(k)) {
-        if (notFound.length < 50) notFound.push(r.key);
-        continue;
-      }
-      const cur = perStaff.get(sid) ?? { amount: 0, tax: 0 };
-      cur.amount += r.amount;
-      cur.tax += r.tax;
-      perStaff.set(sid, cur);
-    }
-
-    // make sure every matched person has a line in this period
-    const staffIds = [...perStaff.keys()];
-    for (const part of chunk(staffIds, 500)) {
-      await db
-        .insert(salaryEntries)
-        .values(part.map((staffId) => ({ id: uid("se"), periodId: data.periodId, staffId })))
-        .onConflictDoNothing();
-    }
-    for (const part of chunk([...perStaff], 500)) {
-      const list = sql.join(
-        part.map(
-          ([sid, v]) =>
-            sql`(${sid}::text, ${round2(v.amount)}::numeric, ${round2(v.tax)}::numeric)`,
-        ),
-        sql`, `,
+    return withTransaction(async () => {
+      await lockImportPeriod(data.periodId);
+      const staged = await stageImport(
+        actor.id,
+        "payroll",
+        `${data.periodId}:${data.companyId}:${data.keyKind}:${data.mode}`,
+        { uploadId: data.uploadId, chunkIndex: 0, totalChunks: 1 },
+        data.rows,
       );
-      const amountExpr =
-        data.mode === "add"
-          ? sql`COALESCE((e.payroll ->> ${data.companyId}::text)::numeric, 0) + v.amt`
-          : sql`v.amt`;
-      await db.execute(sql`
+      if (staged.result)
+        return staged.result as { matched: number; notFound: string[]; notFoundCount: number };
+      const period = await assertOpen(data.periodId);
+      const [company] = await db
+        .select()
+        .from(payrollCompanies)
+        .where(eq(payrollCompanies.id, data.companyId))
+        .limit(1);
+      if (!company) throw new Error("That payroll company no longer exists.");
+
+      const staffRows = await db.select().from(payrollStaff);
+      const lookup = new Map<string, string>();
+      const dupName = new Set<string>();
+      for (const s of staffRows) {
+        const k =
+          data.keyKind === "ni"
+            ? normNi(s.ni)
+            : data.keyKind === "rssId"
+              ? s.rssId
+              : data.keyKind === "essId"
+                ? s.essId
+                : normName(s.name);
+        if (!k) continue;
+        if (lookup.has(k)) dupName.add(k);
+        lookup.set(k, s.id);
+      }
+
+      const perStaff = new Map<string, { amount: number; tax: number }>();
+      const notFound: string[] = [];
+      for (const r of data.rows) {
+        const k =
+          data.keyKind === "ni"
+            ? normNi(r.key)
+            : data.keyKind === "name"
+              ? normName(r.key)
+              : r.key.trim();
+        if (!k) continue;
+        const sid = lookup.get(k);
+        if (!sid || dupName.has(k)) {
+          if (notFound.length < 50) notFound.push(r.key);
+          continue;
+        }
+        const cur = perStaff.get(sid) ?? { amount: 0, tax: 0 };
+        cur.amount += r.amount;
+        cur.tax += r.tax;
+        perStaff.set(sid, cur);
+      }
+
+      // make sure every matched person has a line in this period
+      const staffIds = [...perStaff.keys()];
+      for (const part of chunk(staffIds, 500)) {
+        await db
+          .insert(salaryEntries)
+          .values(part.map((staffId) => ({ id: uid("se"), periodId: data.periodId, staffId })))
+          .onConflictDoNothing();
+      }
+      for (const part of chunk([...perStaff], 500)) {
+        const list = sql.join(
+          part.map(
+            ([sid, v]) =>
+              sql`(${sid}::text, ${round2(v.amount)}::numeric, ${round2(v.tax)}::numeric)`,
+          ),
+          sql`, `,
+        );
+        const amountExpr =
+          data.mode === "add"
+            ? sql`COALESCE((e.payroll ->> ${data.companyId}::text)::numeric, 0) + v.amt`
+            : sql`v.amt`;
+        await db.execute(sql`
         UPDATE salary_entries e SET
           payroll = e.payroll || jsonb_build_object(${data.companyId}::text, (${amountExpr})),
           tax_deduction = CASE WHEN v.tax <> 0 THEN ${data.mode === "add" ? sql`e.tax_deduction + v.tax` : sql`v.tax`} ELSE e.tax_deduction END
         FROM (VALUES ${list}) AS v(staff_id, amt, tax)
         WHERE e.period_id = ${data.periodId} AND e.staff_id = v.staff_id`);
-    }
+      }
 
-    await recordActivity({
-      actor,
-      action: "updated",
-      module: "salary",
-      entityId: period.id,
-      label: `Salary period — ${formatMonthLabel(period.month)}`,
-      details: `Imported ${company.name} payroll${data.fileName ? ` from ${data.fileName}` : ""}: ${perStaff.size} staff matched, ${notFound.length} not found`,
+      await recordActivity({
+        actor,
+        action: "updated",
+        module: "salary",
+        entityId: period.id,
+        label: `Salary period — ${formatMonthLabel(period.month)}`,
+        details: `Imported ${company.name} payroll${data.fileName ? ` from ${data.fileName}` : ""}: ${perStaff.size} staff matched, ${notFound.length} not found`,
+      });
+      const result = { matched: perStaff.size, notFound, notFoundCount: notFound.length };
+      await finishImport(data.uploadId, result);
+      return result;
     });
-    return { matched: perStaff.size, notFound, notFoundCount: notFound.length };
   });

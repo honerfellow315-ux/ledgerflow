@@ -1895,3 +1895,13 @@ div.min-h-screen.bg-background:has(> aside.sidebar-shell) {
     .lf-main .num { overflow-wrap: anywhere; }
   }
 }
+
+@media print {
+  .group-statement-page { display:block !important; border:0; padding:0; color:#000; background:#fff; break-after:page; }
+  .group-statement-page:last-child { break-after:auto; }
+  .group-statement-page table { width:100%; table-layout:fixed; font-size:9px; }
+  .group-statement-page th, .group-statement-page td { overflow-wrap:anywhere; white-space:normal; }
+  .group-statement-page tr { break-inside:avoid; }
+  .group-statement-page thead { display:table-header-group; }
+  .group-statement-page div { overflow:visible !important; }
+}

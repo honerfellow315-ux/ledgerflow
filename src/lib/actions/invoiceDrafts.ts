@@ -1,3 +1,4 @@
+import { lockInvoiceNumbers } from "../server/invoiceNumbers";
 /**
  * Invoice Drafts server functions.
  *  - Seeing drafts needs Invoices (view) and Salary Sheet (view): the hours come from the
@@ -8,12 +9,19 @@
 import { createServerFn } from "@tanstack/react-start";
 import { desc, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../server/db";
+import { db, withTransaction } from "../server/db";
 import { salaryPeriods } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
 import { recordActivity } from "../server/activity";
 import { createDraftInvoices, loadDrafts, type CreateResult } from "../server/invoiceDrafts";
-import { draftState, draftTotals, nameKey, type Draft, type SiteHours, type UnmatchedName } from "../invoiceDrafts/data";
+import {
+  draftState,
+  draftTotals,
+  nameKey,
+  type Draft,
+  type SiteHours,
+  type UnmatchedName,
+} from "../invoiceDrafts/data";
 import { round2 } from "../ledger/calc";
 
 async function requireDraftAccess() {
@@ -29,15 +37,17 @@ export interface DraftMonth {
 }
 
 /** Months that have a Salary Sheet, newest first. */
-export const listDraftMonths = createServerFn({ method: "GET" }).handler(async (): Promise<DraftMonth[]> => {
-  await requireDraftAccess();
-  const list = await db
-    .select({ month: salaryPeriods.month, status: salaryPeriods.status })
-    .from(salaryPeriods)
-    .orderBy(desc(salaryPeriods.month))
-    .limit(60);
-  return list;
-});
+export const listDraftMonths = createServerFn({ method: "GET" }).handler(
+  async (): Promise<DraftMonth[]> => {
+    await requireDraftAccess();
+    const list = await db
+      .select({ month: salaryPeriods.month, status: salaryPeriods.status })
+      .from(salaryPeriods)
+      .orderBy(desc(salaryPeriods.month))
+      .limit(60);
+    return list;
+  },
+);
 
 export type DraftFilter = "all" | "ready" | "check" | "done";
 
@@ -102,7 +112,9 @@ export const listDrafts = createServerFn({ method: "GET" })
 
 /** Hours per site for one draft ("where the hours come from"). */
 export const getDraftSites = createServerFn({ method: "POST" })
-  .validator(z.object({ month: monthSchema, shiftNames: z.array(z.string().max(300)).min(1).max(50) }))
+  .validator(
+    z.object({ month: monthSchema, shiftNames: z.array(z.string().max(300)).min(1).max(50) }),
+  )
   .handler(async ({ data }): Promise<SiteHours[]> => {
     await requireDraftAccess();
     const names = sql.join(
@@ -134,7 +146,15 @@ export const createDrafts = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<CreateResult> => {
     const actor = await requirePermission("invoices", "create");
     await requirePermission("salary", "view");
-    return createDraftInvoices({ actor, month: data.month, clientIds: data.clientIds, allowWarnings: data.allowWarnings });
+    return withTransaction(async () => {
+      await lockInvoiceNumbers();
+      return createDraftInvoices({
+        actor,
+        month: data.month,
+        clientIds: data.clientIds,
+        allowWarnings: data.allowWarnings,
+      });
+    });
   });
 
 export interface MappableClient {
@@ -143,20 +163,31 @@ export interface MappableClient {
 }
 
 /** Clients a shift name can be linked to. */
-export const listMappableClients = createServerFn({ method: "GET" }).handler(async (): Promise<MappableClient[]> => {
-  await requirePermission("invoices", "create");
-  const res = await db.execute(sql`SELECT id, name FROM clients WHERE deleted_at IS NULL ORDER BY name LIMIT 2000`);
-  return (res.rows as { id: string; name: string }[]).map((r) => ({ id: r.id, name: r.name }));
-});
+export const listMappableClients = createServerFn({ method: "GET" }).handler(
+  async (): Promise<MappableClient[]> => {
+    await requirePermission("invoices", "create");
+    const res = await db.execute(
+      sql`SELECT id, name FROM clients WHERE deleted_at IS NULL ORDER BY name LIMIT 2000`,
+    );
+    return (res.rows as { id: string; name: string }[]).map((r) => ({ id: r.id, name: r.name }));
+  },
+);
 
 /** Remember "this name in the shift export is this client". */
 export const linkShiftClient = createServerFn({ method: "POST" })
-  .validator(z.object({ shiftName: z.string().trim().min(1).max(300), clientId: z.string().min(1).max(100) }))
+  .validator(
+    z.object({
+      shiftName: z.string().trim().min(1).max(300),
+      clientId: z.string().min(1).max(100),
+    }),
+  )
   .handler(async ({ data }) => {
     const actor = await requirePermission("invoices", "create");
     const key = nameKey(data.shiftName);
     if (!key) throw new Error("That name has no letters or numbers to match on.");
-    const found = await db.execute(sql`SELECT name FROM clients WHERE id = ${data.clientId} AND deleted_at IS NULL LIMIT 1`);
+    const found = await db.execute(
+      sql`SELECT name FROM clients WHERE id = ${data.clientId} AND deleted_at IS NULL LIMIT 1`,
+    );
     const client = (found.rows[0] as { name: string } | undefined)?.name;
     if (!client) throw new Error("That client no longer exists.");
     await db.execute(sql`
