@@ -436,6 +436,21 @@ export function parseShiftWorkbook(
   const named = sheets.filter((s) => s.name.trim().toLowerCase() === source.toLowerCase());
   const fromNamed = named.length > 0 ? pick(named) : null;
   if (fromNamed && fromNamed.rows.length > 0) return fromNamed;
+  // A workbook with its own RSS / ESS tabs must never be re-read under another company
+  // code: that imported the biggest tab again for every code and multiplied hours.
+  if (sheets.some((s) => ["rss", "ess"].includes(s.name.trim().toLowerCase()))) {
+    return {
+      rows: [],
+      warnings: [
+        `This file has RSS / ESS tabs but none named "${source}". Choose RSS or ESS as the company.`,
+      ],
+      totals: { hours: 0, amount: 0 },
+      months: {},
+      skipped: 0,
+      layout: null,
+      sheetName: "",
+    };
+  }
   return (
     pick(sheets) ?? {
       rows: [],

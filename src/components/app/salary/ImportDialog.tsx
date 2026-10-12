@@ -258,8 +258,26 @@ function ShiftImport({
       .reduce((s, [, n]) => s + n, 0);
   }, [parse, month]);
 
+  // Only shifts dated in the month being paid are imported (on by default). A shift
+  // export that covers several months used to be added to ONE month in full, which
+  // multiplied a person's hours and pay.
+  const [onlyMonth, setOnlyMonth] = useState(true);
+  const toImport = useMemo(
+    () =>
+      parse
+        ? onlyMonth
+          ? parse.rows.filter((r) => !r.date || r.date.startsWith(month))
+          : parse.rows
+        : [],
+    [parse, onlyMonth, month],
+  );
+  const importHours = useMemo(
+    () => Math.round(toImport.reduce((t, r) => t + r.hours, 0) * 100) / 100,
+    [toImport],
+  );
+
   async function run() {
-    if (!parse || parse.rows.length === 0 || running.current) return;
+    if (!parse || toImport.length === 0 || running.current) return;
     running.current = true;
     setBusy(true);
     setResult(null);
@@ -268,18 +286,18 @@ function ShiftImport({
       let matched = 0;
       let created = 0;
       let unmatched = 0;
-      for (let i = 0; i < parse.rows.length; i += SIZE) {
+      for (let i = 0; i < toImport.length; i += SIZE) {
         setProgress(
-          `Uploading shifts ${Math.min(i + SIZE, parse.rows.length)} / ${parse.rows.length}…`,
+          `Uploading shifts ${Math.min(i + SIZE, toImport.length)} / ${toImport.length}…`,
         );
         const r = await importShiftsChunk({
           data: {
-            uploadId: uploadIdFor(JSON.stringify([periodId, source, createMissing, parse.rows])),
+            uploadId: uploadIdFor(JSON.stringify([periodId, source, createMissing, toImport])),
             chunkIndex: i / SIZE,
-            totalChunks: Math.ceil(parse.rows.length / SIZE),
+            totalChunks: Math.ceil(toImport.length / SIZE),
             periodId,
             source,
-            rows: parse.rows.slice(i, i + SIZE),
+            rows: toImport.slice(i, i + SIZE),
             reset: i === 0,
             createMissingStaff: createMissing && canCreateStaff,
           },
@@ -293,7 +311,7 @@ function ShiftImport({
       const done = await recomputeSheetFromShifts({ data: { periodId, source, fileName } });
       await refresh();
       setResult(
-        `Imported ${parse.rows.length} ${source} shifts. ${matched} matched existing staff, ${created} new staff created` +
+        `Imported ${toImport.length} ${source} shifts. ${matched} matched existing staff, ${created} new staff created` +
           (done.unmatched > 0
             ? `, ${done.unmatched} shifts could not be matched to anyone (see the warning on the sheet).`
             : "."),
@@ -397,7 +415,16 @@ function ShiftImport({
           {outside > 0 ? (
             <Notice tone="warn">
               {outside} of {parse.rows.length} shifts are dated outside {formatMonthLabel(month)}.
-              Check you picked the right month.
+              {onlyMonth
+                ? ` They will NOT be imported: ${toImport.length} shifts · ${importHours} hours will be.`
+                : " They WILL be imported and added to this month's hours and pay."}
+              <label className="mt-1 flex items-center gap-2">
+                <Checkbox
+                  checked={onlyMonth}
+                  onCheckedChange={(v) => setOnlyMonth(v === true)}
+                />
+                <span>Only import shifts dated in {formatMonthLabel(month)} (recommended)</span>
+              </label>
             </Notice>
           ) : null}
           {parse.skipped > 0 ? (
@@ -427,7 +454,7 @@ function ShiftImport({
       {result ? <Notice tone="ok">{result}</Notice> : null}
       <div className="flex items-center justify-end gap-3">
         {progress ? <span className="text-[12px] text-muted-foreground">{progress}</span> : null}
-        <Button onClick={run} disabled={busy || !parse || parse.rows.length === 0}>
+        <Button onClick={run} disabled={busy || !parse || toImport.length === 0}>
           {busy ? "Working…" : "Import shifts"}
         </Button>
       </div>
