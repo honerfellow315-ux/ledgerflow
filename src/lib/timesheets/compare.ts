@@ -18,7 +18,7 @@
  * ignoring case and punctuation; one name inside the other (4+ letters) also counts.
  */
 import { normName, round2 } from "../payroll/calc";
-import { HOURS_TOLERANCE_MINUTES } from "./rules";
+import { HOURS_TOLERANCE_MINUTES, SITE_DIFFERENCE_BLOCKS_MATCH_ON_SINGLE_SHIFT_DAY } from "./rules";
 import type { RowResult } from "./data";
 
 export interface SheetRowInput {
@@ -40,6 +40,8 @@ export interface RecordShift {
   siteName: string;
   hours: number;
   rate: number;
+  /** The shift is in our records but not linked to this staff member (found by NI, company ID or name). */
+  unlinked?: boolean;
 }
 
 export interface RowAnswer {
@@ -83,6 +85,8 @@ export function compareRows(args: {
   month: string;
   rows: SheetRowInput[];
   records: RecordShift[];
+  /** Dates on which our records hold a shift with 0 hours (such shifts are not paired). */
+  zeroHourDates?: ReadonlySet<string>;
 }): { answers: RowAnswer[]; missing: MissingFromSheet[] } {
   const answers = new Map<number, RowAnswer>();
   const missing: MissingFromSheet[] = [];
@@ -111,6 +115,10 @@ export function compareRows(args: {
     (recordCounts.get(recordKey(rec)) ?? 0) > 1 ? "Possible duplicate in our records: same date, site, client, hours and rate. Review the imported shifts; both records are included." : "",
     (dayMinutes.get(rec.date) ?? 0) > 1440 ? "Our records total more than 24 hours for this person on this date. Review the imported shifts." : "",
   ].filter(Boolean).join(" ");
+  const linkNote = (rec: RecordShift) =>
+    rec.unlinked
+      ? "This shift in our records is not linked to the staff member (found by NI, company ID or name). Link it in the Salary Sheet."
+      : "";
   const recordsByDate = new Map<string, RecordShift[]>();
   for (const rec of args.records) {
     const list = recordsByDate.get(rec.date);
@@ -188,7 +196,9 @@ export function compareRows(args: {
             r,
             recs.length > 0
               ? "Our records have fewer shifts on this date than the sheet."
-              : "No shift on this date in our records.",
+              : args.zeroHourDates?.has(date)
+                ? "Our records have a shift on this date, but with 0 hours."
+                : "No shift on this date in our records.",
           ),
         });
         continue;
@@ -210,8 +220,13 @@ export function compareRows(args: {
       if (sheetSite.length > 0 && !siteOk(r, rec)) {
         const where = rec.siteName || rec.clientName;
         if (where) note = `${note} The site on the sheet differs from our record (${where}).`.trim();
-        if (result === "match") result = "check_reading";
+        const singleShiftDay = recs.length === 1 && sheetRows.length === 1;
+        if (result === "match" && (!singleShiftDay || SITE_DIFFERENCE_BLOCKS_MATCH_ON_SINGLE_SHIFT_DAY)) {
+          result = "check_reading";
+        }
       }
+      const linked = linkNote(rec);
+      if (linked) note = `${note} ${linked}`.trim();
       const diagnostic = recordNote(rec);
       if (diagnostic) {
         note = [note, diagnostic].filter(Boolean).join(" ");
@@ -235,7 +250,7 @@ export function compareRows(args: {
           site: rec.siteName || rec.clientName,
           recordHours: rec.hours,
           rate: rec.rate,
-          note: ["Worked per our records, but not listed on the sheet.", recordNote(rec)].filter(Boolean).join(" "),
+          note: ["Worked per our records, but not listed on the sheet.", recordNote(rec), linkNote(rec)].filter(Boolean).join(" "),
         });
       }
     }
@@ -250,7 +265,7 @@ export function compareRows(args: {
         site: rec.siteName || rec.clientName,
         recordHours: rec.hours,
         rate: rec.rate,
-        note: [unreadableDates.has(date) ? "Recorded shift could not be compared because the sheet hours are unreadable." : "Worked per our records, but not listed on the sheet.", recordNote(rec)].filter(Boolean).join(" "),
+        note: [unreadableDates.has(date) ? "Recorded shift could not be compared because the sheet hours are unreadable." : "Worked per our records, but not listed on the sheet.", recordNote(rec), linkNote(rec)].filter(Boolean).join(" "),
       });
     }
   }

@@ -1,7 +1,7 @@
 # LedgerFlow: kaam ka plan
 
 Ye file batati hai ke hamne kya karna tha, kya ho chuka hai, aur kya baqi hai.
-Aakhri update: 12 Oct 2026 (Step 1: pre-AI operational fixes).
+Aakhri update: 12 Oct 2026 (Timesheet Check matching ka fix).
 
 ## Current instructions (12 Oct 2026)
 
@@ -69,6 +69,14 @@ Ab `/timesheets` par **`.pdf` (jisme typed text ho) aur `.docx`** bhi upload hot
 - Hadein: ek PDF ya Word me ek hi banda. Standard template ki tarteeb (Sr No, Date, Site, Start, End, Hours, Rate, Amount, Expense). Site ka lamba naam PDF me do lines me toot jaye to site ka naam adhoora aa sakta hai (tareekh aur ghante par asar nahi).
 - Asli typed PDF sample par test: 21 rows, 243 ghante, aur sheet ka apna total (326.5) alag parha gaya, jo compare me mismatch ban kar flag hota hai.
 - Files: `lib/timesheets/textRows.ts`, `readPdf.ts`, `readWord.ts`, aur `parseFile.ts` me nayi branches.
+
+### Timesheet Check: "match nahi hota" ka fix (12 Oct)
+Asli database jaisa test (chhota Postgres) chalake 3 wajah pakri gayin aur theek huin:
+1. **Shifts staff se linked nahi thin** (`salary_shifts.staff_id` khali). Tab har row "No shift on this date in our records" aati thi. Aisa tab hota hai jab staff Salary import ke baad add hua, naam alag likha tha, ya staff delete aur restore hua (delete par shifts ka staff khali ho jata hai). Ab khali-staff wali shifts bhi li jati hain agar unka **NI, company ID ya naam** wohi ho (aur NI doosra na ho). Kisi **aur staff** ki shifts kabhi nahi li jatin. Aisi row par note aata hai: "not linked ... Link it in the Salary Sheet".
+2. **Site ka naam alag likha ho** (guard "Wickes", system "Wickes Building Supplies"): ghante barabar hone par bhi row "Check the reading" ban jati thi. Ab agar us din sirf ek shift hai aur ghante barabar hain to row **match** rehti hai aur note me site ka farq likha aata hai. Ek din me kai shifts hon to site abhi bhi pehchan ke kaam aati hai. Switch: `SITE_DIFFERENCE_BLOCKS_MATCH_ON_SINGLE_SHIFT_DAY` (`lib/timesheets/rules.ts`).
+3. **0 ghante wali shift** pehle "No shift on this date" dikhati thi. Ab note aata hai: "Our records have a shift on this date, but with 0 hours."
+
+Deploy ke baad purani sheets par **"Check again"** dabao taake naye qaide se dobara compare ho. Database me koi SQL nahi.
 
 ### Tasks (asli backend)
 `/tasks` ab asli database par hai (sample data aur "preview / See it as" hata diya).

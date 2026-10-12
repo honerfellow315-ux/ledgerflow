@@ -8,7 +8,7 @@
  * it. Matching asks the database for the one person (never loads all staff), so it stays
  * fast with 10,000+ staff.
  */
-import { and, asc, eq, gt, gte, lte, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../../../drizzle/schema";
 import {
   payrollStaff,
@@ -108,18 +108,61 @@ export async function findStaff(db: Db, rawNi: string, rawName: string): Promise
 
 /* ------------------------------ our own records ------------------------------ */
 
+/**
+ * This person's shifts in our records for the sheet's dates.
+ *
+ * A shift normally carries the staff member's id (it was matched when the shifts were
+ * imported). Some do not: the person was added to Staff after the import, a name was spelt
+ * differently then, or the staff record was deleted and restored (deleting sets the shifts'
+ * staff to empty). Looking only at the id would then say "No shift on this date in our
+ * records" for every row. So shifts with NO staff id are also taken when they carry this
+ * person's NI number or company ID, or the same name (and not a different NI number).
+ * Shifts that belong to ANOTHER staff member are never taken. Such shifts are marked
+ * `unlinked` so the sheet says so.
+ *
+ * Shifts with 0 hours cannot be compared; only their dates are returned, so the note can
+ * say "a shift exists on this date, but with 0 hours".
+ */
 async function loadRecords(
   db: Db,
   staffId: string,
   month: string,
   dates: readonly string[],
-): Promise<RecordShift[]> {
+): Promise<{ records: RecordShift[]; zeroHourDates: Set<string> }> {
   const real = dates.filter((d) => d !== "");
   const from = [`${month}-01`, ...real].sort()[0]!;
   const to = [`${month}-31`, ...real].sort().at(-1)!;
+
+  const [person] = await db
+    .select({ ni: payrollStaff.ni, name: payrollStaff.name, rssId: payrollStaff.rssId, essId: payrollStaff.essId })
+    .from(payrollStaff)
+    .where(eq(payrollStaff.id, staffId))
+    .limit(1);
+  const niKey = normNi(person?.ni ?? "");
+  const nameKey = normName(person?.name ?? "").replace(/\s+/g, " ");
+  const companyIds = [person?.rssId, person?.essId].filter((x): x is string => typeof x === "string" && x !== "");
+
+  const shiftNi = sql`regexp_replace(upper(${salaryShifts.ni}), '[^A-Z0-9]', '', 'g')`;
+  const shiftName = sql`trim(regexp_replace(regexp_replace(regexp_replace(lower(${salaryShifts.employeeName}), '[(][^)]*[)]', ' ', 'g'), '[^a-z0-9]+', ' ', 'g'), ' +', ' ', 'g'))`;
+  const unlinkedBy = [];
+  if (niKey.length >= 6) unlinkedBy.push(sql`${shiftNi} = ${niKey}`);
+  if (companyIds.length > 0) unlinkedBy.push(inArray(salaryShifts.employeeId, companyIds));
+  if (nameKey) {
+    unlinkedBy.push(
+      niKey
+        ? sql`(${shiftName} = ${nameKey} AND (${shiftNi} = '' OR ${shiftNi} = ${niKey}))`
+        : sql`${shiftName} = ${nameKey}`,
+    );
+  }
+  const whose =
+    unlinkedBy.length > 0
+      ? or(eq(salaryShifts.staffId, staffId), and(isNull(salaryShifts.staffId), or(...unlinkedBy)))
+      : eq(salaryShifts.staffId, staffId);
+
   const rows = await db
     .select({
       id: salaryShifts.id,
+      staffId: salaryShifts.staffId,
       date: salaryShifts.date,
       clientName: salaryShifts.clientName,
       siteName: salaryShifts.siteName,
@@ -127,15 +170,26 @@ async function loadRecords(
       rate: salaryShifts.rate,
     })
     .from(salaryShifts)
-    .where(
-      and(
-        eq(salaryShifts.staffId, staffId),
-        gte(salaryShifts.date, from),
-        lte(salaryShifts.date, to),
-        gt(salaryShifts.hours, 0),
-      ),
-    );
-  return rows;
+    .where(and(whose, gte(salaryShifts.date, from), lte(salaryShifts.date, to)));
+
+  const records: RecordShift[] = [];
+  const zeroHourDates = new Set<string>();
+  for (const r of rows) {
+    if (r.hours > 0) {
+      records.push({
+        id: r.id,
+        date: r.date,
+        clientName: r.clientName,
+        siteName: r.siteName,
+        hours: r.hours,
+        rate: r.rate,
+        ...(r.staffId === null ? { unlinked: true } : {}),
+      });
+    } else {
+      zeroHourDates.add(r.date);
+    }
+  }
+  return { records, zeroHourDates };
 }
 
 /* ------------------------------ one full check ------------------------------ */
@@ -154,19 +208,20 @@ export async function evaluate(
   a: { personName: string; personNi: string; month: string; rows: SheetRowInput[] },
 ): Promise<Evaluation> {
   const staff = await findStaff(db, a.personNi, a.personName);
-  const records = staff.staffId
+  const loaded = staff.staffId
     ? await loadRecords(
         db,
         staff.staffId,
         a.month,
         a.rows.map((r) => r.date),
       )
-    : [];
+    : { records: [], zeroHourDates: new Set<string>() };
   const { answers, missing } = compareRows({
     staffFound: staff.staffId !== null,
     month: a.month,
     rows: a.rows,
-    records,
+    records: loaded.records,
+    zeroHourDates: loaded.zeroHourDates,
   });
   const sheetHours = sumHours(a.rows.map((r) => r.hours));
   const recordHours =
