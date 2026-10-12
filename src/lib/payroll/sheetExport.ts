@@ -41,7 +41,7 @@ const HEAD = [
   "Address",
   "Town",
   "Post Code",
-  "Uniform",
+  "Uniform cost",
   "Account Holder Name",
   "Account Number",
   "Sort Code",
@@ -162,7 +162,9 @@ export async function buildPayrollWorkbook(
       row.getCell(8).value =
         line.fixedAmount != null || line.holidayRate != null
           ? t.amount
-          : { formula: `G${r}*E${r}`, result: t.amount };
+          : { formula: `G${r}*E${r}+R${r}`, result: t.amount };
+      row.getCell(18).value = line.uniformCost ?? 0;
+      row.getCell(18).numFmt = "0.00";
       row.getCell(9).value = dob;
       row.getCell(10).value = dob
         ? { formula: `IF(I${r}="","",DATEDIF(I${r},TODAY(),"Y"))`, result: age === "" ? "" : age }
@@ -175,7 +177,7 @@ export async function buildPayrollWorkbook(
         row.getCell(15).value = staff.address ?? null;
         row.getCell(16).value = staff.town ?? null;
         row.getCell(17).value = staff.postCode ?? null;
-        row.getCell(18).value = staff.uniform ?? null;
+
         row.getCell(19).value = staff.accountHolderName ?? null;
         // kept as text so leading zeros in account numbers / sort codes survive
         row.getCell(20).value = staff.accountNumber ?? null;

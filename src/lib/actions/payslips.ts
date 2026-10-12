@@ -70,6 +70,7 @@ const lineSelect = {
   holidayEntitlement: payrollLines.holidayEntitlement,
   rate: payrollLines.rate,
   holidayRate: payrollLines.holidayRate,
+  uniformCost: payrollLines.uniformCost,
   fixedAmount: payrollLines.fixedAmount,
 };
 
@@ -83,6 +84,7 @@ function toRow(
     holidayEntitlement: number;
     rate: number;
     holidayRate: number | null;
+    uniformCost: number;
     fixedAmount: number | null;
   },
   head: { company: string; address: string; month: string },
@@ -99,6 +101,7 @@ function toRow(
     holidayEntitlement: r.holidayEntitlement,
     rate: r.rate,
     holidayRate: r.holidayRate,
+    uniformCost: r.uniformCost,
     fixedAmount: r.fixedAmount,
   };
 }
@@ -171,7 +174,8 @@ export const listPayslips = createServerFn({ method: "GET" })
         holidayEntitlement: payrollLines.holidayEntitlement,
         rate: payrollLines.rate,
         holidayRate: payrollLines.holidayRate,
-        fixedAmount: payrollLines.fixedAmount,
+        uniformCost: payrollLines.uniformCost,
+  fixedAmount: payrollLines.fixedAmount,
       })
       .from(payrollLines)
       .innerJoin(payrollStaff, eq(payrollStaff.id, payrollLines.staffId))

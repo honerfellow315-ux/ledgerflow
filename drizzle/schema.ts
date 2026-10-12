@@ -547,6 +547,7 @@ export const payrollLines = pgTable(
     comment: text("comment").notNull().default(""),
     rate: numeric("rate", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
     // NULL = Amount is Rate x Total Hours. Set = fixed monthly pay (guards not paid by hours).
+    uniformCost: numeric("uniform_cost", { precision: 10, scale: 2, mode: "number" }).notNull().default(0),
     fixedAmount: numeric("fixed_amount", { precision: 10, scale: 2, mode: "number" }),
     // NULL = holiday entitlement is information only. Set = those hours are paid at this rate.
     holidayRate: numeric("holiday_rate", { precision: 10, scale: 2, mode: "number" }),

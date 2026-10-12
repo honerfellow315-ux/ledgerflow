@@ -53,6 +53,8 @@ export interface PayrollLine {
   comment: string;
   rate: number;
   /** Fixed monthly pay (guards not paid by hours). null = Amount is Rate x Total Hours. */
+  /** Additional uniform cost for this company/month only. */
+  uniformCost?: number;
   fixedAmount: number | null;
   /** Rate the Holiday Entitlement hours are paid at. null = information only (old behaviour). */
   holidayRate: number | null;

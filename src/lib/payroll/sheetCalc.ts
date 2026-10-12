@@ -3,7 +3,8 @@
  *
  *   Total Hours = Units (Hours) + Bank Holiday Hours          (E = C + B)
  *   Amount      = Rate x Total Hours (+ Holiday Entitlement x Holiday Rate, when that is set)
- *   Fixed pay   = a line with a Fixed Amount is paid exactly that, whatever its hours
+ *   Uniform cost is added to hourly or fixed pay for this month.
+ *   Fixed pay   = Fixed Amount + Uniform cost, whatever its hours
  *   Age         = whole years from DOB                         (J = DATEDIF)
  *
  * Holiday Entitlement is NOT part of Total Hours, exactly as in the sheet. It is only paid when the
@@ -24,17 +25,17 @@ export interface LineTotals {
 
 export function lineTotals(
   l: Pick<PayrollLine, "unitsHours" | "bankHolidayHours" | "rate"> &
-    Partial<Pick<PayrollLine, "holidayEntitlement" | "fixedAmount" | "holidayRate">>,
+    Partial<Pick<PayrollLine, "holidayEntitlement" | "fixedAmount" | "holidayRate" | "uniformCost">>,
 ): LineTotals {
   const totalHours = round2(n(l.unitsHours) + n(l.bankHolidayHours));
   if (typeof l.fixedAmount === "number" && Number.isFinite(l.fixedAmount)) {
-    return { totalHours, amount: round2(l.fixedAmount) };
+    return { totalHours, amount: round2(l.fixedAmount + n(l.uniformCost)) };
   }
   const holidayPay =
     typeof l.holidayRate === "number" && Number.isFinite(l.holidayRate)
       ? n(l.holidayEntitlement) * l.holidayRate
       : 0;
-  return { totalHours, amount: round2(n(l.rate) * totalHours + holidayPay) };
+  return { totalHours, amount: round2(n(l.rate) * totalHours + holidayPay + n(l.uniformCost)) };
 }
 
 export interface SheetTotals {

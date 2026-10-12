@@ -56,6 +56,7 @@ const toLine = (r: typeof payrollLines.$inferSelect): PayrollLine => ({
   holidayEntitlement: r.holidayEntitlement,
   comment: r.comment,
   rate: r.rate,
+  uniformCost: r.uniformCost,
   fixedAmount: r.fixedAmount ?? null,
   holidayRate: r.holidayRate ?? null,
 });
@@ -602,6 +603,7 @@ const linePatch = z
     holidayEntitlement: hoursNum,
     comment: z.string().trim().max(200),
     rate: z.number().min(0).max(10000),
+    uniformCost: z.number().finite().min(0).max(1000000).multipleOf(0.01),
     fixedAmount: z.number().min(0).max(1000000).nullable(),
     holidayRate: z.number().min(0).max(10000).nullable(),
   })
@@ -1140,6 +1142,7 @@ export const importPayrollSheet = createServerFn({ method: "POST" })
         holidayEntitlement: entitlement,
         rate,
         fixedAmount: fixed,
+        uniformCost: existing?.uniformCost ?? 0,
         holidayRate,
       });
 

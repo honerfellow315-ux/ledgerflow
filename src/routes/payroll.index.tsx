@@ -397,7 +397,7 @@ const PERSONAL: Col[] = [
   { key: "addr", label: "Address", sensitive: true, render: (s) => dash(s.address) },
   { key: "town", label: "Town", sensitive: true, render: (s) => dash(s.town) },
   { key: "pc", label: "Post Code", sensitive: true, render: (s) => dash(s.postCode) },
-  { key: "uni", label: "Uniform", sensitive: true, render: (s) => dash(s.uniform) },
+  { key: "uni", label: "Uniform details", sensitive: true, render: (s) => dash(s.uniform) },
 ];
 const BANKING: Col[] = [
   {
@@ -851,7 +851,7 @@ function PayrollPageContent() {
               title={`Payroll — ${filtered.length} of ${rows.length} staff`}
               description={
                 canSeeDetails
-                  ? "Hours, rate and comment save as you type. Total hours and amount are calculated."
+                  ? "Hours, rate, uniform cost and comment save on blur or Enter. Total hours and amount are calculated."
                   : "Personal and bank columns need the Staff permission."
               }
               actions={
@@ -920,7 +920,7 @@ function PayrollPageContent() {
                     <tr className="text-[10px] font-bold uppercase tracking-wide">
                       <th className="sticky left-0 z-20 bg-surface-muted" />
                       <th
-                        colSpan={9}
+                        colSpan={10}
                         className="border-l border-border bg-info-soft px-3 py-1 text-center text-primary"
                       >
                         Employment
@@ -948,6 +948,7 @@ function PayrollPageContent() {
                       <TH align="right">Rate</TH>
                       <TH align="right">Holiday rate</TH>
                       <TH align="right">Fixed amount</TH>
+                      <TH align="right">Uniform cost (£)</TH>
                       <TH align="right">Amount</TH>
                       {visibleGroups.flatMap((g) =>
                         g.cols.map((c) => (
@@ -1054,6 +1055,9 @@ function PayrollPageContent() {
                               onCommit={(n) => saveLine(r.line.id, { fixedAmount: n })}
                             />
                           </TD>
+                          <TD align="right">
+                            <NumCell label={`Uniform cost for ${r.staff.name}`} value={r.line.uniformCost ?? 0} disabled={!canEdit} onCommit={(n) => saveLine(r.line.id, { uniformCost: n })} />
+                          </TD>
                           <TD align="right" mono className="font-semibold">
                             {formatMoney(r.totals.amount)}
                           </TD>
@@ -1116,6 +1120,9 @@ function PayrollPageContent() {
                       </TD>
                       <TD />
                       <TD />
+                      <TD />
+                      <TD />
+                      <TD align="right" mono>{formatMoney(filtered.reduce((sum, r) => sum + (r.line.uniformCost ?? 0), 0))}</TD>
                       <TD align="right" mono>
                         {formatMoney(totals.amount)}
                       </TD>

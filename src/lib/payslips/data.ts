@@ -19,6 +19,7 @@ export interface PayslipRow {
   holidayEntitlement: number;
   rate: number;
   holidayRate: number | null;
+  uniformCost?: number;
   fixedAmount: number | null;
 }
 
@@ -38,6 +39,7 @@ export function payslipTotals(p: PayslipRow) {
     holidayEntitlement: p.holidayEntitlement,
     rate: p.rate,
     holidayRate: p.holidayRate,
+    uniformCost: p.uniformCost ?? 0,
     fixedAmount: p.fixedAmount,
   });
 }
@@ -48,6 +50,11 @@ export function payslipTotals(p: PayslipRow) {
  * never end up a penny away from the sheet's figure.
  */
 export function earningLines(p: PayslipRow): EarningLine[] {
+  const uniform: EarningLine[] = (p.uniformCost ?? 0) > 0 ? [{ label: "Uniform cost", hours: null, rate: null, amount: r2(p.uniformCost!) }] : [];
+  return [...baseEarningLines({ ...p, uniformCost: 0 }), ...uniform];
+}
+
+function baseEarningLines(p: PayslipRow): EarningLine[] {
   if (p.fixedAmount !== null) {
     return [{ label: "Fixed monthly pay", hours: null, rate: null, amount: r2(p.fixedAmount) }];
   }
