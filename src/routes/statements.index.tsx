@@ -463,6 +463,14 @@ function StatementsPageContent() {
         name={selectedGroup.name}
         clients={selectedGroup.clients}
         onBack={() => setGroupKey("")}
+        renderPrint={(clients, month, billingClient) => (
+          <GroupedStatementDocument
+            clients={clients}
+            month={month}
+            billingClient={billingClient}
+            safari={safariPrint}
+          />
+        )}
       />
     );
   const companySummary = groupStatement(data, invoiceViews, companyClients);
@@ -911,6 +919,76 @@ function StatementsPageContent() {
         />
       )}
     </>
+  );
+}
+
+// Adapt grouped account data to the existing print templates. The templates below stay unchanged.
+function GroupedStatementDocument({
+  clients,
+  month,
+  billingClient,
+  safari,
+}: {
+  clients: Client[];
+  month: string;
+  billingClient: Client;
+  safari: boolean;
+}) {
+  const { data, invoiceViews } = useLedger();
+  const result = groupStatement(data, invoiceViews, clients, month);
+  const ids = new Set(clients.map((c) => c.id));
+  const views = invoiceViews.filter((v) => ids.has(v.clientId));
+  const labelFor = (id: string) => {
+    const c = clients.find((c) => c.id === id)!;
+    return `${c.company || c.name} / ${data.companies.find((x) => x.id === c.companyId)?.name || data.settings.businessName}`;
+  };
+  const outstandingInvoices: OutstandingRow[] = clients
+    .flatMap((c) => applyClientCredit(views.filter((v) => v.clientId === c.id)).views)
+    .filter((v) => v.effectiveOutstanding > 0.004)
+    .map((v) => ({
+      ...v,
+      description: clients.length > 1 ? `${labelFor(v.clientId)}: ${v.description}` : v.description,
+      dueStatus: (v.ageing > 0 ? "overdue" : "due") as DueStatus,
+    }))
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.number.localeCompare(b.number));
+  const total = round2(outstandingInvoices.reduce((sum, v) => sum + v.effectiveOutstanding, 0));
+  const overdue = round2(
+    outstandingInvoices
+      .filter((v) => v.dueStatus === "overdue")
+      .reduce((sum, v) => sum + v.effectiveOutstanding, 0),
+  );
+  const first = clients[0]!;
+  const client: Client =
+    clients.length === 1
+      ? first
+      : {
+          ...first,
+          company: clients.map((c) => c.company || c.name).join(" / "),
+          address: "",
+          vatNumber: "",
+          accountReference: "",
+        };
+  const Document = safari ? StatementDocumentSafari : StatementDocument;
+  return (
+    <Document
+      settings={businessProfileFor(data.settings, data.companies, billingClient)}
+      client={client}
+      rows={result.rows.map((r) => ({
+        ...r,
+        key: r.id,
+        type: r.type as EntryType,
+        description:
+          clients.length > 1 ? `${labelFor(r.clientId)}: ${r.description}` : r.description,
+      }))}
+      statementDate={todayIso()}
+      totals={totalsForViews(views)}
+      closingBalance={result.closing}
+      openingBalance={month ? result.opening : undefined}
+      periodLabel={month ? formatMonth(month) : undefined}
+      accountClosingBalance={result.accountBalance}
+      outstandingInvoices={outstandingInvoices}
+      outstandingTotals={{ total, overdue, due: round2(total - overdue) }}
+    />
   );
 }
 
