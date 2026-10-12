@@ -1,3 +1,4 @@
+import { AiDocumentDialog } from "@/components/app/AiDocumentDialog";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -85,6 +86,7 @@ function BankMatchContent() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [aiOpen, setAiOpen] = useState(false);
   const [filter, setFilter] = useState<BankFilter>("all");
   const [q, setQ] = useState("");
   const [search, setSearch] = useState("");
@@ -229,6 +231,9 @@ function BankMatchContent() {
 
   return (
     <div className="space-y-5">
+      <AiDocumentDialog kind="bank" open={aiOpen} onOpenChange={setAiOpen} onReviewed={async (doc) => {
+        if(doc.kind==='bank') await saveStatement(doc.parsed);
+      }}/>
       {pendingStatement ? (
         <StatementReview
           key={pendingStatement.fileHash}
@@ -261,6 +266,7 @@ function BankMatchContent() {
             >
               <Check className="size-4" /> Confirm all matched{matchedN ? ` (${matchedN})` : ""}
             </Button>
+            <Button variant="outline" disabled={busy} onClick={()=>setAiOpen(true)}>Read photo / scanned PDF with AI</Button>
             <Button disabled={busy} onClick={() => fileRef.current?.click()}>
               <Upload className="size-4" /> Upload bank statement
             </Button>

@@ -181,7 +181,7 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
     }
     if (text.chars < 20) {
       result.problems.push(
-        "This PDF has no typed text. It looks like a scan or a photo. Scans and photos are read in a later phase.",
+        "This PDF has no typed text. It looks like a scan or a photo. Use the Read photo / scanned PDF with AI button.",
       );
       return result;
     }
@@ -214,7 +214,7 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
   } else {
     // Phase D (photos, scans) plugs in here.
     result.problems.push(
-      "This file type is not supported yet. Use Excel (.xlsx), CSV, a typed PDF or Word (.docx). Photos come in a later phase.",
+      "This file type is not supported yet. Use Excel (.xlsx), CSV, a typed PDF or Word (.docx). Use the AI reading button for photos.",
     );
     return result;
   }

@@ -1,3 +1,4 @@
+import { AiDocumentDialog } from "@/components/app/AiDocumentDialog";
 import { useRef, useState, type DragEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -28,7 +29,7 @@ function readMode(name: string): { label: string; tone: Tone; supported: boolean
   if (ext === "xls") return { label: "Save as .xlsx first", tone: "bad", supported: false };
   if (ext === "doc") return { label: "Save as .docx first", tone: "bad", supported: false };
   if (["jpg", "jpeg", "png", "webp", "heic"].includes(ext)) {
-    return { label: "Photos come in a later phase", tone: "bad", supported: false };
+    return { label: "Use the AI reading button", tone: "bad", supported: false };
   }
   return { label: "Not supported", tone: "bad", supported: false };
 }
@@ -78,6 +79,7 @@ export function UploadTimesheetDialog({
   onSaved?: (month: string) => void;
 }) {
   const qc = useQueryClient();
+  const [aiOpen, setAiOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [runs, setRuns] = useState<FileRun[]>([]);
   const [over, setOver] = useState(false);
@@ -164,16 +166,27 @@ export function UploadTimesheetDialog({
   const doneCount = runs.filter((r) => r.state === "done" || r.state === "failed").length;
 
   return (
-    <Dialog open={open} onOpenChange={close}>
+    <>
+    <AiDocumentDialog kind="timesheet" open={aiOpen} onOpenChange={setAiOpen} onReviewed={async (doc) => {
+      if (doc.kind !== "timesheet") return;
+      const outcomes = await unwrap(uploadTimesheetFile({data:{fileName:doc.parsed.fileName,fileHash:doc.parsed.fileHash,sheets:doc.parsed.sheets}}));
+      const saved = outcomes.filter(o=>o.outcome==='saved');
+      if(!saved.length) throw new Error(outcomes.map(o=>o.message).join(' ') || 'No timesheet saved.');
+      await qc.invalidateQueries({queryKey:['timesheets']});
+      toast.success('Reviewed AI timesheet saved and checked.');
+      const month=saved.at(-1)?.month;if(month)onSaved?.(month);
+      onOpenChange(false);
+    }}/>
+    <Dialog open={open && !aiOpen} onOpenChange={close}>
       <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Upload timesheets</DialogTitle>
           <DialogDescription>
-            Add the timesheets your staff sent: Excel, CSV, typed PDF or Word. Photos and scanned
-            PDFs come in a later phase.
+            Add Excel, CSV, typed PDF or Word. Use AI reading below for photos and scanned PDFs.
           </DialogDescription>
         </DialogHeader>
 
+        <Button variant="outline" disabled={running} onClick={()=>setAiOpen(true)}>Read photo / scanned PDF with AI</Button>
         <label
           onDragOver={(e) => {
             e.preventDefault();
@@ -282,5 +295,6 @@ export function UploadTimesheetDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   );
 }

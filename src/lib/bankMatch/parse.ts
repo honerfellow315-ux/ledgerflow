@@ -356,7 +356,7 @@ export async function parseBankFile(file: File): Promise<ParsedStatement> {
     return {
       ...out,
       problems: [
-        "Photos require the later AI reading step. Use CSV, Excel, a typed PDF or Word table for now.",
+        "Use the Read photo / scanned PDF with AI button for photos, or upload CSV, Excel, a typed PDF or Word table here.",
       ],
     };
   } else if (ext === "xls") {

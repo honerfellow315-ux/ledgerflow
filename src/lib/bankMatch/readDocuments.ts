@@ -99,7 +99,7 @@ export async function bankPdfToMatrix(buf: ArrayBuffer): Promise<Matrix> {
           });
       if (!pieces.some((p) => p.str.trim()))
         throw new Error(
-          `Page ${pageNo} is a scan or has no text. Photo/scanned reading needs the later AI step. Nothing was uploaded.`,
+          `Page ${pageNo} is a scan or has no text. Use the Read photo / scanned PDF with AI button. Nothing was uploaded.`,
         );
       const pageMatrix = bankPageToMatrix(pieces);
       if (matrix.length && matrix[0]!.join("|") !== pageMatrix[0]!.join("|"))
