@@ -42,6 +42,7 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { StatusBadge } from "@/components/app/StatusBadge";
 import { cn } from "@/lib/utils";
 import { RequireView } from "@/components/app/RequireView";
+import { PayrollHoursPanel } from "@/components/app/PayrollHoursPanel";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -639,6 +640,8 @@ function DashboardContent() {
               </div>
             </Panel>
           </div>
+
+          {can("payroll", "view") ? <PayrollHoursPanel enabled={!!user} /> : null}
         </div>
 
         {/* ------------------------------- right rail ------------------------------- */}
