@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, exists, isNotNull, isNull, not, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../server/db";
 import {
@@ -298,3 +298,96 @@ export const permanentlyDelete = createServerFn({ method: "POST" })
     });
     return { ok: true };
   });
+
+/**
+ * Empties the whole bin: permanently removes every soft-deleted row, oldest dependants first.
+ *
+ * Deleting a client or an invoice in the database also removes the rows that belong to it
+ * (see the `onDelete: "cascade"` references in drizzle/schema.ts). To make sure "Empty" can
+ * never take a LIVE record with it, a deleted invoice that still has a live payment, or a
+ * deleted client that still has live invoices / payments / hours / subcontracts / credit notes,
+ * is left in the bin and counted as `skipped`. Admin-only, no way back.
+ */
+export const emptyTrash = createServerFn({ method: "POST" }).handler(async () => {
+  const actor = await requireAdmin();
+  let removed = 0;
+
+  // 1) rows nothing else depends on
+  for (const table of [payments, expenses, hoursEntries, subcontractEntries, creditNotes] as const) {
+    const gone = await db.delete(table).where(isNotNull(table.deletedAt)).returning({ id: table.id });
+    removed += gone.length;
+  }
+
+  // 2) invoices — only those with no live payment left on them
+  const invoicesGone = await db
+    .delete(invoices)
+    .where(
+      and(
+        isNotNull(invoices.deletedAt),
+        not(
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(payments)
+              .where(and(eq(payments.invoiceId, invoices.id), isNull(payments.deletedAt))),
+          ),
+        ),
+      ),
+    )
+    .returning({ id: invoices.id });
+  removed += invoicesGone.length;
+
+  // 3) companies (clients only lose the link, nothing cascades)
+  const companiesGone = await db
+    .delete(companies)
+    .where(isNotNull(companies.deletedAt))
+    .returning({ id: companies.id });
+  removed += companiesGone.length;
+
+  // 4) clients — only those with nothing live left under them
+  const liveUnder = (
+    table: typeof invoices | typeof payments | typeof hoursEntries | typeof subcontractEntries | typeof creditNotes,
+  ) =>
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(table)
+        .where(and(eq(table.clientId, clients.id), isNull(table.deletedAt))),
+    );
+  const clientsGone = await db
+    .delete(clients)
+    .where(
+      and(
+        isNotNull(clients.deletedAt),
+        not(liveUnder(invoices)),
+        not(liveUnder(payments)),
+        not(liveUnder(hoursEntries)),
+        not(liveUnder(subcontractEntries)),
+        not(liveUnder(creditNotes)),
+      ),
+    )
+    .returning({ id: clients.id });
+  removed += clientsGone.length;
+
+  // 5) staff snapshots (table may not exist yet if its migration was never run)
+  const staffGone = await db
+    .delete(staffTrash)
+    .returning({ id: staffTrash.id })
+    .catch(() => []);
+  removed += staffGone.length;
+
+  // anything still deleted-but-present was kept on purpose (live records depend on it)
+  const [leftInvoices, leftClients] = await Promise.all([
+    db.select({ id: invoices.id }).from(invoices).where(isNotNull(invoices.deletedAt)),
+    db.select({ id: clients.id }).from(clients).where(isNotNull(clients.deletedAt)),
+  ]);
+  const skipped = leftInvoices.length + leftClients.length;
+
+  await recordActivity({
+    actor,
+    action: "purged",
+    module: "recycleBin",
+    label: `Emptied recycle bin — ${removed} record${removed === 1 ? "" : "s"}${skipped ? `, ${skipped} kept (live records still use them)` : ""}`,
+  });
+  return { ok: true, removed, skipped };
+});

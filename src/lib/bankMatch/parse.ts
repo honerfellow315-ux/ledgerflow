@@ -186,6 +186,9 @@ export function parseBankMatrix(m: Matrix): {
   for (let r = head.row + 1; r < m.length; r++) {
     const row = m[r] ?? [];
     if (row.every((c) => c === null || String(c).trim() === "")) continue;
+    // Some statements (e.g. the ESS sheet) paste the header row again at every month.
+    // A repeated header is not a payment, so it is skipped instead of refusing the file.
+    if (DATE_H.has(key(row[cols.date] ?? null))) continue;
     const rowNo = r + 1;
     let credit: number | null = null;
     let debit: number | null = null;

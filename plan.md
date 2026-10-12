@@ -140,6 +140,7 @@ Deploy ke baad purani sheets par **"Check again"** dabao taake naye qaide se dob
 - **Upload delete:** jis upload ki koi payment record ho chuki ho wo delete nahi hoti (pehle Undo karo).
 - **Permissions:** koi naya module nahi. Dekhne ke liye **Payments View aur Invoices View**; upload, confirm, ignore, upload delete ke liye **Payments Create**; Undo (recorded) ke liye **Payments Delete**. Menu "Payments" permission se.
 - Naye tables: `bank_statements`, `bank_lines`, `bank_payer_links` (`schema/bank-match-migration.sql`, dobara chalane par bhi safe, koi purani table nahi chhoo'ti). `drizzle/schema.ts` me badlav nahi, kyunke ye tables seedhi SQL se use hoti hain.
+- ESS sample: `public/samples/ess-bank-statement-sample.xlsx` (jhoota data, asli ESS sheet ka format). Bank Match page par "ESS sample format" button se download hoti hai. Parser har mahine dobara paste hua header row skip karta hai.
 - Samples: `samples/` me do jhoote UK statements (Lloyds jaisa aur Starling jaisa). Unke client naam aur amounts apne test invoices se milane hon to CSV me badal lo.
 
 **DB par ye SQL chalani hai (code deploy se PEHLE):** `schema/bank-match-migration.sql`

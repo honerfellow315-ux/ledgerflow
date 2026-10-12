@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Download,
   Search,
   Trash2,
   Upload,
@@ -265,6 +266,11 @@ function BankMatchContent() {
               onClick={() => setBulkOpen(true)}
             >
               <Check className="size-4" /> Confirm all matched{matchedN ? ` (${matchedN})` : ""}
+            </Button>
+            <Button variant="outline" asChild>
+              <a href="/samples/ess-bank-statement-sample.xlsx" download>
+                <Download className="size-4" /> ESS sample format
+              </a>
             </Button>
             <Button variant="outline" disabled={busy} onClick={()=>setAiOpen(true)}>Read photo / scanned PDF with AI</Button>
             <Button disabled={busy} onClick={() => fileRef.current?.click()}>

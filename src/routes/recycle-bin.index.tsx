@@ -7,6 +7,7 @@ import {
   listTrash,
   restoreFromTrash,
   permanentlyDelete,
+  emptyTrash,
   type TrashItem,
   type TrashType,
 } from "@/lib/actions/trash";
@@ -60,6 +61,7 @@ function RecycleBinPageContent() {
   const trashQ = useQuery({ queryKey: ["trash"], queryFn: () => listTrash() });
 
   const [toPurge, setToPurge] = useState<TrashItem | null>(null);
+  const [emptyOpen, setEmptyOpen] = useState(false);
 
   const restoreMutation = useMutation({
     mutationFn: (item: TrashItem) => restoreFromTrash({ data: { type: item.type, id: item.id } }),
@@ -82,6 +84,22 @@ function RecycleBinPageContent() {
       setToPurge(null);
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : "Delete failed."),
+  });
+
+  const emptyMutation = useMutation({
+    mutationFn: () => emptyTrash(),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["trash"] });
+      setEmptyOpen(false);
+      const kept = res.skipped
+        ? ` ${res.skipped} kept because live records still use ${res.skipped === 1 ? "it" : "them"}.`
+        : "";
+      toast.success(`Recycle bin emptied (${res.removed} removed).${kept}`);
+    },
+    onError: (err: unknown) => {
+      setEmptyOpen(false);
+      toast.error(err instanceof Error ? err.message : "Could not empty the recycle bin.");
+    },
   });
 
   if (!ready) return null;
@@ -108,6 +126,18 @@ function RecycleBinPageContent() {
             rows.length === 0
               ? "Nothing deleted."
               : `${rows.length} deleted record${rows.length === 1 ? "" : "s"} — restore or remove for good.`
+          }
+          actions={
+            rows.length > 0 ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={emptyMutation.isPending}
+                onClick={() => setEmptyOpen(true)}
+              >
+                <Trash2 className="size-4" /> Empty recycle bin
+              </Button>
+            ) : null
           }
         />
 
@@ -170,6 +200,14 @@ function RecycleBinPageContent() {
         description={`"${toPurge?.label ?? ""}" will be gone for good — this can't be undone, even from here.`}
         confirmLabel="Delete forever"
         onConfirm={() => toPurge && purgeMutation.mutate(toPurge)}
+      />
+      <ConfirmDialog
+        open={emptyOpen}
+        onOpenChange={setEmptyOpen}
+        title="Empty the whole recycle bin?"
+        description={`All ${rows.length} deleted record${rows.length === 1 ? "" : "s"} will be removed for good — this can't be undone. A deleted client or invoice that live records still depend on is kept.`}
+        confirmLabel="Empty recycle bin"
+        onConfirm={() => emptyMutation.mutate()}
       />
     </div>
   );
