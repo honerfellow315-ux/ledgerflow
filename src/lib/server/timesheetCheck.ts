@@ -8,7 +8,7 @@
  * it. Matching asks the database for the one person (never loads all staff), so it stays
  * fast with 10,000+ staff.
  */
-import { and, asc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import * as schema from "../../../drizzle/schema";
 import {
   payrollStaff,
@@ -115,10 +115,16 @@ export async function findStaff(db: Db, rawNi: string, rawName: string): Promise
  * imported). Some do not: the person was added to Staff after the import, a name was spelt
  * differently then, or the staff record was deleted and restored (deleting sets the shifts'
  * staff to empty). Looking only at the id would then say "No shift on this date in our
- * records" for every row. So shifts with NO staff id are also taken when they carry this
- * person's NI number or company ID, or the same name (and not a different NI number).
+ * records" for every row. So shifts with NO staff id are also taken, but only on strong
+ * evidence that they are this person's:
+ *   - the same NI number, or
+ *   - the same company ID IN THE SAME SHIFT COMPANY (RSS id with RSS shifts, ESS id with ESS
+ *     shifts: employee numbers of two companies overlap, so the company must match), or
+ *   - the same name, only when the shift carries no NI number and no company ID at all.
  * Shifts that belong to ANOTHER staff member are never taken. Such shifts are marked
- * `unlinked` so the sheet says so.
+ * `unlinked` so the sheet says so. As a last guard, on any date where the total would pass
+ * 24 hours, the unlinked shifts of that date are left out (nobody works more than 24 hours a
+ * day, so those cannot all be this person's).
  *
  * Shifts with 0 hours cannot be compared; only their dates are returned, so the note can
  * say "a shift exists on this date, but with 0 hours".
@@ -134,30 +140,39 @@ async function loadRecords(
   const to = [`${month}-31`, ...real].sort().at(-1)!;
 
   const [person] = await db
-    .select({ ni: payrollStaff.ni, name: payrollStaff.name, rssId: payrollStaff.rssId, essId: payrollStaff.essId })
+    .select({
+      ni: payrollStaff.ni,
+      name: payrollStaff.name,
+      rssId: payrollStaff.rssId,
+      essId: payrollStaff.essId,
+      extIds: payrollStaff.extIds,
+    })
     .from(payrollStaff)
     .where(eq(payrollStaff.id, staffId))
     .limit(1);
   const niKey = normNi(person?.ni ?? "");
   const nameKey = normName(person?.name ?? "").replace(/\s+/g, " ");
-  const companyIds = [person?.rssId, person?.essId].filter((x): x is string => typeof x === "string" && x !== "");
+  const idPairs: { source: string; id: string }[] = [];
+  if (person?.rssId) idPairs.push({ source: "RSS", id: person.rssId });
+  if (person?.essId) idPairs.push({ source: "ESS", id: person.essId });
+  for (const [source, id] of Object.entries(person?.extIds ?? {})) {
+    if (typeof id === "string" && id !== "") idPairs.push({ source, id });
+  }
 
   const shiftNi = sql`regexp_replace(upper(${salaryShifts.ni}), '[^A-Z0-9]', '', 'g')`;
   const shiftName = sql`trim(regexp_replace(regexp_replace(regexp_replace(lower(${salaryShifts.employeeName}), '[(][^)]*[)]', ' ', 'g'), '[^a-z0-9]+', ' ', 'g'), ' +', ' ', 'g'))`;
-  const unlinkedBy = [];
+  const unlinkedBy: SQL[] = [];
   if (niKey.length >= 6) unlinkedBy.push(sql`${shiftNi} = ${niKey}`);
-  if (companyIds.length > 0) unlinkedBy.push(inArray(salaryShifts.employeeId, companyIds));
-  if (nameKey) {
-    unlinkedBy.push(
-      niKey
-        ? sql`(${shiftName} = ${nameKey} AND (${shiftNi} = '' OR ${shiftNi} = ${niKey}))`
-        : sql`${shiftName} = ${nameKey}`,
-    );
+  for (const p of idPairs) {
+    unlinkedBy.push(sql`(${salaryShifts.source} = ${p.source} AND ${salaryShifts.employeeId} = ${p.id})`);
   }
-  const whose =
-    unlinkedBy.length > 0
-      ? or(eq(salaryShifts.staffId, staffId), and(isNull(salaryShifts.staffId), or(...unlinkedBy)))
-      : eq(salaryShifts.staffId, staffId);
+  if (nameKey) {
+    unlinkedBy.push(sql`(${shiftName} = ${nameKey} AND ${shiftNi} = '' AND ${salaryShifts.employeeId} = '')`);
+  }
+  const unlinkedAny = unlinkedBy.length > 0 ? or(...unlinkedBy) : undefined;
+  const whose = unlinkedAny
+    ? or(eq(salaryShifts.staffId, staffId), and(isNull(salaryShifts.staffId), unlinkedAny))
+    : eq(salaryShifts.staffId, staffId);
 
   const rows = await db
     .select({
@@ -172,9 +187,14 @@ async function loadRecords(
     .from(salaryShifts)
     .where(and(whose, gte(salaryShifts.date, from), lte(salaryShifts.date, to)));
 
+  const dayTotal = new Map<string, number>();
+  for (const r of rows) if (r.hours > 0) dayTotal.set(r.date, (dayTotal.get(r.date) ?? 0) + r.hours);
+
   const records: RecordShift[] = [];
   const zeroHourDates = new Set<string>();
   for (const r of rows) {
+    // Over 24 hours in one day cannot all be one person's: leave out the unlinked ones.
+    if (r.staffId === null && (dayTotal.get(r.date) ?? 0) > 24) continue;
     if (r.hours > 0) {
       records.push({
         id: r.id,
