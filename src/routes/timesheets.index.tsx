@@ -579,6 +579,15 @@ function TimesheetsPageContent() {
       <UploadTimesheetDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
+        onOpenExisting={(id, m) => {
+          setUploadOpen(false);
+          setMonth(m);
+          setQ("");
+          setSearch("");
+          setStatus(ALL);
+          setPage(1);
+          setOpenId(id);
+        }}
         onSaved={(m) => {
           setMonth(m);
           setPage(1);

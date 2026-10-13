@@ -444,9 +444,32 @@ export const setTimesheetMonthLock = createServerFn({ method: "POST" })
   .validator(z.object({ month, locked: z.boolean() }))
   .handler(async ({ data }) => {
     const actor = await requireAdmin();
-    await db.execute(
-      sql`SELECT set_timesheet_month_lock(${data.month}, ${data.locked}, ${actorName(actor)})`,
-    );
+    try {
+      await db.execute(
+        sql`SELECT set_timesheet_month_lock(${data.month}, ${data.locked}, ${actorName(actor)})`,
+      );
+    } catch (err) {
+      // Read known business errors from the wrapped database cause; never return its SQL or parameters.
+      let cause: unknown = err;
+      const seen = new Set<unknown>();
+      while (cause && typeof cause === "object" && !seen.has(cause)) {
+        seen.add(cause);
+        const e = cause as { message?: unknown; cause?: unknown };
+        const message = typeof e.message === "string" ? e.message : "";
+        if (message.includes("Resolve all unmatched, unconfirmed or incomplete sheets"))
+          throw new Error(
+            "Review unmatched staff, confirm name-only matches and resolve sheet differences before locking this month.",
+          );
+        if (message.includes("There are no timesheets in this month"))
+          throw new Error("There are no timesheets in this month to lock.");
+        if (message.includes("Review duplicate staff sheets"))
+          throw new Error("Review duplicate staff sheets before locking this month.");
+        cause = e.cause;
+      }
+      throw new Error(
+        "The month could not be updated. Refresh and try again. If it continues, ask your administrator to check the timesheet setup.",
+      );
+    }
     await recordActivity({
       actor,
       action: "updated",

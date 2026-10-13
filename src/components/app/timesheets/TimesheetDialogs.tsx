@@ -1,3 +1,4 @@
+import { formatMonthLabel } from "@/lib/payroll/calc";
 import { AiDocumentDialog } from "@/components/app/AiDocumentDialog";
 import { useRef, useState, type DragEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -45,12 +46,20 @@ interface FileRun {
 
 const WAITING: FileRun = { state: "waiting", outcomes: [], message: "" };
 
-function OutcomeLine({ o }: { o: UploadOutcome }) {
+function OutcomeLine({
+  o,
+  onOpenExisting,
+}: {
+  o: UploadOutcome;
+  onOpenExisting?: (id: string, month: string) => void;
+}) {
   if (o.outcome === "saved" && o.status) {
     return (
       <li className="flex flex-wrap items-center gap-2">
         <SheetStatusBadge status={o.status} />
-        <span className="text-foreground">{o.staffName || o.label}</span>
+        <span className="text-foreground">
+          {o.staffName || o.label} · {formatMonthLabel(o.month)}
+        </span>
         <span className="text-muted-foreground">
           {o.issues === 0 ? "everything matches" : `${o.issues} to look at`}
         </span>
@@ -65,6 +74,16 @@ function OutcomeLine({ o }: { o: UploadOutcome }) {
         {o.outcome === "duplicate" ? "Already uploaded" : "Not saved"}
       </Pill>
       <span className="text-muted-foreground">{o.message}</span>
+      {o.outcome === "duplicate" && o.sheetId && onOpenExisting ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onOpenExisting(o.sheetId!, o.month)}
+        >
+          Open existing sheet
+        </Button>
+      ) : null}
     </li>
   );
 }
@@ -73,11 +92,13 @@ export function UploadTimesheetDialog({
   open,
   onOpenChange,
   onSaved,
+  onOpenExisting,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called with the month (yyyy-mm) of the last sheet that was saved. */
   onSaved?: (month: string) => void;
+  onOpenExisting?: (id: string, month: string) => void;
 }) {
   const qc = useQueryClient();
   const [aiOpen, setAiOpen] = useState(false);
@@ -300,7 +321,11 @@ export function UploadTimesheetDialog({
                     {r && (r.outcomes.length > 0 || r.message) ? (
                       <ul className="mt-2 space-y-1.5 text-xs">
                         {r.outcomes.map((o, k) => (
-                          <OutcomeLine key={`${o.label}-${k}`} o={o} />
+                          <OutcomeLine
+                            onOpenExisting={onOpenExisting}
+                            key={`${o.label}-${k}`}
+                            o={o}
+                          />
                         ))}
                         {r.message ? <li className="text-muted-foreground">{r.message}</li> : null}
                       </ul>

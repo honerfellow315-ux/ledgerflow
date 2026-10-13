@@ -415,26 +415,30 @@ export async function saveParsedSheet(
     .returning({ id: timesheetSheets.id });
 
   if (inserted.length === 0) {
-    const [same] = await db
-      .select({ at: timesheetSheets.uploadedAt })
+    const [existing] = await db
+      .select()
       .from(timesheetSheets)
       .where(
-        and(
-          eq(timesheetSheets.fileHash, a.fileHash),
-          eq(timesheetSheets.sheetLabel, sheet.sheetLabel.slice(0, 100)),
+        or(
+          and(
+            eq(timesheetSheets.fileHash, a.fileHash),
+            eq(timesheetSheets.sheetLabel, sheet.sheetLabel.slice(0, 100)),
+          ),
+          and(eq(timesheetSheets.personKey, key), eq(timesheetSheets.month, month)),
         ),
       )
       .limit(1);
-    if (same) {
-      return fail(
+    if (!existing)
+      return fail("rejected", "The upload could not be saved. Refresh the list and try again.");
+    return {
+      ...fail(
         "duplicate",
-        `This exact file was already uploaded on ${same.at.toLocaleDateString("en-GB")}. Nothing was added.`,
-      );
-    }
-    return fail(
-      "duplicate",
-      `There is already a sheet for this person for ${formatMonthLabel(month)}. Delete the old one first if this one replaces it.`,
-    );
+        `A sheet already exists for ${formatMonthLabel(existing.month)}. Open it to review or delete it before uploading a replacement.`,
+      ),
+      sheetId: existing.id,
+      month: existing.month,
+      staffName: existing.personName,
+    };
   }
 
   const rowValues: (typeof timesheetRows.$inferInsert)[] = sheet.rows.map((r, i) => {

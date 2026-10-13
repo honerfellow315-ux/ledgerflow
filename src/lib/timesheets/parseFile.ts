@@ -167,6 +167,18 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
   } else if (ext === "xlsx") {
     try {
       const sheets = await excelSheets(buf);
+      const isReceipt = sheets.some(
+        (s) =>
+          s.name === "Summary" &&
+          (s.matrix[0] ?? []).includes("Hours on sheet") &&
+          (s.matrix[0] ?? []).includes("Hours in our records"),
+      );
+      if (isReceipt) {
+        result.problems.push(
+          "This is a Timesheet Check report, not the original timesheet. Upload the staff member's original Excel or PDF timesheet instead.",
+        );
+        return result;
+      }
       grids = sheets.map((s) => ({ ...s, single: sheets.length === 1 }));
     } catch {
       result.problems.push(
