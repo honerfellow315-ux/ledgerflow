@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { money } from "../server/limits";
 import { db } from "../server/db";
 import { clients } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
@@ -15,7 +16,7 @@ const clientInput = z.object({
   phone: z.string().default(""),
   address: z.string().default(""),
   status: z.enum(["active", "on-hold", "closed"]).default("active"),
-  rate: z.number().optional(),
+  rate: money.optional(),
   paymentTermDays: z.number().int().optional(),
   vatNumber: z.string().optional(),
   accountReference: z.string().optional(),

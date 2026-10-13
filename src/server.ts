@@ -61,6 +61,28 @@ function withSecurityHeaders(request: Request, response: Response): Response {
   if (IS_PROD) {
     headers.set("Strict-Transport-Security", "max-age=31536000");
   }
+  // Private finance app: keep it out of search engines.
+  headers.set("X-Robots-Tag", "noindex, nofollow");
+  // Report-Only first: the browser logs anything this policy would block
+  // (DevTools console) without breaking printing, fonts or the PDF reader.
+  // Once the console stays clean in production, rename the header to
+  // "Content-Security-Policy" to enforce it.
+  headers.set(
+    "Content-Security-Policy-Report-Only",
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "img-src 'self' data: blob:",
+      "connect-src 'self'",
+      "worker-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join("; "),
+  );
   // Pages and API responses carry private financial data: never let the
   // browser or a proxy keep a copy (also stops the Back button re-showing
   // data after logout). Hashed build assets keep their normal caching.

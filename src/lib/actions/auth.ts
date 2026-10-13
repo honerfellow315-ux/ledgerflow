@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../server/db";
 import { users } from "../../../drizzle/schema";
@@ -8,27 +8,39 @@ import {
   destroySession,
   getClientIp,
   getCurrentUser,
-  ipThrottled,
+  loginFailureDetails,
+  loginThrottled,
   pruneExpiredSessions,
-  userThrottled,
+  pruneOldLoginFailures,
   verifyPasswordOrDummy,
   type UserRow,
 } from "../server/auth";
 import { recordActivity } from "../server/activity";
+import { activityLog } from "../../../drizzle/schema";
+import { uid } from "../server/id";
 import type { Permissions } from "../permissions";
 
 export type LoginResult = { status: "ok" } | { status: "error"; message: string };
 
+/** Written straight to the table (not via the fail-safe recordActivity) on
+ * purpose: the brute-force throttle counts these rows, so if the write fails
+ * the login must fail too instead of silently switching protection off. */
 async function logFailure(username: string, ip: string, actor: UserRow | null) {
-  await recordActivity({
-    actor,
+  await db.insert(activityLog).values({
+    id: uid("log"),
+    userId: actor?.id ?? null,
+    username: actor?.username ?? "system",
+    displayName: actor?.displayName ?? "",
     action: "login_failed",
     module: "auth",
-    label: `Attempted username: ${username.slice(0, 64)}`,
-    // `ip:<addr>` is what the per-IP throttle counts — keep this exact format.
-    details: `ip:${ip}`,
+    // Never store what was typed for an unknown account: people sometimes
+    // paste their password into the username box.
+    label: actor ? `Failed login: ${actor.username}` : "Failed login: unknown username",
+    details: loginFailureDetails(ip, username),
   });
 }
+
+const THROTTLE_MESSAGE = "Too many attempts. Please try again in a few minutes.";
 
 export const login = createServerFn({ method: "POST" })
   .validator(
@@ -41,19 +53,17 @@ export const login = createServerFn({ method: "POST" })
     const username = data.username.trim();
     const ip = getClientIp();
 
-    if (await ipThrottled(ip)) {
-      return { status: "error", message: "Too many attempts. Please try again in a few minutes." };
+    if (await loginThrottled(ip, username)) {
+      return { status: "error", message: THROTTLE_MESSAGE };
     }
     await pruneExpiredSessions();
+    await pruneOldLoginFailures();
 
-    const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
-
-    if (user && (await userThrottled(user.id))) {
-      return {
-        status: "error",
-        message: "Too many failed attempts. Please try again in 15 minutes.",
-      };
-    }
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(sql`lower(${users.username}) = ${username.toLowerCase()}`)
+      .limit(1);
 
     const passwordOk = await verifyPasswordOrDummy(data.password, user?.passwordHash);
     if (!user || !passwordOk) {

@@ -557,7 +557,7 @@ function BankMatchContent() {
                       {s.confirmed}
                     </TD>
                     <TD align="right">
-                      {canWrite ? (
+                      {can("payments", "delete") ? (
                         <Button
                           size="sm"
                           variant="outline"

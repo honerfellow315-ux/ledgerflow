@@ -270,6 +270,45 @@ export function compareRows(args: {
       });
     }
 
+    // Split shifts: the sheet may show one 8 h row where our records hold 4 h + 4 h
+    // (or the other way round). When the number of rows differs and the day's TOTAL
+    // agrees, the day is fine: each row gets its own hours back and nothing is
+    // reported as missing. Duplicates never qualify (their totals differ), and any
+    // row that is uncertain or unlinked is left alone. (Identical 4 h + 4 h records are normal here, so the "possible duplicate" note does not block it.)
+    if (sheetRows.length !== recs.length && recs.length > 0) {
+      const answered = sheetRows.map((r) => answers.get(r.key)!);
+      const sheetTotal = sheetRows.reduce((t, r) => t + minutes(r.hours ?? 0), 0);
+      const recTotal = recs.reduce((t, x) => t + minutes(x.hours), 0);
+      const hasIssue =
+        answered.some((a) => a.result !== "match") || recs.some((x) => !takenRec.has(x.id));
+      const onlySizeIssues = answered.every(
+        (a) =>
+          a.result === "match" ||
+          a.result === "hours_over" ||
+          a.result === "hours_under" ||
+          a.result === "not_in_records",
+      );
+      const clean =
+        sheetRows.every((r) => !r.uncertain && !r.parseNote) && recs.every((x) => !x.unlinked);
+      if (
+        hasIssue &&
+        onlySizeIssues &&
+        clean &&
+        sheetTotal > 0 &&
+        Math.abs(sheetTotal - recTotal) <= HOURS_TOLERANCE_MINUTES
+      ) {
+        for (const r of sheetRows) {
+          answers.set(r.key, {
+            key: r.key,
+            result: "match",
+            recordHours: r.hours ?? 0,
+            note: `Day total matches: ${sheetRows.length} sheet row(s), ${fmt(sheetTotal / 60)}, against ${recs.length} shift(s) in our records, ${fmt(recTotal / 60)}.`,
+          });
+        }
+        for (const rec of recs) takenRec.add(rec.id);
+      }
+    }
+
     if (date.startsWith(args.month)) {
       for (const rec of recs) {
         if (takenRec.has(rec.id)) continue;

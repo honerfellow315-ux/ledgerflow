@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { money as zMoney } from "../server/limits";
 import { db } from "../server/db";
 import { expenses } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
@@ -15,8 +16,8 @@ const expenseInput = z.object({
   date: z.string().min(1),
   category: z.string().default(""),
   description: z.string().default(""),
-  amountExVat: z.number(),
-  vatAmount: z.number().default(0),
+  amountExVat: zMoney,
+  vatAmount: zMoney.default(0),
   // Free-form/reusable — see settings.paymentMethods (Settings > Payment Methods).
   method: z.string().min(1).default("Bank Transfer"),
   paidTo: z.string().default(""),

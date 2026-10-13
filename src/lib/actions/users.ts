@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../server/db";
 import { users } from "../../../drizzle/schema";
@@ -52,6 +52,18 @@ function publicUser(row: typeof users.$inferSelect) {
   return rest;
 }
 
+/** Usernames are compared case-insensitively ("Admin" and "admin" are the same
+ * person as far as login is concerned). */
+async function assertUsernameFree(username: string, exceptId?: string) {
+  const rows = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`lower(${users.username}) = ${username.trim().toLowerCase()}`);
+  if (rows.some((r) => r.id !== exceptId)) {
+    throw new Response("That username is already taken.", { status: 400 });
+  }
+}
+
 export const listUsers = createServerFn({ method: "GET" }).handler(async () => {
   await requireAdmin();
   const rows = await db.select().from(users).orderBy(users.username);
@@ -66,6 +78,7 @@ export const createUser = createServerFn({ method: "POST" })
     const problem = validatePassword(data.password, username);
     if (problem) throw new Response(problem, { status: 400 });
 
+    await assertUsernameFree(username);
     const passwordHash = await hashPassword(data.password);
     const [row] = await db
       .insert(users)

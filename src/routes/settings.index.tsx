@@ -41,7 +41,7 @@ function SettingsPage() {
 
 function SettingsPageContent() {
   const { data, hydrated, updateSettings } = useLedger();
-  const { can } = usePermissions();
+  const { can, isAdmin } = usePermissions();
   const s = data.settings;
 
   const [name, setName] = useState(s.businessName);
@@ -305,9 +305,15 @@ function SettingsPageContent() {
               placeholder={"Account holder: \nSort code: \nAccount number: "}
               value={bankDetails}
               onChange={(e) => setBankDetails(e.target.value)}
+              disabled={!isAdmin}
             />
           </Field>
-          {can("settings", "edit") ? (
+          {!isAdmin ? (
+            <p className="text-xs text-muted-foreground">
+              Only an admin can change the payment details.
+            </p>
+          ) : null}
+          {can("settings", "edit") && isAdmin ? (
             <Button size="sm" onClick={saveBankDetails}>
               Save Payment Details
             </Button>

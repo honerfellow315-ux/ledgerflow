@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { money, vatPercent } from "../server/limits";
 import { db } from "../server/db";
 import { creditNotes } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
@@ -14,9 +15,9 @@ const creditNoteInput = z.object({
   invoiceId: z.string().optional(),
   date: z.string().min(1),
   reason: z.string().default(""),
-  amountExVat: z.number(),
+  amountExVat: money,
   vatIncluded: z.boolean().default(false),
-  vatRate: z.number().default(20),
+  vatRate: vatPercent.default(20),
   status: z.enum(["draft", "issued", "applied"]).default("draft"),
   comments: z.string().optional(),
 });

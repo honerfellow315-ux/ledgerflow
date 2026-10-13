@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx scripts/pre-ai-check.ts && node --import tsx scripts/ai-document-check.ts && node --import tsx scripts/payroll-uniform-check.ts && node --import tsx scripts/final-workflow-check.ts"
+    "test": "node --import tsx scripts/pre-ai-check.ts && node --import tsx scripts/ai-document-check.ts && node --import tsx scripts/payroll-uniform-check.ts && node --import tsx scripts/final-workflow-check.ts && node --import tsx scripts/security-check.ts"
   },
   "overrides": {
     "rolldown": "1.2.1"
@@ -40,7 +40,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
-    "drizzle-orm": "^0.44.6",
+    "drizzle-orm": "^0.45.4",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.2",
     "lucide-react": "^0.575.0",

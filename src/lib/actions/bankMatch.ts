@@ -255,7 +255,7 @@ export const undoBankLine = createServerFn({ method: "POST" })
 export const deleteBankStatement = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string().min(1).max(100) }))
   .handler(async ({ data }) => {
-    const actor = await requirePermission("payments", "create");
+    const actor = await requirePermission("payments", "delete");
     await requirePermission("invoices", "view");
     await removeStatement(actor, data.id);
     return { ok: true };

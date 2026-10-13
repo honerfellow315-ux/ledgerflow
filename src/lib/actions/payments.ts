@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { money as zMoney, hoursAmount } from "../server/limits";
 import { db } from "../server/db";
 import { payments } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
@@ -17,7 +18,7 @@ const paymentInput = z.object({
   date: z.string().min(1),
   // Free-form/reusable — see settings.paymentMethods (Settings > Payment Methods).
   method: z.string().min(1).default("Bank Transfer"),
-  amount: z.number(),
+  amount: zMoney,
   reference: z.string().default(""),
   notes: z.string().optional(),
   // Hours-wise payment recording — see drizzle/schema.ts payments.hoursEntryId.
@@ -29,7 +30,7 @@ const paymentInput = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.trim() ? v : null)),
-  hoursPaid: z.number().optional(),
+  hoursPaid: hoursAmount.optional(),
 });
 
 export const listPayments = createServerFn({ method: "GET" }).handler(async () => {

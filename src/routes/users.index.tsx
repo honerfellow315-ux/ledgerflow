@@ -46,6 +46,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { MIN_PASSWORD_LENGTH } from "@/lib/passwordPolicy";
 import {
   Dialog,
   DialogContent,
@@ -284,12 +285,12 @@ function UserDialog({
       toast.error("Username is required.");
       return;
     }
-    if (!user && password.length < 8) {
-      toast.error("Password must be at least 8 characters.");
+    if (!user && password.length < MIN_PASSWORD_LENGTH) {
+      toast.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
-    if (password && password.length < 8) {
-      toast.error("Password must be at least 8 characters.");
+    if (password && password.length < MIN_PASSWORD_LENGTH) {
+      toast.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
 
@@ -370,7 +371,7 @@ function UserDialog({
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={user ? "••••••••" : "At least 8 characters"}
+              placeholder={user ? "••••••••" : `At least ${MIN_PASSWORD_LENGTH} characters`}
             />
           </div>
           <div>

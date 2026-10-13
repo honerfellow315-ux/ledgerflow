@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { money, hoursAmount } from "../server/limits";
 import { db } from "../server/db";
 import { hoursEntries } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
@@ -11,11 +12,11 @@ import { recordActivity, changedFieldsSummary } from "../server/activity";
 const hoursInput = z.object({
   month: z.string().min(1),
   clientId: z.string().min(1),
-  totalHours: z.number().default(0),
-  payrollHours: z.number().default(0),
-  managementPayrollHours: z.number().default(0),
-  unpaidHours: z.number().default(0),
-  rate: z.number().default(0),
+  totalHours: hoursAmount.default(0),
+  payrollHours: hoursAmount.default(0),
+  managementPayrollHours: hoursAmount.default(0),
+  unpaidHours: hoursAmount.default(0),
+  rate: money.default(0),
   // Rate the payroll hours were paid at. 0 / missing = not set (NULL).
   payrollRate: z
     .number()

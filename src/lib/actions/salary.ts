@@ -3,6 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, asc, desc, eq, inArray, lt, gt, sql } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { z } from "zod";
+import { money as zMoney } from "../server/limits";
 import { db, withTransaction } from "../server/db";
 import {
   payrollCompanies,
@@ -13,6 +14,7 @@ import {
   shiftCompanies,
 } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
+import { hasPermission } from "../permissions";
 import { uid } from "../server/id";
 import { recordActivity, changedFieldsSummary } from "../server/activity";
 import { importShiftRows } from "../server/shiftImport";
@@ -799,7 +801,8 @@ export const deletePeriod = createServerFn({ method: "POST" })
 export const getPeriodSheet = createServerFn({ method: "POST" })
   .validator(z.object({ periodId: z.string() }))
   .handler(async ({ data }): Promise<PeriodSheet> => {
-    await requirePermission("salary", "view");
+    const viewer = await requirePermission("salary", "view");
+    const canSeeStaffDetails = hasPermission(viewer.role, viewer.permissions, "staff", "view");
     const periodRow = await getPeriodOrThrow(data.periodId);
     const [{ entries, payments }, staffRows, companies, counts] = await Promise.all([
       loadPeriodData(data.periodId),
@@ -824,7 +827,12 @@ export const getPeriodSheet = createServerFn({ method: "POST" })
       period: toPeriod(periodRow),
       entries,
       payments,
-      staff: staffRows.map(toSheetStaff),
+      staff: staffRows.map((r) => {
+        const s = toSheetStaff(r);
+        // NI and bank details belong behind the separate "staff" permission
+        // (payroll already masks them the same way).
+        return canSeeStaffDetails ? s : { ...s, ni: "", accountDetail: "" };
+      }),
       companies: companies.map(toCompany),
       unmatchedShifts,
       shiftCounts,
@@ -877,17 +885,17 @@ export const getEntryBreakdown = createServerFn({ method: "POST" })
 
 const entryPatch = z
   .object({
-    rssAmount: z.number(),
-    rssHours: z.number(),
-    essAmount: z.number(),
-    essHours: z.number(),
-    carryForward: z.number(),
-    taxDeduction: z.number(),
-    deduction: z.number(),
+    rssAmount: zMoney,
+    rssHours: zMoney,
+    essAmount: zMoney,
+    essHours: zMoney,
+    carryForward: zMoney,
+    taxDeduction: zMoney,
+    deduction: zMoney,
     deductionNote: z.string(),
     checkStatus: z.enum(["", "Reviewed", "Verified"]),
     flag: z.string(),
-    payroll: z.record(z.string(), z.number()),
+    payroll: z.record(z.string(), zMoney),
   })
   .partial();
 
@@ -975,7 +983,7 @@ export const deleteEntry = createServerFn({ method: "POST" })
 
 const paymentInput = z.object({
   date: z.string().min(1),
-  amount: z.number(),
+  amount: zMoney,
   method: z.string().min(1).default("Bank Transfer"),
   reference: z.string().default(""),
   notes: z.string().optional(),
@@ -1171,11 +1179,11 @@ const shiftRow = z.object({
   date: z.string(),
   clientName: z.string(),
   siteName: z.string(),
-  hours: z.number(),
-  rate: z.number(),
-  amount: z.number(),
-  expenses: z.number(),
-  penalty: z.number(),
+  hours: zMoney,
+  rate: zMoney,
+  amount: zMoney,
+  expenses: zMoney,
+  penalty: zMoney,
   accountDetail: z.string(),
   tag: z.string(),
 });
@@ -1321,16 +1329,16 @@ const masterRow = z.object({
   ni: z.string(),
   tag: z.string(),
   name: z.string(),
-  rssAmount: z.number(),
-  rssHours: z.number(),
-  essAmount: z.number(),
-  essHours: z.number(),
-  carryForward: z.number(),
+  rssAmount: zMoney,
+  rssHours: zMoney,
+  essAmount: zMoney,
+  essHours: zMoney,
+  carryForward: zMoney,
   checkStatus: z.enum(["", "Reviewed", "Verified"]),
-  payroll: z.record(z.string(), z.number()),
-  taxDeduction: z.number(),
-  payments: z.array(z.number()),
-  deduction: z.number(),
+  payroll: z.record(z.string(), zMoney),
+  taxDeduction: zMoney,
+  payments: z.array(zMoney),
+  deduction: zMoney,
   accountDetail: z.string(),
   flag: z.string(),
   area: z.string(),
@@ -1615,7 +1623,7 @@ export const importPayrollAmounts = createServerFn({ method: "POST" })
       companyId: z.string(),
       keyKind: z.enum(["ni", "rssId", "essId", "name"]),
       mode: z.enum(["replace", "add"]),
-      rows: z.array(z.object({ key: z.string(), amount: z.number(), tax: z.number() })).max(3000),
+      rows: z.array(z.object({ key: z.string(), amount: zMoney, tax: zMoney })).max(3000),
       fileName: z.string().default(""),
     }),
   )
