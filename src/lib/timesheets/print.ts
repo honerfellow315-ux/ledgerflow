@@ -12,9 +12,10 @@ export function timesheetReportHtml(sheets: readonly TimesheetSheet[]): string {
       <p>NI: ${esc(maskNi(sheet.ni))} · Source: ${esc(sheet.fileName)}</p>
       <p><strong>Status: ${esc(sheet.status.replace(/_/g, " "))}</strong>${sheet.matchedBy === "name" && !sheet.staffConfirmed ? " · Name match awaiting confirmation" : ""}</p>
       <p>Sheet hours: <b>${total.sheetHours}</b> · Recorded hours: <b>${total.recordHours}</b> · Difference: <b>${total.diff}</b> · Issues: <b>${total.issues}</b></p>
+      ${sheet.statedAccepted ? `<p class="notice">Stated total differs from the rows. Accepted by ${esc(sheet.statedAccepted.by)}: ${esc(sheet.statedAccepted.note)}</p>` : ""}
       ${total.statedMismatch ? `<p class="notice">Stated total (${sheet.statedHours}) differs from the row total (${total.sheetHours}).</p>` : ""}
       ${sheet.readNote ? `<p class="notice">${esc(sheet.readNote)}</p>` : ""}
-      <table><thead><tr><th>Date</th><th>Site</th><th>Time</th><th>Sheet h</th><th>Record h</th><th>Result</th></tr></thead><tbody>${sheet.rows.map((row) => `<tr><td>${esc(row.date || "Unreadable")}</td><td>${esc(row.site)}</td><td>${esc(row.start)}–${esc(row.end)}</td><td>${row.sheetHours}</td><td>${row.recordHours ?? "—"}</td><td>${esc(row.result.replace(/_/g, " "))}${row.note ? `<br><small>${esc(row.note)}</small>` : ""}</td></tr>`).join("")}</tbody></table></section>`;
+      <table><thead><tr><th>Date</th><th>Site</th><th>Time</th><th>Sheet h</th><th>Record h</th><th>Result</th></tr></thead><tbody>${sheet.rows.map((row) => `<tr><td>${esc(row.date || "Unreadable")}</td><td>${esc(row.site)}</td><td>${esc(row.start)}–${esc(row.end)}</td><td>${row.sheetHours}</td><td>${row.recordHours ?? "—"}</td><td>${esc(row.result.replace(/_/g, " "))}${row.accepted ? ` · <b>accepted</b>` : ""}${row.note ? `<br><small>${esc(row.note)}</small>` : ""}${row.accepted ? `<br><small>Accepted by ${esc(row.accepted.by)}: ${esc(row.accepted.note)}</small>` : ""}</td></tr>`).join("")}</tbody></table></section>`;
     })
     .join("");
 }

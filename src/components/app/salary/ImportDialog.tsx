@@ -419,10 +419,7 @@ function ShiftImport({
                 ? ` They will NOT be imported: ${toImport.length} shifts · ${importHours} hours will be.`
                 : " They WILL be imported and added to this month's hours and pay."}
               <label className="mt-1 flex items-center gap-2">
-                <Checkbox
-                  checked={onlyMonth}
-                  onCheckedChange={(v) => setOnlyMonth(v === true)}
-                />
+                <Checkbox checked={onlyMonth} onCheckedChange={(v) => setOnlyMonth(v === true)} />
                 <span>Only import shifts dated in {formatMonthLabel(month)} (recommended)</span>
               </label>
             </Notice>

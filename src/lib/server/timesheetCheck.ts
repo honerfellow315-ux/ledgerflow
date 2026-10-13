@@ -6,11 +6,12 @@
  * Name, NI number and date of birth must all agree with one Staff record.
  * Matching queries the NI candidates rather than loading every staff record.
  */
-import { and, asc, eq, gte, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import * as schema from "../../../drizzle/schema";
 import {
   payrollStaff,
   salaryShifts,
+  timesheetAcceptances,
   timesheetRows,
   timesheetSheets,
 } from "../../../drizzle/schema";
@@ -72,7 +73,7 @@ export async function findStaff(
   const dob = normalizeDob(rawDob);
   if (!nameKey || !niKey || !rawDob.trim())
     return NO_MATCH(
-      "Staff name, NI number and date of birth are required. Complete the identity details before importing.",
+      "The sheet is missing the staff name, NI number or date of birth. Use Correct identity on this sheet to add what is missing.",
     );
   if (!isValidNi(rawNi)) return NO_MATCH("Enter a valid NI number before importing.");
   if (!dob) return NO_MATCH("Enter a valid date of birth using the date field.");
@@ -90,14 +91,16 @@ export async function findStaff(
     );
   if (normName(hit.name).replace(/\s+/g, " ") !== nameKey)
     return NO_MATCH(
-      "The staff name does not match the record for this NI number. Check the name before importing.",
+      `The name on the sheet ("${rawName.trim()}") does not match the name in Staff for this NI number ("${hit.name}"). Correct one of them.`,
     );
   if (!normalizeDob(hit.dob ?? ""))
     return NO_MATCH(
-      "This staff record has no valid date of birth. Update it in Staff before importing.",
+      `The Staff record for ${hit.name} has no date of birth yet. Add it in Staff, then press Check again on this sheet.`,
     );
   if (normalizeDob(hit.dob ?? "") !== dob)
-    return NO_MATCH("The date of birth does not match Staff. Check the details before importing.");
+    return NO_MATCH(
+      `The date of birth on the sheet does not match the one in Staff for ${hit.name}. Correct one of them, then press Check again.`,
+    );
   return { staffId: hit.id, matchedBy: "ni", staffName: hit.name, note: "" };
 }
 
@@ -303,14 +306,398 @@ export function dominantMonth(dates: readonly string[]): string {
   return best;
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  let e: unknown = err;
-  for (let i = 0; i < 4 && e; i++) {
-    if (typeof e === "object" && e !== null && (e as { code?: unknown }).code === "23505")
-      return true;
-    e = typeof e === "object" && e !== null ? (e as { cause?: unknown }).cause : undefined;
+/* ------------------------------ accepting a difference ------------------------------ */
+
+/**
+ * Fingerprint of one difference: what kind it is, the day, the site and both hour figures.
+ * An acceptance is stored against this fingerprint, so if the sheet or our records change
+ * (a different hour figure, another site...) the fingerprint changes and the acceptance
+ * lapses by itself. A purely cosmetic re-check keeps it.
+ */
+export function acceptKey(a: {
+  result: string;
+  date: string;
+  site: string;
+  sheetHours: number | null;
+  recordHours: number | null;
+}): string {
+  const h = (n: number | null) => (n === null ? "-" : n.toFixed(2));
+  return [a.result, a.date, a.site.trim().toLowerCase(), h(a.sheetHours), h(a.recordHours)].join(
+    "|",
+  );
+}
+
+/** Fingerprint of "the sheet's stated total differs from its rows". */
+export const statedKey = (stated: number | null, sheetHours: number): string =>
+  `${stated === null ? "-" : stated.toFixed(2)}|${sheetHours.toFixed(2)}`;
+
+/* ------------------------------ one person, one month, any number of sheets ------------------------------ */
+
+type ItemRef = { sheet: SheetRec; row: RowRec; overlap: boolean; key: number };
+
+/**
+ * Compares EVERYTHING one person sent for one month against our records, in one go.
+ *
+ * A person may have several sheets in a month (weekly sheets, a late correction...). Checking
+ * each sheet alone would call the days on the other sheets "missing" and could count the same
+ * day twice. So all of the person's sheets are merged first:
+ *   - a row that is identical (day, site, start, end, hours) to a row on an EARLIER sheet is
+ *     the same work and is counted ONCE (it is marked "counted once"); two identical rows on
+ *     the SAME sheet are still reported (a genuine duplicate);
+ *   - the merged rows are compared with our records once, so a day is never counted twice;
+ *   - "in our records but not on any sheet" rows are listed once, on the newest sheet.
+ * Differences an approver accepted (and that have not changed since) do not count as issues.
+ * Safe to run any number of times.
+ */
+export async function recomputeStaffMonth(db: Db, staffId: string, month: string): Promise<void> {
+  const sheets = await db
+    .select()
+    .from(timesheetSheets)
+    .where(and(eq(timesheetSheets.staffId, staffId), eq(timesheetSheets.month, month)))
+    .orderBy(asc(timesheetSheets.uploadedAt), asc(timesheetSheets.id));
+  if (sheets.length === 0) return;
+  const ids = sheets.map((x) => x.id);
+
+  const stored = await db
+    .select()
+    .from(timesheetRows)
+    .where(and(inArray(timesheetRows.sheetId, ids), eq(timesheetRows.fromRecords, false)))
+    .orderBy(asc(timesheetRows.sheetId), asc(timesheetRows.lineNo));
+  const bySheet = new Map<string, RowRec[]>();
+  for (const r of stored) {
+    const list = bySheet.get(r.sheetId);
+    if (list) list.push(r);
+    else bySheet.set(r.sheetId, [r]);
   }
-  return false;
+
+  // 1. merge: rows already seen on an earlier sheet are counted once
+  const earlier = new Map<string, number>();
+  const items: ItemRef[] = [];
+  const inputs: SheetRowInput[] = [];
+  for (const sh of sheets) {
+    const seenHere = new Map<string, number>();
+    for (const r of bySheet.get(sh.id) ?? []) {
+      const sig = [
+        r.date,
+        r.site.trim().toLowerCase(),
+        r.startTime,
+        r.endTime,
+        r.sheetHours === null ? "-" : r.sheetHours.toFixed(2),
+      ].join("|");
+      const nth = seenHere.get(sig) ?? 0;
+      seenHere.set(sig, nth + 1);
+      const overlap = nth < (earlier.get(sig) ?? 0);
+      let key = -1;
+      if (!overlap) {
+        key = inputs.length;
+        inputs.push({
+          key,
+          date: r.date,
+          site: r.site,
+          siteAlt: r.siteAlt,
+          hours: r.sheetHours,
+          uncertain: r.uncertain,
+          parseNote: r.parseNote,
+        });
+      }
+      items.push({ sheet: sh, row: r, overlap, key });
+    }
+    for (const [sig, n] of seenHere) earlier.set(sig, Math.max(earlier.get(sig) ?? 0, n));
+  }
+
+  // 2. compare once
+  const loaded = await loadRecords(
+    db,
+    staffId,
+    month,
+    inputs.map((i) => i.date),
+  );
+  const { answers, missing } = compareRows({
+    staffFound: true,
+    month,
+    rows: inputs,
+    records: loaded.records,
+    zeroHourDates: loaded.zeroHourDates,
+  });
+
+  // 3. what an approver already accepted
+  const accepted = await db
+    .select()
+    .from(timesheetAcceptances)
+    .where(and(eq(timesheetAcceptances.staffId, staffId), eq(timesheetAcceptances.month, month)));
+  const acceptedBy = new Map(accepted.map((x) => [x.rowKey, x]));
+  const acceptance = (
+    result: string,
+    date: string,
+    site: string,
+    sheetHours: number | null,
+    recordHours: number | null,
+  ) =>
+    result === "match"
+      ? undefined
+      : acceptedBy.get(acceptKey({ result, date, site, sheetHours, recordHours }));
+
+  // 4. write every row's answer
+  type Out = {
+    id: string;
+    result: string;
+    recordHours: number | null;
+    note: string;
+    accNote: string;
+    accBy: string;
+    accAt: string | null;
+  };
+  const outs: Out[] = [];
+  const issuesBySheet = new Map<string, number>();
+  const bump = (sheetId: string) =>
+    issuesBySheet.set(sheetId, (issuesBySheet.get(sheetId) ?? 0) + 1);
+  for (const it of items) {
+    if (it.overlap) {
+      outs.push({
+        id: it.row.id,
+        result: "match",
+        recordHours: it.row.sheetHours,
+        note: "Counted once: the same row is on another sheet for this month.",
+        accNote: "",
+        accBy: "",
+        accAt: null,
+      });
+      continue;
+    }
+    const ans = answers[it.key]!;
+    const acc = acceptance(
+      ans.result,
+      it.row.date,
+      it.row.site,
+      it.row.sheetHours,
+      ans.recordHours,
+    );
+    if (ans.result !== "match" && !acc) bump(it.sheet.id);
+    outs.push({
+      id: it.row.id,
+      result: ans.result,
+      recordHours: ans.recordHours,
+      note: ans.note,
+      accNote: acc?.note ?? "",
+      accBy: acc?.acceptedByName ?? "",
+      accAt: acc ? acc.acceptedAt.toISOString() : null,
+    });
+  }
+  for (const part of chunk(outs, 200)) {
+    const list = sql.join(
+      part.map(
+        (o) =>
+          sql`(${o.id}::text, ${o.result}::text, ${o.recordHours}::numeric, ${o.note}::text, ${o.accNote}::text, ${o.accBy}::text, ${o.accAt}::timestamptz)`,
+      ),
+      sql`, `,
+    );
+    await db.execute(sql`
+      UPDATE timesheet_rows t
+      SET result = v.result, record_hours = v.record_hours, note = v.note,
+          accepted_note = v.accepted_note, accepted_by_name = v.accepted_by_name,
+          accepted_at = v.accepted_at
+      FROM (VALUES ${list}) AS v(id, result, record_hours, note, accepted_note, accepted_by_name, accepted_at)
+      WHERE t.id = v.id`);
+  }
+
+  // 5. "in our records but on no sheet" rows live on the newest sheet only
+  const latest = sheets[sheets.length - 1]!;
+  await db
+    .delete(timesheetRows)
+    .where(and(inArray(timesheetRows.sheetId, ids), eq(timesheetRows.fromRecords, true)));
+  const extra: (typeof timesheetRows.$inferInsert)[] = missing.map((m, i) => {
+    const acc = acceptance("not_on_sheet", m.date, m.site, 0, m.recordHours);
+    if (!acc) bump(latest.id);
+    return {
+      id: uid("tr"),
+      sheetId: latest.id,
+      lineNo: 10000 + i,
+      fromRecords: true,
+      date: m.date,
+      site: m.site,
+      sheetHours: 0,
+      rate: m.rate,
+      recordHours: m.recordHours,
+      result: "not_on_sheet",
+      note: m.note,
+      acceptedNote: acc?.note ?? "",
+      acceptedByName: acc?.acceptedByName ?? "",
+      acceptedAt: acc?.acceptedAt ?? null,
+    };
+  });
+  for (const part of chunk(extra, 250)) await db.insert(timesheetRows).values(part);
+
+  // 6. each sheet's own line (totals, issues, status)
+  for (const sh of sheets) {
+    const own = items.filter((i) => i.sheet.id === sh.id);
+    const isLatest = sh.id === latest.id;
+    const sheetHours = sumHours(own.map((i) => i.row.sheetHours));
+    const recordHours = round2(
+      sumHours(own.map((i) => (i.overlap ? i.row.sheetHours : answers[i.key]!.recordHours))) +
+        (isLatest ? sumHours(missing.map((m) => m.recordHours)) : 0),
+    );
+    const mismatch = statedMismatch(sh.statedHours, sheetHours);
+    // An approver may accept a stated total that differs from the rows; it lapses if either figure changes.
+    const statedOk = mismatch && sh.statedAcceptedKey === statedKey(sh.statedHours, sheetHours);
+    const rowIssues = issuesBySheet.get(sh.id) ?? 0;
+    const issues = rowIssues + (mismatch && !statedOk ? 1 : 0);
+    const status = decideStatus({
+      staffId,
+      matchedBy: sh.matchedBy as "ni" | "name" | "none",
+      confirmed: sh.staffConfirmedAt !== null,
+      issues,
+      mismatch: false,
+    });
+    await db
+      .update(timesheetSheets)
+      .set({
+        sheetHours,
+        recordHours,
+        rowCount: own.length + (isLatest ? missing.length : 0),
+        issueCount: issues,
+        status,
+        comparedAt: new Date(),
+        // An acceptance only counts while both figures are unchanged; otherwise it lapses.
+        ...(statedOk
+          ? {}
+          : {
+              statedAcceptedKey: "",
+              statedAcceptedNote: "",
+              statedAcceptedByName: "",
+              statedAcceptedAt: null,
+            }),
+      })
+      .where(eq(timesheetSheets.id, sh.id));
+  }
+}
+
+/** The state of a saved difference as the screens need it, for accepting it. */
+async function loadRowForAccept(db: Db, rowId: string) {
+  const [row] = await db.select().from(timesheetRows).where(eq(timesheetRows.id, rowId)).limit(1);
+  if (!row) throw new Error("That row no longer exists.");
+  const [sheet] = await db
+    .select()
+    .from(timesheetSheets)
+    .where(eq(timesheetSheets.id, row.sheetId))
+    .limit(1);
+  if (!sheet) throw new Error("That sheet no longer exists.");
+  if (!sheet.staffId)
+    throw new Error("Match this sheet to a staff member before accepting a difference.");
+  await assertTimesheetMonthOpen(db, sheet.month);
+  return { row, sheet, staffId: sheet.staffId };
+}
+
+/** Accept one difference with a reason. The reason is required. */
+export async function acceptRow(
+  db: Db,
+  a: { rowId: string; note: string; actor: { id: string; name: string } },
+): Promise<{ sheetId: string; month: string; label: string }> {
+  const note = a.note.trim();
+  if (note.length < 3) throw new Error("Write the reason for accepting this difference.");
+  const { row, sheet, staffId } = await loadRowForAccept(db, a.rowId);
+  if (row.result === "match")
+    throw new Error("This row already matches; there is nothing to accept.");
+  const key = acceptKey({
+    result: row.result,
+    date: row.date,
+    site: row.site,
+    sheetHours: row.sheetHours,
+    recordHours: row.recordHours,
+  });
+  await db
+    .insert(timesheetAcceptances)
+    .values({
+      id: uid("tsa"),
+      staffId,
+      month: sheet.month,
+      rowKey: key,
+      note: note.slice(0, 500),
+      acceptedBy: a.actor.id,
+      acceptedByName: a.actor.name,
+    })
+    .onConflictDoUpdate({
+      target: [
+        timesheetAcceptances.staffId,
+        timesheetAcceptances.month,
+        timesheetAcceptances.rowKey,
+      ],
+      set: {
+        note: note.slice(0, 500),
+        acceptedBy: a.actor.id,
+        acceptedByName: a.actor.name,
+        acceptedAt: new Date(),
+      },
+    });
+  await recomputeStaffMonth(db, staffId, sheet.month);
+  return { sheetId: sheet.id, month: sheet.month, label: `${row.date} ${row.site}`.trim() };
+}
+
+/** Take an acceptance back, so the difference counts as an issue again. */
+export async function unacceptRow(
+  db: Db,
+  rowId: string,
+): Promise<{ sheetId: string; month: string }> {
+  const { row, sheet, staffId } = await loadRowForAccept(db, rowId);
+  const key = acceptKey({
+    result: row.result,
+    date: row.date,
+    site: row.site,
+    sheetHours: row.sheetHours,
+    recordHours: row.recordHours,
+  });
+  await db
+    .delete(timesheetAcceptances)
+    .where(
+      and(
+        eq(timesheetAcceptances.staffId, staffId),
+        eq(timesheetAcceptances.month, sheet.month),
+        eq(timesheetAcceptances.rowKey, key),
+      ),
+    );
+  await recomputeStaffMonth(db, staffId, sheet.month);
+  return { sheetId: sheet.id, month: sheet.month };
+}
+
+/** Accept (or take back) that a sheet's own stated total differs from its rows. */
+export async function setStatedAccepted(
+  db: Db,
+  a: { sheetId: string; accept: boolean; note: string; actor: { id: string; name: string } },
+): Promise<{ month: string }> {
+  const [sheet] = await db
+    .select()
+    .from(timesheetSheets)
+    .where(eq(timesheetSheets.id, a.sheetId))
+    .limit(1);
+  if (!sheet) throw new Error("That sheet no longer exists.");
+  if (!sheet.staffId) throw new Error("Match this sheet to a staff member first.");
+  await assertTimesheetMonthOpen(db, sheet.month);
+  if (a.accept) {
+    const note = a.note.trim();
+    if (note.length < 3) throw new Error("Write the reason for accepting this difference.");
+    if (!statedMismatch(sheet.statedHours, sheet.sheetHours))
+      throw new Error("The sheet's total already matches its rows.");
+    await db
+      .update(timesheetSheets)
+      .set({
+        statedAcceptedKey: statedKey(sheet.statedHours, sheet.sheetHours),
+        statedAcceptedNote: note.slice(0, 500),
+        statedAcceptedByName: a.actor.name,
+        statedAcceptedAt: new Date(),
+      })
+      .where(eq(timesheetSheets.id, sheet.id));
+  } else {
+    await db
+      .update(timesheetSheets)
+      .set({
+        statedAcceptedKey: "",
+        statedAcceptedNote: "",
+        statedAcceptedByName: "",
+        statedAcceptedAt: null,
+      })
+      .where(eq(timesheetSheets.id, sheet.id));
+  }
+  await recomputeStaffMonth(db, sheet.staffId, sheet.month);
+  return { month: sheet.month };
 }
 
 /* ------------------------------ saving a new sheet ------------------------------ */
@@ -360,7 +747,90 @@ export async function saveParsedSheet(
     rows: inputs,
   });
 
-  if (!ev.staff.staffId) return fail("rejected", ev.staff.note);
+  if (!ev.staff.staffId) {
+    // Nobody matched (for example the staff record has no date of birth yet). Keep the sheet
+    // as "staff not found" instead of throwing the upload away: fix Staff, press Check again,
+    // and nothing has to be uploaded a second time. A sheet like this can never be locked.
+    const holdingId = uid("ts");
+    const held = await db
+      .insert(timesheetSheets)
+      .values({
+        id: holdingId,
+        month,
+        fileName: a.fileName.slice(0, 255),
+        sheetLabel: sheet.sheetLabel.slice(0, 100),
+        fileHash: a.fileHash,
+        format: sheet.format,
+        uploadedBy: a.actor.id,
+        uploadedByName: a.actor.name,
+        staffId: null,
+        matchedBy: "none",
+        personName: sheet.personName,
+        personNi: sheet.personNi,
+        personDob: normalizeDob(sheet.personDob ?? ""),
+        personKey: personKeyOf(
+          null,
+          sheet.personNi,
+          sheet.personName,
+          a.fileHash,
+          sheet.sheetLabel,
+        ),
+        statedHours: sheet.statedHours,
+        sheetHours: ev.sheetHours,
+        recordHours: 0,
+        rowCount: sheet.rows.length,
+        issueCount: ev.answers.filter((x) => x.result !== "match").length,
+        status: "staff_not_found",
+        readNote: ev.staff.note.slice(0, 500),
+        comparedAt: new Date(),
+      })
+      .onConflictDoNothing()
+      .returning({ id: timesheetSheets.id });
+    if (held.length === 0)
+      return fail("duplicate", "This file was already uploaded, so nothing was added twice.");
+    try {
+      for (const part of chunk(
+        sheet.rows.map((r, i) => ({ r, ans: ev.answers[i]! })),
+        250,
+      ))
+        await db.insert(timesheetRows).values(
+          part.map(({ r, ans }, k) => ({
+            id: uid("tr"),
+            sheetId: holdingId,
+            lineNo: sheet.rows.indexOf(r) + 1 || k + 1,
+            fromRecords: false,
+            date: r.date,
+            site: r.site,
+            siteAlt: r.siteAlt,
+            startTime: r.start,
+            endTime: r.end,
+            sheetHours: r.hours,
+            rate: r.rate,
+            amount: r.amount,
+            expense: r.expense,
+            uncertain: r.uncertain,
+            parseNote: r.note,
+            recordHours: ans.recordHours,
+            result: ans.result,
+            note: ans.note,
+          })),
+        );
+    } catch (err) {
+      await db.delete(timesheetSheets).where(eq(timesheetSheets.id, holdingId));
+      throw err;
+    }
+    return {
+      label,
+      outcome: "saved",
+      message: `${ev.staff.note} The sheet is saved as "staff not found": fix the staff record, then press Check again.`,
+      sheetId: holdingId,
+      status: "staff_not_found",
+      issues: ev.answers.filter((x) => x.result !== "match").length,
+      staffName: sheet.personName,
+      matchedBy: "none",
+      month,
+    };
+  }
 
   const mismatch = statedMismatch(sheet.statedHours, ev.sheetHours);
   const status = decideStatus({
@@ -401,7 +871,7 @@ export async function saveParsedSheet(
       sheetHours: ev.sheetHours,
       recordHours: ev.recordHours,
       rowCount: totalRows,
-      issueCount: ev.issues,
+      issueCount: ev.issues + (mismatch ? 1 : 0),
       status,
       readNote: sheet.warnings.length > 0 ? sheet.warnings.join(" ") : null,
       comparedAt: new Date(),
@@ -410,16 +880,15 @@ export async function saveParsedSheet(
     .returning({ id: timesheetSheets.id });
 
   if (inserted.length === 0) {
+    // Only the SAME FILE (same content and sheet) can clash now: several different sheets
+    // for one person and month are allowed.
     const [existing] = await db
       .select()
       .from(timesheetSheets)
       .where(
-        or(
-          and(
-            eq(timesheetSheets.fileHash, a.fileHash),
-            eq(timesheetSheets.sheetLabel, sheet.sheetLabel.slice(0, 100)),
-          ),
-          and(eq(timesheetSheets.personKey, key), eq(timesheetSheets.month, month)),
+        and(
+          eq(timesheetSheets.fileHash, a.fileHash),
+          eq(timesheetSheets.sheetLabel, sheet.sheetLabel.slice(0, 100)),
         ),
       )
       .limit(1);
@@ -428,7 +897,7 @@ export async function saveParsedSheet(
     return {
       ...fail(
         "duplicate",
-        `A sheet already exists for ${formatMonthLabel(existing.month)}. Open it to review or delete it before uploading a replacement.`,
+        `This file was already uploaded for ${formatMonthLabel(existing.month)}, so nothing was added twice. Open it to review it.`,
       ),
       sheetId: existing.id,
       month: existing.month,
@@ -459,37 +928,31 @@ export async function saveParsedSheet(
       note: ans.note,
     };
   });
-  ev.missing.forEach((m, i) => {
-    rowValues.push({
-      id: uid("tr"),
-      sheetId: id,
-      lineNo: 10000 + i,
-      fromRecords: true,
-      date: m.date,
-      site: m.site,
-      sheetHours: 0,
-      rate: m.rate,
-      recordHours: m.recordHours,
-      result: "not_on_sheet",
-      note: m.note,
-    });
-  });
 
   try {
     for (const part of chunk(rowValues, 250)) await db.insert(timesheetRows).values(part);
+    // Merge with the person's other sheets for this month and compare everything once.
+    await recomputeStaffMonth(db, ev.staff.staffId, month);
   } catch (err) {
     // Never leave a half-saved sheet behind.
     await db.delete(timesheetSheets).where(eq(timesheetSheets.id, id));
     throw err;
   }
 
+  const [saved] = await db
+    .select({ status: timesheetSheets.status, issues: timesheetSheets.issueCount })
+    .from(timesheetSheets)
+    .where(eq(timesheetSheets.id, id))
+    .limit(1);
+
   return {
     label,
     outcome: "saved",
     message: ev.staff.note,
     sheetId: id,
-    status,
-    issues: ev.issues + (mismatch ? 1 : 0),
+    status: saved ? storedStatus({ staffId: ev.staff.staffId, status: saved.status }) : status,
+    // The same figure the list shows: the sheet's own stated-total difference is included.
+    issues: saved?.issues ?? ev.issues + (mismatch ? 1 : 0),
     staffName: ev.staff.staffName || sheet.personName,
     matchedBy: ev.staff.matchedBy,
     month,
@@ -508,8 +971,8 @@ export interface RecheckResult {
 
 /**
  * Runs the comparison again for one saved sheet (after Staff or shifts changed): finds the
- * person again, reloads our records, rewrites each row's answer and the sheet's totals.
- * Safe to run any number of times.
+ * person again, then re-compares everything that person sent for the month (their other
+ * sheets included, so nothing is counted twice). Safe to run any number of times.
  */
 export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResult | null> {
   const [sheet] = await db
@@ -519,12 +982,67 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
     .limit(1);
   if (!sheet) return null;
   await assertTimesheetMonthOpen(db, sheet.month);
+
+  // While rechecking, the sheet cannot be locked as ready with old comparison results.
+  await db
+    .update(timesheetSheets)
+    .set({ status: "needs_review", comparedAt: null })
+    .where(eq(timesheetSheets.id, sheetId));
+
+  const staff = await findStaff(db, sheet.personNi, sheet.personName, sheet.personDob ?? "");
+  // A human's confirmation of a name-only match only survives while it is the same person.
+  const keepConfirmed =
+    staff.matchedBy === "name" &&
+    sheet.staffId === staff.staffId &&
+    sheet.staffConfirmedAt !== null;
+  const key = personKeyOf(
+    staff.staffId,
+    sheet.personNi,
+    sheet.personName,
+    sheet.fileHash,
+    sheet.sheetLabel,
+  );
+  await db
+    .update(timesheetSheets)
+    .set({
+      staffId: staff.staffId,
+      matchedBy: staff.matchedBy,
+      staffConfirmedAt: keepConfirmed ? sheet.staffConfirmedAt : null,
+      personKey: key,
+    })
+    .where(eq(timesheetSheets.id, sheetId));
+
+  if (staff.staffId) {
+    await recomputeStaffMonth(db, staff.staffId, sheet.month);
+  } else {
+    await recheckUnmatched(db, sheet);
+  }
+  // The person this sheet used to belong to may have lost (or regained) a sheet.
+  if (sheet.staffId && sheet.staffId !== staff.staffId) {
+    await recomputeStaffMonth(db, sheet.staffId, sheet.month);
+  }
+
+  const [after] = await db
+    .select()
+    .from(timesheetSheets)
+    .where(eq(timesheetSheets.id, sheetId))
+    .limit(1);
+  return {
+    id: sheetId,
+    status: after ? storedStatus(after) : "needs_review",
+    previousStatus: storedStatus(sheet),
+    issues: after?.issueCount ?? 0,
+    note: staff.note,
+  };
+}
+
+/** A sheet nobody could be matched to: its rows cannot be compared, only listed. */
+async function recheckUnmatched(db: Db, sheet: SheetRec): Promise<void> {
   const stored = await db
     .select()
     .from(timesheetRows)
-    .where(and(eq(timesheetRows.sheetId, sheetId), eq(timesheetRows.fromRecords, false)))
+    .where(and(eq(timesheetRows.sheetId, sheet.id), eq(timesheetRows.fromRecords, false)))
     .orderBy(asc(timesheetRows.lineNo));
-
   const inputs: SheetRowInput[] = stored.map((r, i) => ({
     key: i,
     date: r.date,
@@ -534,37 +1052,15 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
     uncertain: r.uncertain,
     parseNote: r.parseNote,
   }));
-  const personName = sheet.personName;
-  // While rechecking, the sheet cannot be locked as ready with old comparison results.
-  await db
-    .update(timesheetSheets)
-    .set({ status: "needs_review", comparedAt: null })
-    .where(eq(timesheetSheets.id, sheetId));
-  const ev = await evaluate(db, {
-    personName,
-    personNi: sheet.personNi,
-    personDob: sheet.personDob ?? "",
+  const { answers, missing } = compareRows({
+    staffFound: false,
     month: sheet.month,
     rows: inputs,
+    records: [],
+    zeroHourDates: new Set<string>(),
   });
-
-  // A human's confirmation of a name-only match only survives while it is the same person.
-  const keepConfirmed =
-    ev.staff.matchedBy === "name" &&
-    sheet.staffId === ev.staff.staffId &&
-    sheet.staffConfirmedAt !== null;
-  const mismatch = statedMismatch(sheet.statedHours, ev.sheetHours);
-  const status = decideStatus({
-    staffId: ev.staff.staffId,
-    matchedBy: ev.staff.matchedBy,
-    confirmed: keepConfirmed,
-    issues: ev.issues,
-    mismatch,
-  });
-
-  // 1. each sheet row's answer
   for (const part of chunk(
-    stored.map((r, i) => ({ r, a: ev.answers[i]! })),
+    stored.map((r, i) => ({ r, a: answers[i]! })),
     200,
   )) {
     const list = sql.join(
@@ -576,73 +1072,26 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
     );
     await db.execute(sql`
       UPDATE timesheet_rows t
-      SET result = v.result, record_hours = v.record_hours, note = v.note
+      SET result = v.result, record_hours = v.record_hours, note = v.note,
+          accepted_note = '', accepted_by_name = '', accepted_at = NULL
       FROM (VALUES ${list}) AS v(id, result, record_hours, note)
       WHERE t.id = v.id`);
   }
-  // 2. the "in our records but not on the sheet" rows are rebuilt
   await db
     .delete(timesheetRows)
-    .where(and(eq(timesheetRows.sheetId, sheetId), eq(timesheetRows.fromRecords, true)));
-  const extra: (typeof timesheetRows.$inferInsert)[] = ev.missing.map((m, i) => ({
-    id: uid("tr"),
-    sheetId,
-    lineNo: 10000 + i,
-    fromRecords: true,
-    date: m.date,
-    site: m.site,
-    sheetHours: 0,
-    rate: m.rate,
-    recordHours: m.recordHours,
-    result: "not_on_sheet",
-    note: m.note,
-  }));
-  for (const part of chunk(extra, 250)) await db.insert(timesheetRows).values(part);
-
-  // 3. the sheet's own line
-  const key = personKeyOf(
-    ev.staff.staffId,
-    sheet.personNi,
-    personName,
-    sheet.fileHash,
-    sheet.sheetLabel,
-  );
-  const common = {
-    personName,
-    staffId: ev.staff.staffId,
-    matchedBy: ev.staff.matchedBy,
-    staffConfirmedAt: keepConfirmed ? sheet.staffConfirmedAt : null,
-    sheetHours: ev.sheetHours,
-    recordHours: ev.recordHours,
-    rowCount: stored.length + ev.missing.length,
-    issueCount: ev.issues,
-    status,
-    comparedAt: new Date(),
-  };
-  try {
-    await db
-      .update(timesheetSheets)
-      .set({ ...common, personKey: key })
-      .where(eq(timesheetSheets.id, sheetId));
-  } catch (err) {
-    if (!isUniqueViolation(err)) throw err;
-    // Keep the comparison reviewable, but never mark a duplicate person/month ready.
-    await db
-      .update(timesheetSheets)
-      .set({ ...common, status: "needs_review", staffConfirmedAt: null })
-      .where(eq(timesheetSheets.id, sheetId));
-    throw new Error(
-      "Another sheet already exists for this staff member and month. Review the duplicate before confirming.",
-    );
-  }
-
-  return {
-    id: sheetId,
-    status,
-    previousStatus: storedStatus(sheet),
-    issues: ev.issues + (mismatch ? 1 : 0),
-    note: ev.staff.note,
-  };
+    .where(and(eq(timesheetRows.sheetId, sheet.id), eq(timesheetRows.fromRecords, true)));
+  const sheetHours = sumHours(stored.map((r) => r.sheetHours));
+  await db
+    .update(timesheetSheets)
+    .set({
+      sheetHours,
+      recordHours: 0,
+      rowCount: stored.length + missing.length,
+      issueCount: answers.filter((x) => x.result !== "match").length,
+      status: "staff_not_found",
+      comparedAt: new Date(),
+    })
+    .where(eq(timesheetSheets.id, sheet.id));
 }
 
 /* ------------------------------ confirming a name-only match ------------------------------ */
@@ -658,33 +1107,11 @@ export async function confirmNameMatch(db: Db, sheetId: string): Promise<boolean
   if (!identity.staffId || identity.staffId !== sheet.staffId)
     throw new Error(identity.note || "Use Correct identity to verify this staff member first.");
   await assertTimesheetMonthOpen(db, sheet.month);
-  const [duplicate] = await db
-    .select({ id: timesheetSheets.id })
-    .from(timesheetSheets)
-    .where(
-      and(
-        eq(timesheetSheets.staffId, sheet.staffId),
-        eq(timesheetSheets.month, sheet.month),
-        ne(timesheetSheets.id, sheet.id),
-      ),
-    )
-    .limit(1);
-  if (duplicate)
-    throw new Error(
-      "Another sheet exists for this staff member and month. Review the duplicate first.",
-    );
-  const mismatch = statedMismatch(sheet.statedHours, sheet.sheetHours);
-  const status = decideStatus({
-    staffId: sheet.staffId,
-    matchedBy: "name",
-    confirmed: true,
-    issues: sheet.issueCount,
-    mismatch,
-  });
   await db
     .update(timesheetSheets)
-    .set({ staffConfirmedAt: new Date(), status })
+    .set({ staffConfirmedAt: new Date() })
     .where(eq(timesheetSheets.id, sheetId));
+  await recomputeStaffMonth(db, sheet.staffId, sheet.month);
   return true;
 }
 
@@ -741,7 +1168,9 @@ export function toListItem(x: SheetWithStaff): SheetListItem {
     recordHours: s.recordHours,
     diff: round2(s.sheetHours - s.recordHours),
     issues: s.issueCount,
-    statedMismatch: statedMismatch(s.statedHours, s.sheetHours),
+    statedMismatch:
+      statedMismatch(s.statedHours, s.sheetHours) &&
+      s.statedAcceptedKey !== statedKey(s.statedHours, s.sheetHours),
     status: storedStatus(s),
   };
 }
@@ -759,6 +1188,15 @@ export function toTimesheetSheet(x: SheetWithStaff, rows: readonly RowRec[]): Ti
     rate: r.rate ?? 0,
     result: asResult(r.result),
     ...(r.note ? { note: r.note } : {}),
+    ...(r.acceptedAt
+      ? {
+          accepted: {
+            note: r.acceptedNote,
+            by: r.acceptedByName,
+            at: r.acceptedAt.toISOString(),
+          },
+        }
+      : {}),
   }));
   const label = s.sheetLabel ? `${s.fileName} (${s.sheetLabel})` : s.fileName;
   return {
@@ -778,6 +1216,15 @@ export function toTimesheetSheet(x: SheetWithStaff, rows: readonly RowRec[]): Ti
     status: storedStatus(s),
     staffConfirmed: s.staffConfirmedAt !== null,
     ...(s.readNote ? { readNote: s.readNote } : {}),
+    ...(s.statedAcceptedAt && s.statedAcceptedKey === statedKey(s.statedHours, s.sheetHours)
+      ? {
+          statedAccepted: {
+            note: s.statedAcceptedNote,
+            by: s.statedAcceptedByName,
+            at: s.statedAcceptedAt.toISOString(),
+          },
+        }
+      : {}),
     sourceName: s.personName,
     sourceNi: s.personNi,
     sourceDob: s.personDob,

@@ -31,6 +31,7 @@ export const MODULES = [
   "creditNotes",
   "hours",
   "salary",
+  "timesheets",
   "payroll",
   "staff",
   "reports",
@@ -67,6 +68,10 @@ export const MODULE_ACTIONS: Record<Module, readonly Action[]> = {
   // NI numbers + bank details live here, so it is granted separately
   // payroll sheets (All Payroll Format); approve = verify / close / reopen / push to salary sheet
   payroll: ["view", "create", "edit", "delete", "approve"],
+  // Timesheet Check. create = upload sheets; edit = check again / fix a sheet's staff;
+  // delete = remove a sheet; approve = accept a difference with a note and lock a month.
+  // Reopening a locked month is admin-only, whatever the permissions say.
+  timesheets: ["view", "create", "edit", "delete", "approve"],
   staff: ["view", "create", "edit"],
   reports: ["view"],
   settings: ["view", "edit"],
@@ -89,6 +94,7 @@ export const MODULE_LABELS: Record<Module, string> = {
   hours: "Hours",
   salary: "Salary Sheet",
   payroll: "Payroll Sheet",
+  timesheets: "Timesheet Check",
   staff: "Staff (NI & bank details)",
   reports: "Reports",
   settings: "Settings",

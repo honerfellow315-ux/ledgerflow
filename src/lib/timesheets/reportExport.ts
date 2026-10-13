@@ -86,7 +86,7 @@ export async function downloadTimesheetReport(sheets: readonly TimesheetSheet[])
 
     if (problems === 0) continue;
     for (const r of s.rows) {
-      if (r.result === "match") continue;
+      if (r.result === "match" || r.accepted) continue;
       issues.addRow({
         name: s.staffName,
         date: fmtDate(r.date),

@@ -19,6 +19,8 @@ export interface SheetRow {
   rate: number;
   result: RowResult;
   note?: string;
+  /** An approver accepted this difference. */
+  accepted?: { note: string; by: string; at: string };
 }
 
 export interface TimesheetSheet {
@@ -41,6 +43,10 @@ export interface TimesheetSheet {
   readNote?: string;
   /** A person confirmed a name-only match. */
   staffConfirmed?: boolean;
+  /** The month is locked (nothing can be accepted or changed). */
+  monthLocked?: boolean;
+  /** An approver accepted that the sheet's own total differs from its rows. */
+  statedAccepted?: { note: string; by: string; at: string };
   rows: SheetRow[];
 }
 
@@ -60,8 +66,8 @@ export function sheetTotals(s: TimesheetSheet) {
     sheetHours,
     recordHours,
     diff: round(sheetHours - recordHours),
-    issues: s.rows.filter((r) => r.result !== "match").length,
-    statedMismatch: Math.abs(s.statedHours - sheetHours) > 0.001,
+    issues: s.rows.filter((r) => r.result !== "match" && !r.accepted).length,
+    statedMismatch: Math.abs(s.statedHours - sheetHours) > 0.001 && !s.statedAccepted,
   };
 }
 

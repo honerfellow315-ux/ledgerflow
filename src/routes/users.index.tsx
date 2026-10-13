@@ -17,6 +17,7 @@ import {
   LockKeyhole,
   Pencil,
   Plus,
+  ListChecks,
   Receipt,
   ReceiptText,
   Settings as SettingsIcon,
@@ -87,6 +88,7 @@ const MODULE_ICONS: Record<Module, typeof LayoutDashboard> = {
   creditNotes: FileMinus,
   hours: Clock,
   salary: Banknote,
+  timesheets: ListChecks,
   staff: IdCard,
   reports: Receipt,
   payroll: FileSpreadsheet,
@@ -269,11 +271,18 @@ function UserDialog({
     }
   }, [open, user]);
 
+  // Any action other than View needs View (you cannot edit what you cannot open),
+  // and removing View removes everything else for that module.
   const toggle = (module: Module, action: Action, value: boolean) => {
-    setPermissions((p) => ({
-      ...p,
-      [module]: { ...p[module], [action]: value },
-    }));
+    setPermissions((p) => {
+      const next = { ...p[module], [action]: value };
+      if (action === "view" && !value) {
+        for (const a of Object.keys(next) as Action[]) next[a] = false;
+      } else if (action !== "view" && value && MODULE_ACTIONS[module].includes("view")) {
+        next.view = true;
+      }
+      return { ...p, [module]: next };
+    });
   };
 
   const applyPreset = (preset: "full" | "none") => {

@@ -692,7 +692,7 @@ export const timesheetSheets = pgTable(
     staffConfirmedAt: timestamp("staff_confirmed_at", { withTimezone: true }),
     personName: text("person_name").notNull().default(""),
     personNi: text("person_ni").notNull().default(""),
-  personDob: text("person_dob").notNull().default(""),
+    personDob: text("person_dob").notNull().default(""),
     personKey: text("person_key").notNull(),
     statedHours: numeric("stated_hours", { precision: 10, scale: 2, mode: "number" }),
     sheetHours: numeric("sheet_hours", { precision: 10, scale: 2, mode: "number" })
@@ -706,9 +706,15 @@ export const timesheetSheets = pgTable(
     status: text("status").notNull().default("needs_review"), // ready | needs_review | staff_not_found
     readNote: text("read_note"),
     comparedAt: timestamp("compared_at", { withTimezone: true }),
+    /** An approver accepted that the sheet's stated total differs from its rows. */
+    statedAcceptedNote: text("stated_accepted_note").notNull().default(""),
+    statedAcceptedKey: text("stated_accepted_key").notNull().default(""),
+    statedAcceptedByName: text("stated_accepted_by_name").notNull().default(""),
+    statedAcceptedAt: timestamp("stated_accepted_at", { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex("timesheet_sheets_person_month_uq").on(t.personKey, t.month),
+    // Several sheets per person per month are allowed (see timesheet-multi-sheet-migration.sql).
+    index("timesheet_sheets_person_month_idx").on(t.personKey, t.month),
     uniqueIndex("timesheet_sheets_file_uq").on(t.fileHash, t.sheetLabel),
     index("timesheet_sheets_month_idx").on(t.month, t.uploadedAt),
     index("timesheet_sheets_staff_idx").on(t.staffId),
@@ -739,8 +745,35 @@ export const timesheetRows = pgTable(
     recordHours: numeric("record_hours", { precision: 10, scale: 2, mode: "number" }),
     result: text("result").notNull().default("check_reading"),
     note: text("note").notNull().default(""),
+    /** An approver accepted this difference; the reason is kept (empty = not accepted). */
+    acceptedNote: text("accepted_note").notNull().default(""),
+    acceptedByName: text("accepted_by_name").notNull().default(""),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
   },
   (t) => [index("timesheet_rows_sheet_idx").on(t.sheetId, t.lineNo)],
+);
+
+/**
+ * "Accept with a note": an approver reviewed one difference and decided it is fine (e.g. the
+ * staff member gave a reason, so no pay is deducted). `rowKey` fingerprints the difference
+ * (kind + date + site + the two hour figures), so if the sheet or our records change the
+ * fingerprint changes and the acceptance lapses by itself.
+ */
+export const timesheetAcceptances = pgTable(
+  "timesheet_acceptances",
+  {
+    id: text("id").primaryKey(),
+    staffId: text("staff_id")
+      .notNull()
+      .references(() => payrollStaff.id, { onDelete: "cascade" }),
+    month: text("month").notNull(),
+    rowKey: text("row_key").notNull(),
+    note: text("note").notNull(),
+    acceptedBy: text("accepted_by").notNull().default(""),
+    acceptedByName: text("accepted_by_name").notNull().default(""),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("timesheet_acceptances_uq").on(t.staffId, t.month, t.rowKey)],
 );
 
 // Tasks: free-text tasks that an admin gives out (or anyone logs for themselves), with an

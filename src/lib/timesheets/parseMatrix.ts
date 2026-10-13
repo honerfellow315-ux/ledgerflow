@@ -512,7 +512,9 @@ export function parseTimesheetMatrix(matrix: TsMatrix, sheetLabel: string): Pars
     );
   }
   if (normNi(person.ni).length === 0 && person.name) {
-    warnings.push("The sheet has no NI number, so the person can only be matched by name.");
+    warnings.push(
+      "The sheet has no NI number. Use Correct identity to add it so the person can be matched.",
+    );
   }
 
   return {

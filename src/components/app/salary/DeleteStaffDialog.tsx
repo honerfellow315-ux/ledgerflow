@@ -63,7 +63,7 @@ export function DeleteStaffDialog({
       qc.invalidateQueries({ queryKey: ["trash"] });
       const skipped =
         res.skipped > 0
-          ? ` ${res.skipped} skipped (in a closed month): ${res.skippedNames.join(", ")}.`
+          ? ` ${res.skipped} skipped (in a closed or locked month): ${res.skippedNames.join(", ")}.`
           : "";
       toast.success(`${res.deleted} staff moved to the Recycle Bin.${skipped}`);
       onDone();
@@ -127,6 +127,10 @@ export function DeleteStaffDialog({
                       </li>
                       <li>
                         {i.shifts} imported shift row{i.shifts === 1 ? "" : "s"} un-linked
+                      </li>
+                      <li>
+                        {i.timesheets} timesheet{i.timesheets === 1 ? "" : "s"} kept but shown as
+                        &quot;staff not found&quot; until the person is restored and checked again
                       </li>
                     </ul>
                     {i.blocked > 0 ? (

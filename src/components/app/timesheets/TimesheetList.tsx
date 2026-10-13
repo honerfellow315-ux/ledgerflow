@@ -12,7 +12,8 @@ export function TimesheetList({
   items: SheetListItem[];
   disabled: boolean;
   onOpen: (id: string) => void;
-  onDelete: (sheet: SheetListItem) => void;
+  /** Left out for people without the Delete permission. */
+  onDelete?: (sheet: SheetListItem) => void;
 }) {
   const actions = (s: SheetListItem) => (
     <div className="mt-2 flex flex-wrap gap-2">
@@ -24,16 +25,18 @@ export function TimesheetList({
       >
         Review
       </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="text-destructive"
-        disabled={disabled}
-        onClick={() => onDelete(s)}
-        aria-label={`Delete timesheet for ${s.staffName}`}
-      >
-        Delete
-      </Button>
+      {onDelete ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-destructive"
+          disabled={disabled}
+          onClick={() => onDelete(s)}
+          aria-label={`Delete timesheet for ${s.staffName}`}
+        >
+          Delete
+        </Button>
+      ) : null}
     </div>
   );
   const identity = (s: SheetListItem) => (

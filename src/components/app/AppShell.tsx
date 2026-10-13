@@ -114,7 +114,7 @@ const NAV_GROUPS: { heading: string; items: NavItem[] }[] = [
       { to: "/salary", label: "Salary Sheet", icon: Banknote, module: "salary" },
       { to: "/payroll", label: "Payroll Sheet", icon: FileSpreadsheet, module: "payroll" },
       { to: "/staff", label: "Staff", icon: IdCard, module: "staff" },
-      { to: "/timesheets", label: "Timesheet Check", icon: ListChecks, module: null },
+      { to: "/timesheets", label: "Timesheet Check", icon: ListChecks, module: "timesheets" },
       { to: "/tasks", label: "Tasks", icon: ClipboardList, module: "tasks" },
       { to: "/payslips", label: "Payslips", icon: Banknote, module: "payroll" },
       { to: "/invoice-drafts", label: "Invoice Drafts", icon: FilePlus, module: "invoices" },

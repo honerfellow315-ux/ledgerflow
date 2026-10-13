@@ -32,7 +32,15 @@ export interface DashboardPayrollHours {
  * holiday, same Amount formula as listPayrollSheets); nothing is written.
  */
 export const dashboardPayrollHours = createServerFn({ method: "GET" })
-  .validator(z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).nullable().default(null) }))
+  .validator(
+    z.object({
+      month: z
+        .string()
+        .regex(/^\d{4}-\d{2}$/)
+        .nullable()
+        .default(null),
+    }),
+  )
   .handler(async ({ data }): Promise<DashboardPayrollHours> => {
     await requirePermission("payroll", "view");
     const monthsRes = await db.execute(

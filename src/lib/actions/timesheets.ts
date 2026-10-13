@@ -1,7 +1,12 @@
 /**
- * Timesheet Check server functions. Admin-only for this phase (requireAdmin at the top of
- * every handler, the real security boundary). When the feature gets its own permission
- * module later, swap requireAdmin() for requirePermission("timesheets", ...) here.
+ * Timesheet Check server functions. Every handler checks the "timesheets" permission on the
+ * server (the real security boundary; hiding buttons is only UX):
+ *   view    - open the list and sheets
+ *   create  - upload sheets
+ *   edit    - check again, confirm / correct a sheet's staff member
+ *   delete  - delete a sheet
+ *   approve - accept a difference with a note, lock a month
+ * Reopening a locked month is admin-only. Admins pass every check.
  * The work itself lives in src/lib/server/timesheetCheck.ts.
  */
 import { createServerFn } from "@tanstack/react-start";
@@ -23,12 +28,16 @@ import { z } from "zod";
 import { assertTimesheetMonthOpen } from "../server/timesheetLocks";
 import { db } from "../server/db";
 import { payrollStaff, timesheetRows, timesheetSheets } from "../../../drizzle/schema";
-import { requireAdmin } from "../server/auth";
+import { requirePermission } from "../server/auth";
+import { hasPermission } from "../permissions";
 import { recordActivity } from "../server/activity";
 import { formatMonthLabel } from "../payroll/calc";
 import {
+  acceptRow,
   confirmNameMatch,
   findStaff,
+  setStatedAccepted,
+  unacceptRow,
   personKeyOf,
   recheckSheet,
   saveParsedSheet,
@@ -77,6 +86,17 @@ const listFilter = z.object({
   month: z.union([month, z.literal("all")]),
   search: z.string().trim().max(80).default(""),
   status: z.union([status, z.literal("all")]).default("all"),
+});
+
+type Viewer = Awaited<ReturnType<typeof requirePermission>>;
+
+/** NI numbers and dates of birth stay behind the Staff permission, as everywhere else. */
+const seesIdentity = (u: Viewer) => hasPermission(u.role, u.permissions, "staff", "view");
+const hideSheet = (t: TimesheetSheet): TimesheetSheet => ({
+  ...t,
+  ni: "",
+  sourceNi: "",
+  sourceDob: "",
 });
 
 const actorName = (u: { displayName: string; username: string }) => u.displayName || u.username;
@@ -128,7 +148,7 @@ export const uploadTimesheetFile = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }): Promise<UploadOutcome[]> => {
-    const actor = await requireAdmin();
+    const actor = await requirePermission("timesheets", "create");
     const outcomes: UploadOutcome[] = [];
     for (const sheet of data.sheets) {
       const out = await saveParsedSheet(db, {
@@ -155,7 +175,7 @@ export const uploadTimesheetFile = createServerFn({ method: "POST" })
 /* ------------------------------ reading ------------------------------ */
 
 export const listTimesheetMonths = createServerFn({ method: "GET" }).handler(async () => {
-  await requireAdmin();
+  await requirePermission("timesheets", "view");
   const res = await db.execute(sql`
     SELECT month, count(*)::int AS sheets FROM timesheet_sheets
     GROUP BY month ORDER BY month DESC LIMIT 48`);
@@ -174,7 +194,7 @@ export const listTimesheetSheets = createServerFn({ method: "GET" })
     }),
   )
   .handler(async ({ data }): Promise<SheetListPage> => {
-    await requireAdmin();
+    const viewer = await requirePermission("timesheets", "view");
     const where = whereOf(data);
     const rows = await db
       .select(sheetColumns)
@@ -201,7 +221,7 @@ export const listTimesheetSheets = createServerFn({ method: "GET" })
     const s = (sum.rows[0] ?? {}) as Record<string, number | undefined>;
 
     return {
-      items: rows.map(toListItem),
+      items: rows.map(toListItem).map((it) => (seesIdentity(viewer) ? it : { ...it, ni: "" })),
       total: count?.n ?? 0,
       page: data.page,
       pageSize: data.pageSize,
@@ -239,7 +259,7 @@ async function loadWithRows(rows: SheetWithStaff[]): Promise<TimesheetSheet[]> {
 export const getTimesheetSheet = createServerFn({ method: "GET" })
   .validator(z.object({ id: z.string().min(1).max(100) }))
   .handler(async ({ data }): Promise<TimesheetSheet | null> => {
-    await requireAdmin();
+    const viewer = await requirePermission("timesheets", "view");
     const found = await db
       .select(sheetColumns)
       .from(timesheetSheets)
@@ -247,7 +267,8 @@ export const getTimesheetSheet = createServerFn({ method: "GET" })
       .where(eq(timesheetSheets.id, data.id))
       .limit(1);
     const [one] = await loadWithRows(found);
-    return one ?? null;
+    if (!one) return null;
+    return seesIdentity(viewer) ? one : hideSheet(one);
   });
 
 /** Sheets WITH their rows, a page at a time, for the Excel receipt / report download. */
@@ -259,7 +280,7 @@ export const getTimesheetReportPage = createServerFn({ method: "GET" })
     }),
   )
   .handler(async ({ data }): Promise<TimesheetSheet[]> => {
-    await requireAdmin();
+    const viewer = await requirePermission("timesheets", "view");
     const found = await db
       .select(sheetColumns)
       .from(timesheetSheets)
@@ -268,7 +289,8 @@ export const getTimesheetReportPage = createServerFn({ method: "GET" })
       .orderBy(asc(timesheetSheets.personName), asc(timesheetSheets.id))
       .limit(data.limit)
       .offset(data.offset);
-    return loadWithRows(found);
+    const loaded = await loadWithRows(found);
+    return seesIdentity(viewer) ? loaded : loaded.map(hideSheet);
   });
 
 /* ------------------------------ changing ------------------------------ */
@@ -276,7 +298,7 @@ export const getTimesheetReportPage = createServerFn({ method: "GET" })
 export const recheckTimesheetSheet = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string().min(1).max(100) }))
   .handler(async ({ data }) => {
-    const actor = await requireAdmin();
+    const actor = await requirePermission("timesheets", "edit");
     const res = await recheckSheet(db, data.id);
     if (!res) throw new Error("That sheet no longer exists.");
     await recordActivity({
@@ -303,7 +325,7 @@ export const recheckTimesheetBatch = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const actor = await requireAdmin();
+    const actor = await requirePermission("timesheets", "edit");
     const ids = await db
       .select({ id: timesheetSheets.id })
       .from(timesheetSheets)
@@ -335,7 +357,7 @@ export const recheckTimesheetBatch = createServerFn({ method: "POST" })
 export const confirmTimesheetStaff = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string().min(1).max(100) }))
   .handler(async ({ data }) => {
-    const actor = await requireAdmin();
+    const actor = await requirePermission("timesheets", "edit");
     const ok = await confirmNameMatch(db, data.id);
     if (!ok) throw new Error("There is nothing to confirm on this sheet.");
     await recordActivity({
@@ -351,7 +373,7 @@ export const confirmTimesheetStaff = createServerFn({ method: "POST" })
 export const deleteTimesheetSheet = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string().min(1).max(100) }))
   .handler(async ({ data }) => {
-    const actor = await requireAdmin();
+    const actor = await requirePermission("timesheets", "delete");
     const [row] = await db
       .select({
         id: timesheetSheets.id,
@@ -388,7 +410,9 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
       .refine((value) => !!value.name || !!value.ni, "Enter a name or NI number."),
   )
   .handler(async ({ data }) => {
-    const actor = await requireAdmin();
+    const actor = await requirePermission("timesheets", "edit");
+    // This form reads and writes NI numbers and dates of birth, which sit behind Staff.
+    await requirePermission("staff", "view");
     const [sheet] = await db
       .select()
       .from(timesheetSheets)
@@ -433,10 +457,81 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
     return result;
   });
 
+/* ------------------------------ accepting a difference ------------------------------ */
+
+/** Accept one difference with a reason (approvers and admins only). */
+export const acceptTimesheetRow = createServerFn({ method: "POST" })
+  .validator(
+    z.object({ rowId: z.string().min(1).max(100), note: z.string().trim().min(3).max(500) }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("timesheets", "approve");
+    const res = await acceptRow(db, {
+      rowId: data.rowId,
+      note: data.note,
+      actor: { id: actor.id, name: actorName(actor) },
+    });
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "timesheets",
+      entityId: res.sheetId,
+      label: `Timesheet difference accepted — ${formatMonthLabel(res.month)}`,
+      details: `${res.label}: ${data.note}`,
+    });
+    return { ok: true };
+  });
+
+/** Take an acceptance back, so the difference counts as an issue again. */
+export const unacceptTimesheetRow = createServerFn({ method: "POST" })
+  .validator(z.object({ rowId: z.string().min(1).max(100) }))
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("timesheets", "approve");
+    const res = await unacceptRow(db, data.rowId);
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "timesheets",
+      entityId: res.sheetId,
+      label: `Timesheet acceptance withdrawn — ${formatMonthLabel(res.month)}`,
+    });
+    return { ok: true };
+  });
+
+/** Accept (or withdraw) that the sheet's own stated total differs from its rows. */
+export const setTimesheetStatedAccepted = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      id: z.string().min(1).max(100),
+      accept: z.boolean(),
+      note: z.string().trim().max(500).default(""),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("timesheets", "approve");
+    const res = await setStatedAccepted(db, {
+      sheetId: data.id,
+      accept: data.accept,
+      note: data.note,
+      actor: { id: actor.id, name: actorName(actor) },
+    });
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "timesheets",
+      entityId: data.id,
+      label: data.accept
+        ? `Timesheet stated total accepted — ${formatMonthLabel(res.month)}`
+        : `Timesheet stated-total acceptance withdrawn — ${formatMonthLabel(res.month)}`,
+      details: data.accept ? data.note : "",
+    });
+    return { ok: true };
+  });
+
 export const timesheetMonthLock = createServerFn({ method: "GET" })
   .validator(z.object({ month }))
   .handler(async ({ data }) => {
-    await requireAdmin();
+    await requirePermission("timesheets", "view");
     const result = await db.execute(
       sql`SELECT locked, changed_by AS "changedBy", changed_at AS "changedAt" FROM timesheet_month_locks WHERE month = ${data.month}`,
     );
@@ -447,7 +542,11 @@ export const timesheetMonthLock = createServerFn({ method: "GET" })
 export const setTimesheetMonthLock = createServerFn({ method: "POST" })
   .validator(z.object({ month, locked: z.boolean() }))
   .handler(async ({ data }) => {
-    const actor = await requireAdmin();
+    const actor = await requirePermission("timesheets", "approve");
+    // Locking is for approvers; REOPENING a locked month is for admins only.
+    if (!data.locked && actor.role !== "admin") {
+      throw new Response("Only an admin can reopen a locked timesheet month.", { status: 403 });
+    }
     try {
       await db.execute(
         sql`SELECT set_timesheet_month_lock(${data.month}, ${data.locked}, ${actorName(actor)})`,

@@ -43,6 +43,10 @@ export function SheetCheckPanel({
   onRecheck,
   onDelete,
   onCorrectIdentity,
+  onAcceptRow,
+  onUnacceptRow,
+  onAcceptStated,
+  onUnacceptStated,
   busy = false,
 }: {
   sheet: TimesheetSheet;
@@ -55,14 +59,25 @@ export function SheetCheckPanel({
   onDelete?: () => void;
   busy?: boolean;
   onCorrectIdentity?: (name: string, ni: string, dob: string) => void;
+  /** Accept a difference with a reason (approvers). Left out for everyone else. */
+  onAcceptRow?: (rowId: string, note: string) => void;
+  onUnacceptRow?: (rowId: string) => void;
+  onAcceptStated?: (note: string) => void;
+  onUnacceptStated?: () => void;
 }) {
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [acceptNote, setAcceptNote] = useState("");
+  const [statedNote, setStatedNote] = useState("");
+  const [statedOpen, setStatedOpen] = useState(false);
   const [sourceName, setSourceName] = useState(sheet.sourceName ?? "");
   const [sourceNi, setSourceNi] = useState(sheet.sourceNi ?? "");
   const [sourceDob, setSourceDob] = useState(sheet.sourceDob ?? "");
   const [editIdentity, setEditIdentity] = useState(false);
   const [onlyIssues, setOnlyIssues] = useState(false);
   const t = useMemo(() => sheetTotals(sheet), [sheet]);
-  const rows = onlyIssues ? sheet.rows.filter((row) => row.result !== "match") : sheet.rows;
+  const rows = onlyIssues
+    ? sheet.rows.filter((row) => row.result !== "match" && !row.accepted)
+    : sheet.rows;
   const notFound = sheet.status === "staff_not_found";
   const allMatch = t.issues === 0 && !t.statedMismatch && !notFound;
 
@@ -178,8 +193,63 @@ export function SheetCheckPanel({
       ) : null}
       {t.statedMismatch ? (
         <Notice tone="warn">
-          The sheet says <strong>{fmtHours(sheet.statedHours)}</strong> in total, but its rows add
-          up to <strong>{fmtHours(t.sheetHours)}</strong>.
+          <div className="space-y-2">
+            <p>
+              The sheet says <strong>{fmtHours(sheet.statedHours)}</strong> in total, but its rows
+              add up to <strong>{fmtHours(t.sheetHours)}</strong>.
+            </p>
+            {onAcceptStated ? (
+              statedOpen ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    value={statedNote}
+                    onChange={(e) => setStatedNote(e.target.value)}
+                    placeholder="Reason for accepting"
+                    aria-label="Reason for accepting the sheet total"
+                    className="h-8 min-w-[220px] flex-1 rounded-md border border-border bg-background px-2 text-sm"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={busy || statedNote.trim().length < 3}
+                    onClick={() => {
+                      onAcceptStated(statedNote.trim());
+                      setStatedOpen(false);
+                      setStatedNote("");
+                    }}
+                  >
+                    Accept
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setStatedOpen(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setStatedOpen(true)}
+                >
+                  Accept with note
+                </Button>
+              )
+            ) : null}
+          </div>
+        </Notice>
+      ) : null}
+      {sheet.statedAccepted ? (
+        <Notice tone="info">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              The sheet's total differs from its rows. Accepted by {sheet.statedAccepted.by}:{" "}
+              {sheet.statedAccepted.note}
+            </span>
+            {onUnacceptStated ? (
+              <Button size="sm" variant="outline" disabled={busy} onClick={onUnacceptStated}>
+                Withdraw
+              </Button>
+            ) : null}
+          </div>
         </Notice>
       ) : null}
       {sheet.readNote ? <Notice tone="info">{sheet.readNote}</Notice> : null}
@@ -260,7 +330,10 @@ export function SheetCheckPanel({
               </THead>
               <TBody>
                 {rows.map((row) => (
-                  <TR key={row.id} className={row.result === "match" ? "" : "bg-warning-soft/30"}>
+                  <TR
+                    key={row.id}
+                    className={row.result === "match" || row.accepted ? "" : "bg-warning-soft/30"}
+                  >
                     <TD>{fmtDate(row.date)}</TD>
                     <TD className="max-w-[200px] whitespace-normal break-words">
                       {row.site || "Not provided"}
@@ -279,9 +352,73 @@ export function SheetCheckPanel({
                     </TD>
                     <TD>
                       <RowResultBadge result={row.result} />
+                      {row.accepted ? (
+                        <div className="mt-1">
+                          <Pill tone="good">Accepted</Pill>
+                        </div>
+                      ) : null}
                     </TD>
-                    <TD className="max-w-[280px] whitespace-normal break-words text-muted-foreground">
+                    <TD className="max-w-[320px] whitespace-normal break-words text-muted-foreground">
                       {row.note ?? ""}
+                      {row.accepted ? (
+                        <div className="mt-1 text-foreground">
+                          Accepted by {row.accepted.by}: {row.accepted.note}
+                          {onUnacceptRow ? (
+                            <button
+                              type="button"
+                              className="ml-2 text-primary hover:underline"
+                              disabled={busy}
+                              onClick={() => onUnacceptRow(row.id)}
+                            >
+                              Withdraw
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : row.result !== "match" && onAcceptRow ? (
+                        acceptingId === row.id ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <input
+                              value={acceptNote}
+                              onChange={(e) => setAcceptNote(e.target.value)}
+                              placeholder="Reason (required)"
+                              aria-label="Reason for accepting this difference"
+                              className="h-8 min-w-[180px] flex-1 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                            />
+                            <Button
+                              size="sm"
+                              disabled={busy || acceptNote.trim().length < 3}
+                              onClick={() => {
+                                onAcceptRow(row.id, acceptNote.trim());
+                                setAcceptingId(null);
+                                setAcceptNote("");
+                              }}
+                            >
+                              Accept
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setAcceptingId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              className="text-primary hover:underline"
+                              disabled={busy}
+                              onClick={() => {
+                                setAcceptingId(row.id);
+                                setAcceptNote("");
+                              }}
+                            >
+                              Accept with note
+                            </button>
+                          </div>
+                        )
+                      ) : null}
                     </TD>
                   </TR>
                 ))}

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   payrollCompanies,
@@ -11,6 +11,7 @@ import {
   salaryPeriods,
   salaryShifts,
   staffTrash,
+  timesheetSheets,
 } from "../../../drizzle/schema";
 import { uid } from "./id";
 import { normNi } from "../payroll/calc";
@@ -58,6 +59,8 @@ interface Bundle {
   shiftsByStaff: Map<string, string[]>;
   /** Staff who have a line in a CLOSED salary month / payroll sheet — never deleted. */
   blocked: Map<string, string>;
+  /** How many Timesheet Check sheets each person has. */
+  timesheetsByStaff: Map<string, number>;
 }
 
 /** Loads one person-group's profile and everything the database would cascade away. */
@@ -71,6 +74,7 @@ async function collect(ids: string[]): Promise<Bundle> {
     entries: [],
     payments: [],
     shiftsByStaff: new Map(),
+    timesheetsByStaff: new Map(),
     blocked: new Map(),
   };
   if (staffIds.length === 0) return empty;
@@ -133,7 +137,33 @@ async function collect(ids: string[]): Promise<Bundle> {
     if (month && !blocked.has(l.staffId)) blocked.set(l.staffId, `closed payroll sheet ${month}`);
   }
 
-  return { staff, links, lines, entries, payments, shiftsByStaff, blocked };
+  // Timesheet Check: deleting the person un-links their sheets, which a locked timesheet
+  // month forbids. Say so up front instead of failing in the database.
+  const timesheetsByStaff = new Map<string, number>();
+  const sheetMonths = new Map<string, string[]>();
+  for (const part of chunk(staffIds, 500)) {
+    const rows = await db
+      .select({ staffId: timesheetSheets.staffId, month: timesheetSheets.month })
+      .from(timesheetSheets)
+      .where(inArray(timesheetSheets.staffId, part));
+    for (const r of rows) {
+      if (!r.staffId) continue;
+      timesheetsByStaff.set(r.staffId, (timesheetsByStaff.get(r.staffId) ?? 0) + 1);
+      const list = sheetMonths.get(r.staffId) ?? [];
+      list.push(r.month);
+      sheetMonths.set(r.staffId, list);
+    }
+  }
+  if (sheetMonths.size > 0) {
+    const lockRes = await db.execute(sql`SELECT month FROM timesheet_month_locks WHERE locked`);
+    const lockedMonths = new Set((lockRes.rows as { month: string }[]).map((r) => r.month));
+    for (const [id, months] of sheetMonths) {
+      const hit = months.find((m) => lockedMonths.has(m));
+      if (hit && !blocked.has(id)) blocked.set(id, `locked timesheet month ${hit}`);
+    }
+  }
+
+  return { staff, links, lines, entries, payments, shiftsByStaff, blocked, timesheetsByStaff };
 }
 
 export interface StaffDeleteImpact {
@@ -142,6 +172,8 @@ export interface StaffDeleteImpact {
   payrollLines: number;
   payments: number;
   shifts: number;
+  /** Timesheet Check sheets that would lose their staff link (kept, shown as "staff not found"). */
+  timesheets: number;
   /** How many of the chosen staff can't be deleted (they sit in a closed month). */
   blocked: number;
   blockedNames: string[];
@@ -155,6 +187,7 @@ export async function staffDeleteImpact(ids: string[]): Promise<StaffDeleteImpac
     payrollLines: 0,
     payments: 0,
     shifts: 0,
+    timesheets: 0,
     blocked: 0,
     blockedNames: [],
   };
@@ -169,6 +202,7 @@ export async function staffDeleteImpact(ids: string[]): Promise<StaffDeleteImpac
       }
       out.staff += 1;
       out.shifts += b.shiftsByStaff.get(s.id)?.length ?? 0;
+      out.timesheets += b.timesheetsByStaff.get(s.id) ?? 0;
     }
     const ok = new Set(b.staff.filter((s) => !b.blocked.has(s.id)).map((s) => s.id));
     out.salaryLines += b.entries.filter((e) => ok.has(e.staffId)).length;

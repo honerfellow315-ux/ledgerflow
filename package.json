@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx scripts/pre-ai-check.ts && node --import tsx scripts/ai-document-check.ts && node --import tsx scripts/payroll-uniform-check.ts && node --import tsx scripts/final-workflow-check.ts && node --import tsx scripts/security-check.ts"
+    "test": "node --import tsx scripts/pre-ai-check.ts && node --import tsx scripts/ai-document-check.ts && node --import tsx scripts/payroll-uniform-check.ts && node --import tsx scripts/final-workflow-check.ts && node --import tsx scripts/security-check.ts && node --import tsx scripts/timesheet-db-check.ts"
   },
   "overrides": {
     "rolldown": "1.2.1"
@@ -56,6 +56,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.9",
     "@eslint/js": "^9.32.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.16.5",

@@ -47,6 +47,9 @@ import {
   listTimesheetSheets,
   recheckTimesheetBatch,
   recheckTimesheetSheet,
+  acceptTimesheetRow,
+  unacceptTimesheetRow,
+  setTimesheetStatedAccepted,
   correctTimesheetIdentity,
   timesheetMonthLock,
   setTimesheetMonthLock,
@@ -69,8 +72,8 @@ export const Route = createFileRoute("/timesheets/")({
 });
 
 function TimesheetsPage() {
-  // Admin-only for now, same pattern as the Activity Log: the real gate is isAdmin below
-  // and requireAdmin() inside every server function.
+  // The real gate is the "timesheets" permission checked inside every server function;
+  // the checks below only decide which buttons to show.
   return (
     <RequireView module="dashboard">
       <TimesheetsPageContent />
@@ -85,7 +88,13 @@ const REPORT_MAX_SHEETS = 1000;
 const REPORT_STEP = 50;
 
 function TimesheetsPageContent() {
-  const { isAdmin, ready } = usePermissions();
+  const { isAdmin, can, ready } = usePermissions();
+  const canView = can("timesheets", "view");
+  const canCreate = can("timesheets", "create");
+  const canEdit = can("timesheets", "edit");
+  const canDelete = can("timesheets", "delete");
+  const canApprove = can("timesheets", "approve");
+  const canSeeStaff = can("staff", "view");
   const qc = useQueryClient();
   const [openId, setOpenId] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -112,7 +121,7 @@ function TimesheetsPageContent() {
   const monthsQ = useQuery({
     queryKey: ["timesheets", "months"],
     queryFn: () => unwrap(listTimesheetMonths()),
-    enabled: ready && isAdmin,
+    enabled: ready && canView,
   });
   const months = monthsQ.data ?? [];
   const activeMonth = month || months[0]?.month || ALL;
@@ -125,7 +134,7 @@ function TimesheetsPageContent() {
   const listQ = useQuery({
     queryKey: ["timesheets", "list", filter, page],
     queryFn: () => unwrap(listTimesheetSheets({ data: { ...filter, page, pageSize: PAGE_SIZE } })),
-    enabled: ready && isAdmin && !monthsQ.isLoading,
+    enabled: ready && canView && !monthsQ.isLoading,
     placeholderData: keepPreviousData,
   });
   const list = listQ.data;
@@ -133,14 +142,14 @@ function TimesheetsPageContent() {
   const openQ = useQuery({
     queryKey: ["timesheets", "one", openId],
     queryFn: () => unwrap(getTimesheetSheet({ data: { id: openId ?? "" } })),
-    enabled: ready && isAdmin && openId !== null,
+    enabled: ready && canView && openId !== null,
   });
 
   const lockMonth = openQ.data?.month ?? activeMonth;
   const lockQ = useQuery({
     queryKey: ["timesheets", "lock", lockMonth],
     queryFn: () => unwrap(timesheetMonthLock({ data: { month: lockMonth } })),
-    enabled: ready && isAdmin && lockMonth !== ALL,
+    enabled: ready && canView && lockMonth !== ALL,
     refetchInterval: 30_000,
   });
   const locked = lockQ.data?.locked ?? false;
@@ -157,20 +166,43 @@ function TimesheetsPageContent() {
                 ? `${lockMonth} is locked${lockQ.data?.changedBy ? ` by ${lockQ.data.changedBy}` : ""}`
                 : `${lockMonth} is open for checking`}
         </span>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || lockUnknown}
-          onClick={() =>
-            void guarded(async () => {
-              await unwrap(setTimesheetMonthLock({ data: { month: lockMonth, locked: !locked } }));
-              await refresh();
-              toast.success(locked ? "Month reopened." : "Month locked.");
-            }, "Could not change the month lock. Every sheet must be ready before locking.")
-          }
-        >
-          {locked ? "Reopen month" : "Lock checked month"}
-        </Button>
+        {locked ? (
+          isAdmin ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy || lockUnknown}
+              onClick={() =>
+                void guarded(async () => {
+                  await unwrap(
+                    setTimesheetMonthLock({ data: { month: lockMonth, locked: false } }),
+                  );
+                  await refresh();
+                  toast.success("Month reopened.");
+                }, "Could not reopen the month.")
+              }
+            >
+              Reopen month
+            </Button>
+          ) : (
+            <span className="text-xs text-muted-foreground">Only an admin can reopen it.</span>
+          )
+        ) : canApprove ? (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || lockUnknown}
+            onClick={() =>
+              void guarded(async () => {
+                await unwrap(setTimesheetMonthLock({ data: { month: lockMonth, locked: true } }));
+                await refresh();
+                toast.success("Month locked.");
+              }, "Could not lock the month. Every sheet must be ready (or have its differences accepted) before locking.")
+            }
+          >
+            Lock checked month
+          </Button>
+        ) : null}
       </div>
     ) : null;
 
@@ -292,12 +324,12 @@ function TimesheetsPageContent() {
   );
 
   if (!ready) return null;
-  if (!isAdmin) {
+  if (!canView) {
     return (
       <Panel>
         <EmptyState
           title="You don't have access to this"
-          description="Only administrators can open Timesheet Check for now."
+          description="Ask an administrator to give you Timesheet Check access in your user profile."
         />
       </Panel>
     );
@@ -330,7 +362,7 @@ function TimesheetsPageContent() {
           onPrint={() =>
             void guarded(() => printTimesheetReport([open]), "Could not open the PDF receipt.")
           }
-          {...(open.matchedBy === "name" && !open.staffConfirmed
+          {...(canEdit && open.matchedBy === "name" && !open.staffConfirmed
             ? {
                 onConfirm: () =>
                   void guarded(async () => {
@@ -340,27 +372,69 @@ function TimesheetsPageContent() {
                   }, "Could not confirm the match."),
               }
             : {})}
-          onRecheck={() =>
-            void guarded(async () => {
-              await unwrap(recheckTimesheetSheet({ data: { id: open.id } }));
-              await refresh();
-              toast.success("Checked again.");
-            }, "Could not check this sheet again.")
-          }
-          onCorrectIdentity={(name, ni, dob) =>
-            void guarded(async () => {
-              const result = await unwrap(
-                correctTimesheetIdentity({ data: { id: open.id, name, ni, dob } }),
-              );
-              await refresh();
-              toast.success(
-                result?.status === "staff_not_found"
-                  ? "Identity saved. No unique matching staff member was found."
-                  : "Identity saved and checked again.",
-              );
-            }, "Could not correct the sheet identity.")
-          }
-          onDelete={() => setDeleteTarget({ id: open.id, staffName: open.staffName })}
+          {...(canEdit
+            ? {
+                onRecheck: () =>
+                  void guarded(async () => {
+                    await unwrap(recheckTimesheetSheet({ data: { id: open.id } }));
+                    await refresh();
+                    toast.success("Checked again.");
+                  }, "Could not check this sheet again."),
+              }
+            : {})}
+          {...(canEdit && canSeeStaff
+            ? {
+                onCorrectIdentity: (name: string, ni: string, dob: string) =>
+                  void guarded(async () => {
+                    const result = await unwrap(
+                      correctTimesheetIdentity({ data: { id: open.id, name, ni, dob } }),
+                    );
+                    await refresh();
+                    toast.success(
+                      result?.status === "staff_not_found"
+                        ? "Identity saved. No unique matching staff member was found."
+                        : "Identity saved and checked again.",
+                    );
+                  }, "Could not correct the sheet identity."),
+              }
+            : {})}
+          {...(canApprove
+            ? {
+                onAcceptRow: (rowId: string, note: string) =>
+                  void guarded(async () => {
+                    await unwrap(acceptTimesheetRow({ data: { rowId, note } }));
+                    await refresh();
+                    toast.success("Difference accepted.");
+                  }, "Could not accept this difference."),
+                onUnacceptRow: (rowId: string) =>
+                  void guarded(async () => {
+                    await unwrap(unacceptTimesheetRow({ data: { rowId } }));
+                    await refresh();
+                    toast.success("Acceptance withdrawn.");
+                  }, "Could not withdraw the acceptance."),
+                onAcceptStated: (note: string) =>
+                  void guarded(async () => {
+                    await unwrap(
+                      setTimesheetStatedAccepted({ data: { id: open.id, accept: true, note } }),
+                    );
+                    await refresh();
+                    toast.success("Difference accepted.");
+                  }, "Could not accept this difference."),
+                onUnacceptStated: () =>
+                  void guarded(async () => {
+                    await unwrap(
+                      setTimesheetStatedAccepted({
+                        data: { id: open.id, accept: false, note: "" },
+                      }),
+                    );
+                    await refresh();
+                    toast.success("Acceptance withdrawn.");
+                  }, "Could not withdraw the acceptance."),
+              }
+            : {})}
+          {...(canDelete
+            ? { onDelete: () => setDeleteTarget({ id: open.id, staffName: open.staffName }) }
+            : {})}
         />
         {deleteDialog}
       </>
@@ -390,7 +464,7 @@ function TimesheetsPageContent() {
               setPage(1);
             }}
           >
-            <SelectTrigger className="h-9 w-44" aria-label="Filter timesheets by status">
+            <SelectTrigger className="h-9 w-44" aria-label="Choose the month">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -402,13 +476,15 @@ function TimesheetsPageContent() {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            variant="outline"
-            disabled={busy || activeMonth === ALL || (sum?.total ?? 0) === 0}
-            onClick={() => void recheckMonth()}
-          >
-            <RefreshCw className="size-4" /> Check month again
-          </Button>
+          {canEdit ? (
+            <Button
+              variant="outline"
+              disabled={busy || activeMonth === ALL || (sum?.total ?? 0) === 0}
+              onClick={() => void recheckMonth()}
+            >
+              <RefreshCw className="size-4" /> Check month again
+            </Button>
+          ) : null}
           <Button
             variant="outline"
             disabled={busy || total === 0}
@@ -423,9 +499,11 @@ function TimesheetsPageContent() {
           >
             Print / PDF receipts
           </Button>
-          <Button disabled={busy || locked || lockUnknown} onClick={() => setUploadOpen(true)}>
-            <Upload className="size-4" /> Upload timesheets
-          </Button>
+          {canCreate ? (
+            <Button disabled={busy || locked || lockUnknown} onClick={() => setUploadOpen(true)}>
+              <Upload className="size-4" /> Upload timesheets
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -509,7 +587,7 @@ function TimesheetsPageContent() {
               items={items}
               disabled={busy || locked || lockUnknown}
               onOpen={setOpenId}
-              onDelete={setDeleteTarget}
+              {...(canDelete ? { onDelete: setDeleteTarget } : {})}
             />
             {pages > 1 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-[13px] text-muted-foreground">
