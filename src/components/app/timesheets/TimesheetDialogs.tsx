@@ -1,3 +1,4 @@
+import type { ParsedFile } from "@/lib/timesheets/parsed";
 import { Input } from "@/components/ui/input";
 import { formatMonthLabel } from "@/lib/payroll/calc";
 import { AiDocumentDialog } from "@/components/app/AiDocumentDialog";
@@ -41,6 +42,7 @@ interface FileRun {
   state: "waiting" | "reading" | "checking" | "done" | "failed";
   /** One line per timesheet found in the file. */
   outcomes: UploadOutcome[];
+  draft?: ParsedFile;
   /** Why the file could not be used, or extra notes about it. */
   message: string;
 }
@@ -112,12 +114,39 @@ export function UploadTimesheetDialog({
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
   const lastMonth = useRef("");
+  const active = useRef(false);
+  const drafts = useRef(new Map<File, ParsedFile>());
+  const completed = useRef(new Map<File, Map<number, UploadOutcome>>());
+  const clearDrafts = () => {
+    drafts.current.clear();
+    completed.current.clear();
+  };
+  const editPerson = (
+    file: File,
+    index: number,
+    sheetIndex: number,
+    field: "personName" | "personNi" | "personDob",
+    value: string,
+  ) => {
+    const draft = drafts.current.get(file);
+    if (!draft || active.current) return;
+    const next = {
+      ...draft,
+      sheets: draft.sheets.map((sheet, i) =>
+        i === sheetIndex ? { ...sheet, [field]: value } : sheet,
+      ),
+    };
+    drafts.current.set(file, next);
+    setRun(index, { draft: next });
+    setFinished(false);
+  };
 
   const add = (list: FileList | null) => {
     setAllowMixedMonths(false);
     setMixedReview(false);
     if (!list || running) return;
     if (finished) {
+      clearDrafts();
       setFiles([]);
       setRuns([]);
       setFinished(false);
@@ -135,18 +164,24 @@ export function UploadTimesheetDialog({
   const close = (next: boolean) => {
     if (running) return; // let the files finish first
     if (!next) {
+      clearDrafts();
+      setDateYear("");
+      setMixedReview(false);
+      setAllowMixedMonths(false);
       setFiles([]);
       setRuns([]);
       setFinished(false);
     }
     onOpenChange(next);
   };
-  const supported = files.filter((f) => readMode(f.name).supported);
+  const supported = files.filter((f) => drafts.current.has(f) || readMode(f.name).supported);
 
   const setRun = (i: number, patch: Partial<FileRun>) =>
     setRuns((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
   async function run() {
+    if (active.current) return;
+    active.current = true;
     const list = [...files];
     setRuns(list.map(() => ({ ...WAITING })));
     setRunning(true);
@@ -156,17 +191,16 @@ export function UploadTimesheetDialog({
     let allSucceeded = true;
     for (let i = 0; i < list.length; i++) {
       const file = list[i]!;
-      if (!readMode(file.name).supported) {
+      if (!drafts.current.has(file) && !readMode(file.name).supported) {
         allSucceeded = false;
         setRun(i, { state: "failed", message: readMode(file.name).label });
         continue;
       }
       try {
         setRun(i, { state: "reading" });
-        const parsed = await parseTimesheetFile(
-          file,
-          dateYear.trim() ? Number(dateYear) : undefined,
-        );
+        const parsed =
+          drafts.current.get(file) ??
+          (await parseTimesheetFile(file, dateYear.trim() ? Number(dateYear) : undefined));
         if (parsed.sheets.length === 0) {
           allSucceeded = false;
           setRun(i, {
@@ -175,6 +209,8 @@ export function UploadTimesheetDialog({
           });
           continue;
         }
+        drafts.current.set(file, parsed);
+        setRun(i, { draft: parsed });
         const monthCounts = new Map<string, number>();
         for (const sheet of parsed.sheets)
           for (const row of sheet.rows) {
@@ -200,20 +236,42 @@ export function UploadTimesheetDialog({
           continue;
         }
         setRun(i, { state: "checking" });
-        const outcomes = await unwrap(
-          uploadTimesheetFile({
-            data: { fileName: file.name, fileHash: parsed.fileHash, sheets: parsed.sheets },
-          }),
+        const done = completed.current.get(file) ?? new Map<number, UploadOutcome>();
+        completed.current.set(file, done);
+        const pending = parsed.sheets
+          .map((sheet, index) => ({ sheet, index }))
+          .filter(({ index }) => !done.has(index));
+        const newOutcomes = pending.length
+          ? await unwrap(
+              uploadTimesheetFile({
+                data: {
+                  fileName: file.name,
+                  fileHash: parsed.fileHash,
+                  sheets: pending.map(({ sheet }) => sheet),
+                },
+              }),
+            )
+          : [];
+        const outcomes = parsed.sheets.map(
+          (_, index) =>
+            done.get(index) ?? newOutcomes[pending.findIndex((item) => item.index === index)]!,
         );
+        for (const [index, outcome] of outcomes.entries()) {
+          if (outcome.outcome !== "rejected") done.set(index, outcome);
+        }
         if (parsed.problems.length || outcomes.some((o) => o.outcome !== "saved"))
           allSucceeded = false;
-        for (const o of outcomes) {
+        for (const o of newOutcomes) {
           if (o.outcome === "saved") {
             saved++;
             lastMonth.current = o.month;
           }
         }
-        setRun(i, { state: "done", outcomes, message: parsed.problems.join(" ") });
+        setRun(i, {
+          state: outcomes.some((o) => o.outcome === "rejected") ? "failed" : "done",
+          outcomes,
+          message: parsed.problems.join(" "),
+        });
       } catch (err) {
         allSucceeded = false;
         setRun(i, {
@@ -222,6 +280,7 @@ export function UploadTimesheetDialog({
         });
       }
     }
+    active.current = false;
     setRunning(false);
     setFinished(true);
     await qc.invalidateQueries({ queryKey: ["timesheets"] });
@@ -229,6 +288,7 @@ export function UploadTimesheetDialog({
       toast.success(`${saved} timesheet${saved === 1 ? "" : "s"} saved and checked.`);
       if (lastMonth.current) onSaved?.(lastMonth.current);
       if (allSucceeded) {
+        clearDrafts();
         setFiles([]);
         setRuns([]);
         setFinished(false);
@@ -252,23 +312,21 @@ export function UploadTimesheetDialog({
         onOpenChange={setAiOpen}
         onReviewed={async (doc) => {
           if (doc.kind !== "timesheet") return;
-          const outcomes = await unwrap(
-            uploadTimesheetFile({
-              data: {
-                fileName: doc.parsed.fileName,
-                fileHash: doc.parsed.fileHash,
-                sheets: doc.parsed.sheets,
-              },
-            }),
-          );
-          const saved = outcomes.filter((o) => o.outcome === "saved");
-          if (!saved.length)
-            throw new Error(outcomes.map((o) => o.message).join(" ") || "No timesheet saved.");
-          await qc.invalidateQueries({ queryKey: ["timesheets"] });
-          toast.success("Reviewed AI timesheet saved and checked.");
-          const month = saved.at(-1)?.month;
-          if (month) onSaved?.(month);
-          onOpenChange(false);
+          const file = new File([], doc.parsed.fileName);
+          clearDrafts();
+          drafts.current.set(file, doc.parsed);
+          setFiles([file]);
+          setRuns([
+            {
+              ...WAITING,
+              draft: doc.parsed,
+              message: "Check staff name, NI and date of birth before importing.",
+            },
+          ]);
+          setFinished(false);
+          setMixedReview(false);
+          setAllowMixedMonths(false);
+          setAiOpen(false);
         }}
       />
       <Dialog open={open && !aiOpen} onOpenChange={close}>
@@ -291,6 +349,10 @@ export function UploadTimesheetDialog({
               disabled={running}
               onChange={(e) => {
                 setDateYear(e.target.value);
+                for (const file of files)
+                  if (readMode(file.name).supported && !completed.current.get(file)?.size)
+                    drafts.current.delete(file);
+                setRuns([]);
                 setFinished(false);
               }}
               placeholder="For example, 2026"
@@ -387,13 +449,75 @@ export function UploadTimesheetDialog({
                             type="button"
                             aria-label={`Remove ${f.name}`}
                             className="text-muted-foreground hover:text-foreground"
-                            onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                            onClick={() => {
+                              drafts.current.delete(f);
+                              completed.current.delete(f);
+                              setFiles((prev) => prev.filter((_, idx) => idx !== i));
+                              setRuns((prev) => prev.filter((_, idx) => idx !== i));
+                            }}
                           >
                             <X className="size-4" />
                           </button>
                         ) : null}
                       </span>
                     </div>
+                    {r?.draft?.sheets.map((sheet, sheetIndex) =>
+                      completed.current.get(f)?.has(sheetIndex) ? null : (
+                        <fieldset
+                          key={sheetIndex}
+                          disabled={running}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                              e.preventDefault();
+                              void run();
+                            }
+                          }}
+                          className="mt-3 space-y-2 rounded-lg border p-3"
+                        >
+                          <legend className="px-1 font-medium">
+                            Staff identity{sheet.sheetLabel ? ` · ${sheet.sheetLabel}` : ""}
+                          </legend>
+                          <p className="text-xs text-muted-foreground">
+                            All three details must match one Staff record. A filename is never used
+                            as the staff name. Correct missing or unreadable details here.
+                          </p>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="space-y-1 sm:col-span-2">
+                              <span>Staff name</span>
+                              <Input
+                                value={sheet.personName}
+                                maxLength={120}
+                                autoComplete="off"
+                                onChange={(e) =>
+                                  editPerson(f, i, sheetIndex, "personName", e.target.value)
+                                }
+                              />
+                            </label>
+                            <label className="space-y-1">
+                              <span>NI number</span>
+                              <Input
+                                value={sheet.personNi}
+                                maxLength={20}
+                                autoComplete="off"
+                                onChange={(e) =>
+                                  editPerson(f, i, sheetIndex, "personNi", e.target.value)
+                                }
+                              />
+                            </label>
+                            <label className="space-y-1">
+                              <span>Date of birth</span>
+                              <Input
+                                type="date"
+                                value={sheet.personDob ?? ""}
+                                onChange={(e) =>
+                                  editPerson(f, i, sheetIndex, "personDob", e.target.value)
+                                }
+                              />
+                            </label>
+                          </div>
+                        </fieldset>
+                      ),
+                    )}
                     {r && (r.outcomes.length > 0 || r.message) ? (
                       <ul className="mt-2 space-y-1.5 text-xs">
                         {r.outcomes.map((o, k) => (
@@ -414,7 +538,14 @@ export function UploadTimesheetDialog({
 
           <DialogFooter>
             {finished ? (
-              <Button onClick={() => close(false)}>Close</Button>
+              <>
+                <Button variant="outline" onClick={() => close(false)}>
+                  Close
+                </Button>
+                {runs.some((r) => r.state === "failed") ? (
+                  <Button onClick={() => void run()}>Validate and import</Button>
+                ) : null}
+              </>
             ) : (
               <>
                 <Button variant="outline" disabled={running} onClick={() => close(false)}>

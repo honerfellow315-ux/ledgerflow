@@ -189,6 +189,7 @@ const NI_TOKEN = /\b[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\s?\d{2}\s?\d{2}\s?\d{2}\
 export function topRows(lines: string[]): TsMatrix {
   let name = "";
   let ni = "";
+  let dob = "";
   const labelRe = new RegExp(`\\b(${LABELS})\\b[\\s:#.\\-]*`, "gi");
   for (const line of lines) {
     const text = tidy(line);
@@ -199,13 +200,21 @@ export function topRows(lines: string[]): TsMatrix {
       const to = k + 1 < hits.length ? hits[k + 1]!.index! : text.length;
       const value = text.slice(from, to).trim();
       if (!value) return;
+      if (!dob && /^(?:date of birth|d\.?o\.?b\.?)$/i.test(label)) dob = value;
       if (!name && NAME_LABELS.test(label)) name = value;
       else if (!ni && NI_LABELS.test(label)) ni = NI_TOKEN.exec(value)?.[0] ?? value.slice(0, 20);
     });
     if (!ni) ni = NI_TOKEN.exec(text)?.[0] ?? "";
   }
   // A blank row after each pair stops the parser reading the next line as a missing value.
-  const out: TsMatrix = [["Full Name:", name || null], [], ["NI Number:", ni || null], []];
+  const out: TsMatrix = [
+    ["Full Name:", name || null],
+    [],
+    ["NI Number:", ni || null],
+    [],
+    ["Date of birth:", dob || null],
+    [],
+  ];
   return out;
 }
 

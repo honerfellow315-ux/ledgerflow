@@ -102,7 +102,7 @@ function plainCell(v: unknown, numFmt: string | undefined): TsCell {
   if (v instanceof Date) {
     const serial = v.getTime() / 86400000 + 25569; // Excel serial day number
     if (Number.isNaN(serial)) return null;
-    if (v.getUTCFullYear() < 1950) return { clock: Math.round(serial * 1440) };
+    if (v.getUTCFullYear() < 1901) return { clock: Math.round(serial * 1440) };
     const clock = v.getUTCHours() * 60 + v.getUTCMinutes();
     return {
       clock,

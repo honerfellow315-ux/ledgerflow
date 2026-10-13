@@ -63,6 +63,7 @@ const parsedSheet = z.object({
   sheetLabel: z.string().max(100),
   personName: z.string().max(120),
   personNi: z.string().max(20),
+  personDob: z.string().max(30).default(""),
   statedHours: z.number().finite().min(0).max(5000).nullable(),
   rows: z.array(parsedRow).min(1).max(MAX_ROWS_PER_SHEET),
   warnings: z.array(z.string().max(300)).max(20),
@@ -382,6 +383,7 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
         id: z.string().min(1).max(100),
         name: z.string().trim().max(120),
         ni: z.string().trim().max(20),
+        dob: z.string().trim().max(30),
       })
       .refine((value) => !!value.name || !!value.ni, "Enter a name or NI number."),
   )
@@ -394,7 +396,8 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
       .limit(1);
     if (!sheet) throw new Error("That sheet no longer exists.");
     await assertTimesheetMonthOpen(db, sheet.month);
-    const match = await findStaff(db, data.ni, data.name);
+    const match = await findStaff(db, data.ni, data.name, data.dob);
+    if (!match.staffId) throw new Error(match.note);
     const personKey = personKeyOf(
       match.staffId,
       data.ni,
@@ -409,6 +412,7 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
         personKey,
         personName: data.name,
         personNi: data.ni,
+        personDob: data.dob,
         staffId: null,
         matchedBy: "none",
         staffConfirmedAt: null,

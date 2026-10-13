@@ -30,6 +30,8 @@ export interface ParsedSheet {
   sheetLabel: string;
   personName: string;
   personNi: string;
+  /** ISO date of birth, or empty when the source does not provide one. */
+  personDob?: string;
   /** The total the sheet states for itself, or null when it has none. */
   statedHours: number | null;
   rows: ParsedRow[];

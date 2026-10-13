@@ -692,6 +692,7 @@ export const timesheetSheets = pgTable(
     staffConfirmedAt: timestamp("staff_confirmed_at", { withTimezone: true }),
     personName: text("person_name").notNull().default(""),
     personNi: text("person_ni").notNull().default(""),
+  personDob: text("person_dob").notNull().default(""),
     personKey: text("person_key").notNull(),
     statedHours: numeric("stated_hours", { precision: 10, scale: 2, mode: "number" }),
     sheetHours: numeric("sheet_hours", { precision: 10, scale: 2, mode: "number" })

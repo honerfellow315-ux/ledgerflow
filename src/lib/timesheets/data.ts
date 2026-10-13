@@ -26,6 +26,7 @@ export interface TimesheetSheet {
   staffName: string;
   sourceName?: string;
   sourceNi?: string;
+  sourceDob?: string;
   email: string;
   ni: string;
   matchedBy: "ni" | "name" | "none";

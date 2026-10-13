@@ -322,7 +322,7 @@ function TimesheetsPageContent() {
       <>
         {lockControl}
         <SheetCheckPanel
-          key={open.id + ":" + open.sourceName + ":" + open.sourceNi}
+          key={open.id + ":" + open.sourceName + ":" + open.sourceNi + ":" + open.sourceDob}
           sheet={open}
           busy={busy || locked || lockUnknown}
           onBack={() => setOpenId(null)}
@@ -347,10 +347,10 @@ function TimesheetsPageContent() {
               toast.success("Checked again.");
             }, "Could not check this sheet again.")
           }
-          onCorrectIdentity={(name, ni) =>
+          onCorrectIdentity={(name, ni, dob) =>
             void guarded(async () => {
               const result = await unwrap(
-                correctTimesheetIdentity({ data: { id: open.id, name, ni } }),
+                correctTimesheetIdentity({ data: { id: open.id, name, ni, dob } }),
               );
               await refresh();
               toast.success(

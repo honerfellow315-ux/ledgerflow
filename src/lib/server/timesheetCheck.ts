@@ -3,10 +3,8 @@
  * so it can be tested against a real Postgres. The server functions in
  * src/lib/actions/timesheets.ts check who is asking and then call this.
  *
- * Matching the person: NI number first, then a name that is UNIQUE in Staff. A name-only
- * match is never trusted by itself: the sheet stays "needs a look" until a person confirms
- * it. Matching asks the database for the one person (never loads all staff), so it stays
- * fast with 10,000+ staff.
+ * Name, NI number and date of birth must all agree with one Staff record.
+ * Matching queries the NI candidates rather than loading every staff record.
  */
 import { and, asc, eq, gte, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import * as schema from "../../../drizzle/schema";
@@ -16,8 +14,8 @@ import {
   timesheetRows,
   timesheetSheets,
 } from "../../../drizzle/schema";
-import { formatMonthLabel, normName, normNi, round2 } from "../payroll/calc";
-import { filenameStaffName, FILE_NAME_NOTICE } from "../timesheets/fileIdentity";
+import { formatMonthLabel, isValidNi, normName, normNi, round2 } from "../payroll/calc";
+import { normalizeDob } from "../timesheets/identity";
 import { assertTimesheetMonthOpen } from "./timesheetLocks";
 import { uid } from "./id";
 import { chunk, type Db } from "./shiftImport";
@@ -62,48 +60,45 @@ const NO_MATCH = (note: string): StaffMatch => ({
   note,
 });
 
-export async function findStaff(db: Db, rawNi: string, rawName: string): Promise<StaffMatch> {
+/** All three fields must agree with one Staff record before a new upload can be saved. */
+export async function findStaff(
+  db: Db,
+  rawNi: string,
+  rawName: string,
+  rawDob = "",
+): Promise<StaffMatch> {
   const niKey = normNi(rawNi);
   const nameKey = normName(rawName).replace(/\s+/g, " ");
-
-  if (niKey.length >= 6) {
-    const res = await db.execute(sql`
-      SELECT id, name FROM payroll_staff
-      WHERE regexp_replace(upper(ni), '[^A-Z0-9]', '', 'g') = ${niKey}
-      LIMIT 3`);
-    const hits = res.rows as { id: string; name: string }[];
-    if (hits.length === 1 && hits[0]) {
-      return { staffId: hits[0].id, matchedBy: "ni", staffName: hits[0].name, note: "" };
-    }
-    if (hits.length > 1) {
-      return NO_MATCH("More than one staff member has this NI number. Fix it in Staff first.");
-    }
-  }
-
-  if (nameKey) {
-    const res = await db.execute(sql`
-      SELECT id, name, ni FROM payroll_staff
-      WHERE trim(regexp_replace(regexp_replace(regexp_replace(lower(name), '[(][^)]*[)]', ' ', 'g'), '[^a-z0-9]+', ' ', 'g'), ' +', ' ', 'g')) = ${nameKey}
-      LIMIT 5`);
-    const hits = (res.rows as { id: string; name: string; ni: string }[]).filter(
-      (h) => normName(h.name).replace(/\s+/g, " ") === nameKey,
+  const dob = normalizeDob(rawDob);
+  if (!nameKey || !niKey || !rawDob.trim())
+    return NO_MATCH(
+      "Staff name, NI number and date of birth are required. Complete the identity details before importing.",
     );
-    if (hits.length === 1 && hits[0]) {
-      const theirNi = normNi(hits[0].ni);
-      // Same name but a DIFFERENT NI number is a different person (or a typo): never merge.
-      if (niKey && theirNi && niKey !== theirNi) {
-        return NO_MATCH(
-          "The NI number on the sheet is not in Staff, and the person with this name has a different NI number.",
-        );
-      }
-      return { staffId: hits[0].id, matchedBy: "name", staffName: hits[0].name, note: "" };
-    }
-    if (hits.length > 1)
-      return NO_MATCH("More than one staff member has this name. Add the NI number to the sheet.");
-  }
-  return NO_MATCH(
-    niKey || nameKey ? "This person is not in Staff." : "The sheet has no name and no NI number.",
-  );
+  if (!isValidNi(rawNi)) return NO_MATCH("Enter a valid NI number before importing.");
+  if (!dob) return NO_MATCH("Enter a valid date of birth using the date field.");
+  const res = await db.execute(sql`
+    SELECT id, name, dob FROM payroll_staff
+    WHERE regexp_replace(upper(ni), '[^A-Z0-9]', '', 'g') = ${niKey}
+    LIMIT 3`);
+  const hits = res.rows as { id: string; name: string; dob: string | null }[];
+  if (hits.length > 1)
+    return NO_MATCH("More than one staff member has this NI number. Fix it in Staff first.");
+  const hit = hits[0];
+  if (!hit)
+    return NO_MATCH(
+      "No staff member has this NI number. Check the details or add the person in Staff first.",
+    );
+  if (normName(hit.name).replace(/\s+/g, " ") !== nameKey)
+    return NO_MATCH(
+      "The staff name does not match the record for this NI number. Check the name before importing.",
+    );
+  if (!normalizeDob(hit.dob ?? ""))
+    return NO_MATCH(
+      "This staff record has no valid date of birth. Update it in Staff before importing.",
+    );
+  if (normalizeDob(hit.dob ?? "") !== dob)
+    return NO_MATCH("The date of birth does not match Staff. Check the details before importing.");
+  return { staffId: hit.id, matchedBy: "ni", staffName: hit.name, note: "" };
 }
 
 /* ------------------------------ our own records ------------------------------ */
@@ -230,9 +225,15 @@ export interface Evaluation {
 
 export async function evaluate(
   db: Db,
-  a: { personName: string; personNi: string; month: string; rows: SheetRowInput[] },
+  a: {
+    personName: string;
+    personNi: string;
+    personDob?: string;
+    month: string;
+    rows: SheetRowInput[];
+  },
 ): Promise<Evaluation> {
-  const staff = await findStaff(db, a.personNi, a.personName);
+  const staff = await findStaff(db, a.personNi, a.personName, a.personDob);
   const loaded = staff.staffId
     ? await loadRecords(
         db,
@@ -324,16 +325,6 @@ export async function saveParsedSheet(
   },
 ): Promise<UploadOutcome> {
   const sheet = { ...a.sheet, warnings: [...a.sheet.warnings] };
-  if (!sheet.personName && !sheet.personNi) {
-    const hint = filenameStaffName(a.fileName);
-    if (hint) {
-      sheet.personName = hint;
-      sheet.warnings = sheet.warnings.filter(
-        (note) => !note.startsWith("No name or NI number was found"),
-      );
-      sheet.warnings.push(FILE_NAME_NOTICE);
-    }
-  }
   const label = sheet.sheetLabel || a.fileName;
   const fail = (outcome: "duplicate" | "rejected", message: string): UploadOutcome => ({
     label,
@@ -364,9 +355,12 @@ export async function saveParsedSheet(
   const ev = await evaluate(db, {
     personName: sheet.personName,
     personNi: sheet.personNi,
+    personDob: sheet.personDob ?? "",
     month,
     rows: inputs,
   });
+
+  if (!ev.staff.staffId) return fail("rejected", ev.staff.note);
 
   const mismatch = statedMismatch(sheet.statedHours, ev.sheetHours);
   const status = decideStatus({
@@ -401,6 +395,7 @@ export async function saveParsedSheet(
       matchedBy: ev.staff.matchedBy,
       personName: sheet.personName,
       personNi: sheet.personNi,
+      personDob: normalizeDob(sheet.personDob ?? ""),
       personKey: key,
       statedHours: sheet.statedHours,
       sheetHours: ev.sheetHours,
@@ -539,9 +534,7 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
     uncertain: r.uncertain,
     parseNote: r.parseNote,
   }));
-  const inferredName =
-    !sheet.personName && !sheet.personNi ? filenameStaffName(sheet.fileName) : "";
-  const personName = sheet.personName || inferredName;
+  const personName = sheet.personName;
   // While rechecking, the sheet cannot be locked as ready with old comparison results.
   await db
     .update(timesheetSheets)
@@ -550,6 +543,7 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
   const ev = await evaluate(db, {
     personName,
     personNi: sheet.personNi,
+    personDob: sheet.personDob ?? "",
     month: sheet.month,
     rows: inputs,
   });
@@ -615,16 +609,6 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
   );
   const common = {
     personName,
-    ...(inferredName
-      ? {
-          readNote: [
-            sheet.readNote?.replace(/No name or NI number was found[^.]*\./, "").trim(),
-            FILE_NAME_NOTICE,
-          ]
-            .filter(Boolean)
-            .join(" "),
-        }
-      : {}),
     staffId: ev.staff.staffId,
     matchedBy: ev.staff.matchedBy,
     staffConfirmedAt: keepConfirmed ? sheet.staffConfirmedAt : null,
@@ -670,6 +654,9 @@ export async function confirmNameMatch(db: Db, sheetId: string): Promise<boolean
     .where(eq(timesheetSheets.id, sheetId))
     .limit(1);
   if (!sheet || !sheet.staffId || sheet.matchedBy !== "name") return false;
+  const identity = await findStaff(db, sheet.personNi, sheet.personName, sheet.personDob);
+  if (!identity.staffId || identity.staffId !== sheet.staffId)
+    throw new Error(identity.note || "Use Correct identity to verify this staff member first.");
   await assertTimesheetMonthOpen(db, sheet.month);
   const [duplicate] = await db
     .select({ id: timesheetSheets.id })
@@ -793,6 +780,7 @@ export function toTimesheetSheet(x: SheetWithStaff, rows: readonly RowRec[]): Ti
     ...(s.readNote ? { readNote: s.readNote } : {}),
     sourceName: s.personName,
     sourceNi: s.personNi,
+    sourceDob: s.personDob,
     rows: mapped,
   };
 }

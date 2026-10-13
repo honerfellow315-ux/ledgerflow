@@ -1,3 +1,4 @@
+import { normalizeDob } from "./identity";
 /**
  * Reads ONE worksheet (a grid of cells) of the standard timesheet template:
  *
@@ -38,7 +39,7 @@ function textOf(c: TsCell | undefined): string {
   if (c === null || c === undefined) return "";
   if (typeof c === "number") return String(c);
   if (typeof c === "string") return c.trim();
-  return "";
+  return c.date ?? "";
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -264,14 +265,25 @@ function valueNear(top: TsMatrix, r: number, c: number, inline: string): string 
   return below;
 }
 
-function readPerson(top: TsMatrix): { name: string; ni: string } {
+function readPerson(top: TsMatrix): { name: string; ni: string; dob: string } {
   let name = "";
   let ni = "";
+  let dob = "";
   for (let r = 0; r < top.length; r++) {
     const row = top[r] ?? [];
     for (let c = 0; c < row.length; c++) {
       const t = textOf(row[c]);
       if (!t || t.length > 80) continue;
+      const birth = /^(?:date\s+of\s+birth|d\.?o\.?b\.?)\s*[:#-]?\s*(.*)$/i.exec(t);
+      if (birth) {
+        const raw = valueNear(top, r, c, (birth[1] ?? "").trim());
+        // Unformatted Excel dates are serial days, only interpreted in a labelled DOB cell.
+        const date = /^\d{4,5}$/.test(raw)
+          ? new Date((Number(raw) - 25569) * 86400000).toISOString().slice(0, 10)
+          : raw;
+        dob = normalizeDob(date);
+        continue;
+      }
       if (!ni) {
         const m = NI_LABEL.exec(t);
         if (m) {
@@ -312,6 +324,7 @@ function readPerson(top: TsMatrix): { name: string; ni: string } {
   return {
     name: name.replace(/\s+/g, " ").trim().slice(0, 120),
     ni: ni ? formatNi(ni).slice(0, 20) : "",
+    dob,
   };
 }
 
@@ -507,6 +520,7 @@ export function parseTimesheetMatrix(matrix: TsMatrix, sheetLabel: string): Pars
     sheetLabel,
     personName: person.name,
     personNi: person.ni,
+    personDob: person.dob,
     statedHours: labelledTotal ?? unlabelledTotal,
     rows,
     warnings,
