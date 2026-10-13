@@ -51,10 +51,20 @@ const DATE_RE = new RegExp(
     `|\\d{1,2}(?:st|nd|rd|th)?[\\s-]+${MONTH}\\.?,?[\\s-]+\\d{2,4}` + // 1 September 2026
     `|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}` + // 01/09/2026
     `|\\d{4}-\\d{2}-\\d{2}` + // 2026-09-01
-    `)(?![\\d])`,
+    `)(?![\\d:;])`,
   "i",
 );
-const TIME_PAIR = /(\d{1,2}:\d{2})\s*(?:-|–|to)?\s*(\d{1,2}:\d{2})/i;
+const TIME_PAIR = /(\d{1,2}[:;]\d{2})\s*(?:-|–|to)?\s*(\d{1,2}[:;]\d{2})/i;
+const DATE_ANY_RE = new RegExp(DATE_RE.source.replace(/^\^/, ""), "i");
+const YEARLESS_DATE_RE = new RegExp(
+  `(?<!\\d)\\d{1,2}(?:st|nd|rd|th)?[\\s-]+${MONTH}(?![a-z])`,
+  "i",
+);
+export function needsDateYear(lines: string[]): boolean {
+  return lines.some(
+    (line) => TIME_PAIR.test(line) && !DATE_ANY_RE.test(line) && YEARLESS_DATE_RE.test(line),
+  );
+}
 
 const isPound = (t: string) => /^£\d[\d,]*(?:\.\d+)?$/.test(t);
 const isNumberish = (t: string) =>
@@ -85,6 +95,7 @@ function columnOrder(header: string): number[] {
 export function parseShiftLine(
   raw: string,
   order: number[] = [C.hours, C.rate, C.amount, C.expense],
+  confirmedYear?: number,
 ): TsCell[] | null {
   const s = tidy(raw);
   const serial = /^(\d{1,3})\s+(?=\S)/.exec(s);
@@ -99,11 +110,26 @@ export function parseShiftLine(
     }
   }
   if (!dm) dm = DATE_RE.exec(s);
+  let sitePrefix = "";
+  let yearless = false;
+  if (!dm) {
+    // Site-first rows need a time pair to distinguish them from dated footer notes.
+    if (!TIME_PAIR.test(s)) return null;
+    dm = DATE_ANY_RE.exec(s);
+    if (!dm) {
+      dm = YEARLESS_DATE_RE.exec(s);
+      yearless = !!dm;
+    }
+    if (dm) {
+      sitePrefix = s.slice(0, dm.index).trim();
+      rest = s.slice(dm.index);
+    }
+  }
   if (!dm) return null;
 
   const row: TsCell[] = new Array<TsCell>(WIDTH).fill(null);
   if (serialText) row[C.serial] = serialText;
-  row[C.date] = dm[0].trim();
+  row[C.date] = dm[0].trim() + (yearless && confirmedYear ? ` ${confirmedYear}` : "");
   const after = rest.slice(dm[0].length).trim();
 
   const tm = TIME_PAIR.exec(after);
@@ -113,9 +139,10 @@ export function parseShiftLine(
     row[C.hours] = "?";
     return row;
   }
-  row[C.site] = after.slice(0, tm.index).trim().slice(0, 200) || null;
-  row[C.start] = tm[1]!;
-  row[C.end] = tm[2]!;
+  row[C.site] =
+    [sitePrefix, after.slice(0, tm.index).trim()].filter(Boolean).join(" / ").slice(0, 200) || null;
+  row[C.start] = tm[1]!.replace(";", ":");
+  row[C.end] = tm[2]!.replace(";", ":");
 
   const tokens = after
     .slice(tm.index + tm[0].length)
@@ -201,7 +228,7 @@ const isHeaderLine = (l: string) =>
   /\bdate\b/i.test(l) && /\bstart\b/i.test(l) && /\b(?:end|finish)\b/i.test(l);
 
 /** Returns null when no timesheet header line is found. */
-export function linesToMatrix(all: string[]): TsMatrix | null {
+export function linesToMatrix(all: string[], confirmedYear?: number): TsMatrix | null {
   const lines = all.map(tidy).filter(Boolean);
   const h = lines.findIndex(isHeaderLine);
   if (h < 0) return null;
@@ -209,7 +236,7 @@ export function linesToMatrix(all: string[]): TsMatrix | null {
   const below = lines.slice(h + 1);
   const rows: TsMatrix = [];
   for (const l of below) {
-    const r = parseShiftLine(l, order);
+    const r = parseShiftLine(l, order, confirmedYear);
     if (r) rows.push(r);
   }
   return [...topRows(lines.slice(0, h)), HEADER, ...rows, ...totalRows(below)];

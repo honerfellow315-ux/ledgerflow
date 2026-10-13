@@ -19,7 +19,7 @@ import { parseTimesheetMatrix, type TsCell, type TsMatrix } from "./parseMatrix"
 import type { SheetFormat } from "./data";
 import { pdfToLines } from "./readPdf";
 import { wordToMatrix } from "./readWord";
-import { linesToMatrix } from "./textRows";
+import { linesToMatrix, needsDateYear } from "./textRows";
 
 const NO_TABLE =
   "No timesheet table found. The sheet needs a header row with Date, Start time, End time and Duration.";
@@ -144,9 +144,17 @@ async function excelSheets(buf: ArrayBuffer): Promise<{ name: string; matrix: Ts
 
 /* ------------------------------ entry point ------------------------------ */
 
-export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
+export async function parseTimesheetFile(file: File, confirmedYear?: number): Promise<ParsedFile> {
   const result: ParsedFile = { fileName: file.name, fileHash: "", sheets: [], problems: [] };
   const ext = fileExtension(file.name);
+  if (
+    confirmedYear !== undefined &&
+    (!Number.isInteger(confirmedYear) || confirmedYear < 2000 || confirmedYear > 2100)
+  ) {
+    result.problems.push("Enter a year between 2000 and 2100 for dates without a year.");
+    return result;
+  }
+  let yearAdded = false;
 
   if (file.size === 0) {
     result.problems.push("The file is empty.");
@@ -206,7 +214,14 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
       );
       return result;
     }
-    const matrix = linesToMatrix(text.lines);
+    yearAdded = needsDateYear(text.lines);
+    if (yearAdded && confirmedYear === undefined) {
+      result.problems.push(
+        "This PDF has dates without a year. Enter the correct year in the upload dialog, then check it again. Dates already containing a year will stay unchanged.",
+      );
+      return result;
+    }
+    const matrix = linesToMatrix(text.lines, confirmedYear);
     if (!matrix) {
       result.problems.push(NO_TABLE);
       return result;
@@ -261,6 +276,10 @@ export async function parseTimesheetFile(file: File): Promise<ParsedFile> {
       continue;
     }
     parsed.format = format;
+    if (yearAdded)
+      parsed.warnings.unshift(
+        `Year ${confirmedYear} was supplied by the uploader for PDF dates without a year.`,
+      );
     if (format !== "excel") {
       parsed.warnings.unshift(
         `Read from the ${format === "pdf" ? "PDF" : "Word file"} text. The rows are rebuilt from the text, so check the figures against the original file.`,

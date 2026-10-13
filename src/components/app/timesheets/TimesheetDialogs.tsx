@@ -1,3 +1,4 @@
+import { Input } from "@/components/ui/input";
 import { formatMonthLabel } from "@/lib/payroll/calc";
 import { AiDocumentDialog } from "@/components/app/AiDocumentDialog";
 import { useRef, useState, type DragEvent } from "react";
@@ -101,6 +102,9 @@ export function UploadTimesheetDialog({
   onOpenExisting?: ((id: string, month: string) => void) | undefined;
 }) {
   const qc = useQueryClient();
+  const [dateYear, setDateYear] = useState("");
+  const [mixedReview, setMixedReview] = useState(false);
+  const [allowMixedMonths, setAllowMixedMonths] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [runs, setRuns] = useState<FileRun[]>([]);
@@ -110,11 +114,16 @@ export function UploadTimesheetDialog({
   const lastMonth = useRef("");
 
   const add = (list: FileList | null) => {
+    setAllowMixedMonths(false);
+    setMixedReview(false);
     if (!list || running) return;
     if (finished) {
       setFiles([]);
       setRuns([]);
       setFinished(false);
+      setDateYear("");
+      setAllowMixedMonths(false);
+      setMixedReview(false);
     }
     setFiles((prev) => [...prev, ...Array.from(list)]);
   };
@@ -154,12 +163,39 @@ export function UploadTimesheetDialog({
       }
       try {
         setRun(i, { state: "reading" });
-        const parsed = await parseTimesheetFile(file);
+        const parsed = await parseTimesheetFile(
+          file,
+          dateYear.trim() ? Number(dateYear) : undefined,
+        );
         if (parsed.sheets.length === 0) {
           allSucceeded = false;
           setRun(i, {
             state: "failed",
             message: parsed.problems.join(" ") || "Nothing could be read.",
+          });
+          continue;
+        }
+        const monthCounts = new Map<string, number>();
+        for (const sheet of parsed.sheets)
+          for (const row of sheet.rows) {
+            if (row.date)
+              monthCounts.set(
+                row.date.slice(0, 7),
+                (monthCounts.get(row.date.slice(0, 7)) ?? 0) + 1,
+              );
+          }
+        if (
+          parsed.sheets.some(
+            (sheet) =>
+              new Set(sheet.rows.filter((r) => r.date).map((r) => r.date.slice(0, 7))).size > 1,
+          ) &&
+          !allowMixedMonths
+        ) {
+          allSucceeded = false;
+          setMixedReview(true);
+          setRun(i, {
+            state: "failed",
+            message: `This sheet contains dates from ${[...monthCounts].map(([m, n]) => `${formatMonthLabel(m)} (${n} rows)`).join(", ")}. Check the source file. Confirm below only if these dates are intentional. Existing dates will not be changed.`,
           });
           continue;
         }
@@ -196,6 +232,9 @@ export function UploadTimesheetDialog({
         setFiles([]);
         setRuns([]);
         setFinished(false);
+        setDateYear("");
+        setAllowMixedMonths(false);
+        setMixedReview(false);
         onOpenChange(false);
       }
     } else {
@@ -241,6 +280,43 @@ export function UploadTimesheetDialog({
             </DialogDescription>
           </DialogHeader>
 
+          <label className="space-y-1 text-sm">
+            <span>Year for PDF dates without a year (optional)</span>
+            <Input
+              type="number"
+              min={2000}
+              max={2100}
+              step={1}
+              value={dateYear}
+              disabled={running}
+              onChange={(e) => {
+                setDateYear(e.target.value);
+                setFinished(false);
+              }}
+              placeholder="For example, 2026"
+            />
+            <span className="block text-xs text-muted-foreground">
+              Only fills missing years. Dates already written in the file stay unchanged.
+            </span>
+          </label>
+          {mixedReview ? (
+            <label className="flex items-start gap-2 rounded-lg border border-warning/40 p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={allowMixedMonths}
+                disabled={running}
+                onChange={(e) => {
+                  setAllowMixedMonths(e.target.checked);
+                  setFinished(false);
+                }}
+              />
+              <span>
+                I reviewed the mixed-month dates in the listed files and want to keep them. Each
+                sheet will be filed under the month containing most of its dated rows; other-month
+                rows remain flagged for review.
+              </span>
+            </label>
+          ) : null}
           <Button variant="outline" disabled={running} onClick={() => setAiOpen(true)}>
             Read photo / scanned PDF with AI
           </Button>
