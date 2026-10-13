@@ -51,7 +51,7 @@ function OutcomeLine({
   onOpenExisting,
 }: {
   o: UploadOutcome;
-  onOpenExisting?: (id: string, month: string) => void;
+  onOpenExisting?: ((id: string, month: string) => void) | undefined;
 }) {
   if (o.outcome === "saved" && o.status) {
     return (
@@ -98,7 +98,7 @@ export function UploadTimesheetDialog({
   onOpenChange: (open: boolean) => void;
   /** Called with the month (yyyy-mm) of the last sheet that was saved. */
   onSaved?: (month: string) => void;
-  onOpenExisting?: (id: string, month: string) => void;
+  onOpenExisting?: ((id: string, month: string) => void) | undefined;
 }) {
   const qc = useQueryClient();
   const [aiOpen, setAiOpen] = useState(false);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -40,6 +40,9 @@ export function DeleteStaffDialog({
   onDone: () => void;
 }) {
   const qc = useQueryClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const submitting = useRef(false);
   const [typed, setTyped] = useState("");
 
   useEffect(() => {
@@ -65,6 +68,9 @@ export function DeleteStaffDialog({
       toast.success(`${res.deleted} staff moved to the Recycle Bin.${skipped}`);
       onDone();
     },
+    onSettled: () => {
+      submitting.current = false;
+    },
     onError: (err: unknown) => toast.error(errorMessage(err, "Could not delete.")),
   });
 
@@ -75,71 +81,92 @@ export function DeleteStaffDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={(v) => (remove.isPending ? undefined : onOpenChange(v))}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className="text-base">Delete {label}?</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3 text-[13px]">
-              {impact.isLoading ? (
-                <p>Checking what this will affect…</p>
-              ) : impact.error ? (
-                <p className="text-destructive">
-                  {errorMessage(impact.error, "Couldn't check what this will affect.")}
-                </p>
-              ) : i ? (
-                <>
-                  <p>
-                    {i.staff} staff profile{i.staff === 1 ? "" : "s"} will move to the Recycle Bin.
-                    Their lines are removed from the sheets until you restore them:
+      <AlertDialogContent
+        onOpenAutoFocus={(event) => {
+          if (requireTyping) {
+            event.preventDefault();
+            inputRef.current?.focus();
+          }
+        }}
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canConfirm || submitting.current) return;
+            submitting.current = true;
+            remove.mutate();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base">Delete {label}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-[13px]">
+                {impact.isLoading ? (
+                  <p>Checking what this will affect…</p>
+                ) : impact.error ? (
+                  <p className="text-destructive">
+                    {errorMessage(impact.error, "Couldn't check what this will affect.")}
                   </p>
-                  <ul className="list-disc space-y-0.5 pl-5">
-                    <li>
-                      {i.salaryLines} salary sheet line{i.salaryLines === 1 ? "" : "s"}
-                    </li>
-                    <li>
-                      {i.payrollLines} payroll sheet line{i.payrollLines === 1 ? "" : "s"}
-                    </li>
-                    <li>
-                      {i.payments} cash payment{i.payments === 1 ? "" : "s"} recorded on those lines
-                    </li>
-                    <li>
-                      {i.shifts} imported shift row{i.shifts === 1 ? "" : "s"} un-linked
-                    </li>
-                  </ul>
-                  {i.blocked > 0 ? (
-                    <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-warning">
-                      {i.blocked} {i.blocked === 1 ? "person is" : "people are"} in a closed month
-                      and will be skipped: {i.blockedNames.join(", ")}
-                      {i.blocked > i.blockedNames.length ? "…" : ""}
+                ) : i ? (
+                  <>
+                    <p>
+                      {i.staff} staff profile{i.staff === 1 ? "" : "s"} will move to the Recycle
+                      Bin. Their lines are removed from the sheets until you restore them:
                     </p>
-                  ) : null}
-                  <p>You can bring them back from the Recycle Bin (admin only).</p>
-                </>
-              ) : null}
+                    <ul className="list-disc space-y-0.5 pl-5">
+                      <li>
+                        {i.salaryLines} salary sheet line{i.salaryLines === 1 ? "" : "s"}
+                      </li>
+                      <li>
+                        {i.payrollLines} payroll sheet line{i.payrollLines === 1 ? "" : "s"}
+                      </li>
+                      <li>
+                        {i.payments} cash payment{i.payments === 1 ? "" : "s"} recorded on those
+                        lines
+                      </li>
+                      <li>
+                        {i.shifts} imported shift row{i.shifts === 1 ? "" : "s"} un-linked
+                      </li>
+                    </ul>
+                    {i.blocked > 0 ? (
+                      <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-warning">
+                        {i.blocked} {i.blocked === 1 ? "person is" : "people are"} in a closed month
+                        and will be skipped: {i.blockedNames.join(", ")}
+                        {i.blocked > i.blockedNames.length ? "…" : ""}
+                      </p>
+                    ) : null}
+                    <p>You can bring them back from the Recycle Bin (admin only).</p>
+                  </>
+                ) : null}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {requireTyping ? (
+            <div className="space-y-1.5">
+              <p className="text-[12px] text-muted-foreground">
+                Type <span className="font-semibold text-foreground">DELETE</span> to confirm.
+              </p>
+              <Input
+                ref={inputRef}
+                aria-label="Type DELETE to confirm"
+                disabled={remove.isPending}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder="DELETE"
+                autoComplete="off"
+              />
             </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+          ) : null}
 
-        {requireTyping ? (
-          <div className="space-y-1.5">
-            <p className="text-[12px] text-muted-foreground">
-              Type <span className="font-semibold text-foreground">DELETE</span> to confirm.
-            </p>
-            <Input
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              placeholder="DELETE"
-              autoComplete="off"
-            />
-          </div>
-        ) : null}
-
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={remove.isPending}>Cancel</AlertDialogCancel>
-          <Button variant="destructive" disabled={!canConfirm} onClick={() => remove.mutate()}>
-            {remove.isPending ? "Deleting…" : "Delete"}
-          </Button>
-        </AlertDialogFooter>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={remove.isPending}>Cancel</AlertDialogCancel>
+            <Button ref={confirmRef} type="submit" variant="destructive" disabled={!canConfirm}>
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </AlertDialogFooter>
+        </form>
       </AlertDialogContent>
     </AlertDialog>
   );

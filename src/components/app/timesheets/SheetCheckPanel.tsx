@@ -179,14 +179,20 @@ export function SheetCheckPanel({
         <SummaryCard label="Hours on the sheet" value={fmtHours(t.sheetHours)} />
         <SummaryCard
           label="Hours in our records"
-          value={fmtHours(t.recordHours)}
-          sublabel="Includes shifts not listed on this sheet"
+          value={notFound ? "Not linked" : fmtHours(t.recordHours)}
+          sublabel={
+            notFound
+              ? "Match this sheet to a staff member first"
+              : "Imported shifts for this staff member and month"
+          }
         />
         <SummaryCard
           label="Difference"
-          value={fmtDiff(t.diff)}
-          tone={t.diff === 0 ? "success" : t.diff > 0 ? "danger" : "warning"}
-          {...(t.diff !== 0 ? { sublabel: t.diff > 0 ? "Sheet is higher" : "Sheet is lower" } : {})}
+          value={notFound ? "Not compared" : fmtDiff(t.diff)}
+          tone={notFound ? "warning" : t.diff === 0 ? "success" : t.diff > 0 ? "danger" : "warning"}
+          {...(!notFound && t.diff !== 0
+            ? { sublabel: t.diff > 0 ? "Sheet is higher" : "Sheet is lower" }
+            : {})}
         />
         <SummaryCard
           label="Rows to look at"
@@ -235,9 +241,9 @@ export function SheetCheckPanel({
                 <TR>
                   <TH>Date</TH>
                   <TH>Site</TH>
-                  <TH>Time</TH>
-                  <TH align="right">Sheet</TH>
-                  <TH align="right">Our record</TH>
+                  <TH>Start / end</TH>
+                  <TH align="right">Sheet hours</TH>
+                  <TH align="right">Recorded hours</TH>
                   <TH align="right">Difference</TH>
                   <TH>Result</TH>
                   <TH>Note</TH>
@@ -247,7 +253,9 @@ export function SheetCheckPanel({
                 {rows.map((row) => (
                   <TR key={row.id} className={row.result === "match" ? "" : "bg-warning-soft/30"}>
                     <TD>{fmtDate(row.date)}</TD>
-                    <TD>{row.site}</TD>
+                    <TD className="max-w-[200px] whitespace-normal break-words">
+                      {row.site || "Not provided"}
+                    </TD>
                     <TD mono>
                       {row.start} to {row.end}
                     </TD>
@@ -263,7 +271,7 @@ export function SheetCheckPanel({
                     <TD>
                       <RowResultBadge result={row.result} />
                     </TD>
-                    <TD className="max-w-[280px] truncate text-muted-foreground">
+                    <TD className="max-w-[280px] whitespace-normal break-words text-muted-foreground">
                       {row.note ?? ""}
                     </TD>
                   </TR>

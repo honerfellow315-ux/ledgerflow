@@ -1,6 +1,7 @@
+import { TimesheetList } from "@/components/app/timesheets/TimesheetList";
 import { printTimesheetReport } from "@/lib/timesheets/print";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -14,14 +15,12 @@ import {
 } from "@/lib/icons";
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
-import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
+import { EmptyState, Panel, PanelHeader } from "@/components/app/Panel";
 import { SummaryCard } from "@/components/app/SummaryCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -36,7 +35,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Pill, SheetStatusBadge } from "@/components/app/timesheets/badges";
 import { SheetCheckPanel } from "@/components/app/timesheets/SheetCheckPanel";
 import { UploadTimesheetDialog } from "@/components/app/timesheets/TimesheetDialogs";
 import { downloadTimesheetReport } from "@/lib/timesheets/reportExport";
@@ -55,15 +53,7 @@ import {
 } from "@/lib/actions/timesheets";
 import { errorMessage } from "@/lib/payroll/queries";
 import { unwrap } from "@/lib/unwrap";
-import {
-  FORMAT_LABEL,
-  fmtDateTime,
-  fmtDiff,
-  fmtHours,
-  maskNi,
-  type SheetStatus,
-  type TimesheetSheet,
-} from "@/lib/timesheets/data";
+import { type SheetStatus, type TimesheetSheet } from "@/lib/timesheets/data";
 
 export const Route = createFileRoute("/timesheets/")({
   head: () => ({
@@ -105,7 +95,9 @@ function TimesheetsPageContent() {
   const [page, setPage] = useState(1);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; staffName: string } | null>(null);
+  const deleteButton = useRef<HTMLButtonElement>(null);
+  const deleting = useRef(false);
   const [progress, setProgress] = useState("");
 
   // Search is sent to the server a moment after typing stops.
@@ -251,6 +243,54 @@ function TimesheetsPageContent() {
     setProgress("");
   }
 
+  const deleteDialog = (
+    <AlertDialog
+      open={deleteTarget !== null}
+      onOpenChange={(v) => {
+        if (!busy && !v) setDeleteTarget(null);
+      }}
+    >
+      <AlertDialogContent
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          deleteButton.current?.focus();
+        }}
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete timesheet for {deleteTarget?.staffName}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The uploaded sheet and its comparison will be removed. Staff and salary shift records
+            stay unchanged. You can upload the file again afterwards.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Keep it</AlertDialogCancel>
+          <Button
+            ref={deleteButton}
+            variant="destructive"
+            disabled={busy}
+            onClick={() => {
+              if (!deleteTarget || deleting.current) return;
+              const id = deleteTarget.id;
+              deleting.current = true;
+              void guarded(async () => {
+                await unwrap(deleteTimesheetSheet({ data: { id } }));
+                setDeleteTarget(null);
+                if (openId === id) setOpenId(null);
+                await refresh();
+                toast.success("Sheet deleted.");
+              }, "Could not delete this sheet.").finally(() => {
+                deleting.current = false;
+              });
+            }}
+          >
+            {busy ? "Deleting…" : "Delete sheet"}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   if (!ready) return null;
   if (!isAdmin) {
     return (
@@ -320,34 +360,9 @@ function TimesheetsPageContent() {
               );
             }, "Could not correct the sheet identity.")
           }
-          onDelete={() => setConfirmDelete(true)}
+          onDelete={() => setDeleteTarget({ id: open.id, staffName: open.staffName })}
         />
-        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete this sheet?</AlertDialogTitle>
-              <AlertDialogDescription>
-                The uploaded sheet and its comparison are removed. Your Staff and shift records are
-                not touched. You can upload the file again afterwards.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Keep it</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() =>
-                  void guarded(async () => {
-                    await unwrap(deleteTimesheetSheet({ data: { id: open.id } }));
-                    setOpenId(null);
-                    await refresh();
-                    toast.success("Sheet deleted.");
-                  }, "Could not delete this sheet.")
-                }
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {deleteDialog}
       </>
     );
   }
@@ -375,7 +390,7 @@ function TimesheetsPageContent() {
               setPage(1);
             }}
           >
-            <SelectTrigger className="h-9 w-44">
+            <SelectTrigger className="h-9 w-44" aria-label="Filter timesheets by status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -447,6 +462,7 @@ function TimesheetsPageContent() {
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
+                  aria-label="Search timesheets by staff or file name"
                   placeholder="Name or file"
                   className="h-9 w-48 pl-8"
                 />
@@ -458,7 +474,7 @@ function TimesheetsPageContent() {
                   setPage(1);
                 }}
               >
-                <SelectTrigger className="h-9 w-44">
+                <SelectTrigger className="h-9 w-44" aria-label="Filter timesheets by status">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -489,64 +505,12 @@ function TimesheetsPageContent() {
           />
         ) : (
           <>
-            <TableWrap>
-              <Table className="min-w-[900px]">
-                <THead>
-                  <TR>
-                    <TH>Staff</TH>
-                    <TH>NI</TH>
-                    <TH>File</TH>
-                    <TH>Uploaded</TH>
-                    <TH align="right">Sheet</TH>
-                    <TH align="right">Our records</TH>
-                    <TH align="right">Difference</TH>
-                    <TH>Status</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {items.map((s) => (
-                    <TR key={s.id} onClick={() => setOpenId(s.id)}>
-                      <TD className="font-medium">
-                        <span className="flex flex-wrap items-center gap-2">
-                          {s.staffName}
-                          {activeMonth === ALL ? (
-                            <span className="text-xs font-normal text-muted-foreground">
-                              {s.monthLabel}
-                            </span>
-                          ) : null}
-                          {s.matchedBy === "name" && !s.staffConfirmed ? (
-                            <Pill tone="warn">Name only</Pill>
-                          ) : null}
-                          {s.statedMismatch ? <Pill tone="warn">Total differs</Pill> : null}
-                        </span>
-                      </TD>
-                      <TD mono>{maskNi(s.ni)}</TD>
-                      <TD>
-                        <span className="flex items-center gap-2">
-                          <Pill tone="mute">{FORMAT_LABEL[s.format]}</Pill>
-                          <span className="max-w-[200px] truncate text-muted-foreground">
-                            {s.sheetLabel ? `${s.fileName} (${s.sheetLabel})` : s.fileName}
-                          </span>
-                        </span>
-                      </TD>
-                      <TD>{fmtDateTime(s.uploadedAt)}</TD>
-                      <TD align="right" mono>
-                        {fmtHours(s.sheetHours)}
-                      </TD>
-                      <TD align="right" mono>
-                        {s.status === "staff_not_found" ? "—" : fmtHours(s.recordHours)}
-                      </TD>
-                      <TD align="right" mono>
-                        {s.status === "staff_not_found" ? "—" : fmtDiff(s.diff)}
-                      </TD>
-                      <TD>
-                        <SheetStatusBadge status={s.status} />
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </TableWrap>
+            <TimesheetList
+              items={items}
+              disabled={busy || locked || lockUnknown}
+              onOpen={setOpenId}
+              onDelete={setDeleteTarget}
+            />
             {pages > 1 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-[13px] text-muted-foreground">
                 <span>
@@ -576,6 +540,7 @@ function TimesheetsPageContent() {
         )}
       </Panel>
 
+      {deleteDialog}
       <UploadTimesheetDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
