@@ -21,13 +21,16 @@ export function TR({
   children,
   className,
   onClick,
+  id,
 }: {
   children: ReactNode;
   className?: string;
   onClick?: () => void;
+  id?: string;
 }) {
   return (
     <tr
+      id={id}
       onClick={onClick}
       className={cn(
         "h-11 border-b border-border transition-colors last:border-b-0 hover:bg-accent/55",

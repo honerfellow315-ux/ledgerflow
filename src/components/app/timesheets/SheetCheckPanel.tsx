@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { SummaryCard } from "@/components/app/SummaryCard";
+import { cn } from "@/lib/utils";
 import { Pill, RowResultBadge, SheetStatusBadge } from "@/components/app/timesheets/badges";
 import {
   FORMAT_LABEL,
@@ -74,7 +75,22 @@ export function SheetCheckPanel({
   const [sourceDob, setSourceDob] = useState(sheet.sourceDob ?? "");
   const [editIdentity, setEditIdentity] = useState(false);
   const [onlyIssues, setOnlyIssues] = useState(false);
+  const [lastIssueId, setLastIssueId] = useState<string | null>(null);
   const t = useMemo(() => sheetTotals(sheet), [sheet]);
+  const openIssues = sheet.rows.filter((row) => row.result !== "match" && !row.accepted);
+  const goToNextIssue = () => {
+    if (openIssues.length === 0) return;
+    const at = openIssues.findIndex((row) => row.id === lastIssueId);
+    const next = openIssues[(at + 1) % openIssues.length]!;
+    setLastIssueId(next.id);
+    // The row may be hidden by the "Needs a look" filter or not drawn yet: show all rows first.
+    setOnlyIssues(false);
+    window.setTimeout(() => {
+      document
+        .getElementById(`ts-row-${next.id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+  };
   const rows = onlyIssues
     ? sheet.rows.filter((row) => row.result !== "match" && !row.accepted)
     : sheet.rows;
@@ -254,7 +270,7 @@ export function SheetCheckPanel({
       ) : null}
       {sheet.readNote ? <Notice tone="info">{sheet.readNote}</Notice> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="sticky top-0 z-10 -mx-1 grid gap-3 bg-background/95 px-1 py-2 backdrop-blur sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Hours on the sheet" value={fmtHours(t.sheetHours)} />
         <SummaryCard
           label="Hours in our records"
@@ -294,6 +310,11 @@ export function SheetCheckPanel({
           description={`${rows.length} of ${sheet.rows.length} rows shown. Sites come from the uploaded sheet; differences from salary records appear in Note.`}
           actions={
             <div className="flex items-center gap-2">
+              {openIssues.length > 0 ? (
+                <Button size="sm" variant="outline" onClick={goToNextIssue}>
+                  Next issue ({openIssues.length})
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 variant={onlyIssues ? "outline" : "default"}
@@ -332,7 +353,11 @@ export function SheetCheckPanel({
                 {rows.map((row) => (
                   <TR
                     key={row.id}
-                    className={row.result === "match" || row.accepted ? "" : "bg-warning-soft/30"}
+                    id={`ts-row-${row.id}`}
+                    className={cn(
+                      row.result === "match" || row.accepted ? "" : "bg-warning-soft/30",
+                      row.id === lastIssueId && "ring-2 ring-inset ring-primary/60",
+                    )}
                   >
                     <TD>{fmtDate(row.date)}</TD>
                     <TD className="max-w-[200px] whitespace-normal break-words">

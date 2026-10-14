@@ -33,7 +33,16 @@ export function PanelHeader({
   );
 }
 
-export function EmptyState({ title, description }: { title: string; description?: string }) {
+export function EmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  /** A button that does the obvious next thing (for example "Upload first timesheet"). */
+  action?: ReactNode;
+}) {
   return (
     <div className="flex min-h-44 flex-col items-center justify-center border-t border-dashed border-border px-6 py-12 text-center">
       <span className="mb-3 flex size-8 items-center justify-center rounded-full bg-muted">
@@ -43,6 +52,7 @@ export function EmptyState({ title, description }: { title: string; description?
       {description ? (
         <p className="mt-1 max-w-sm text-xs text-muted-foreground">{description}</p>
       ) : null}
+      {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );
 }

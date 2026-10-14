@@ -77,4 +77,9 @@ export {
   ListChecks,
   ShieldAlert,
   Info,
+  ListTodo,
+  Landmark,
+  FileBadge,
+  ChartColumn,
+  BellRing,
 } from "lucide-react";

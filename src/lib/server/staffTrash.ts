@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { recheckSheet } from "./timesheetCheck";
 import { db } from "./db";
 import {
   payrollCompanies,
@@ -343,12 +344,41 @@ export async function restoreStaffFromTrash(
 
     await db.delete(staffTrash).where(eq(staffTrash.id, row.id));
 
+    // Timesheet Check: sheets that lost this person when they were deleted find them again.
+    // Best effort: a locked month (or any hiccup) must never undo a successful restore.
+    let relinked = 0;
+    try {
+      if (s.ni) {
+        const orphan = await db
+          .select({ id: timesheetSheets.id, ni: timesheetSheets.personNi })
+          .from(timesheetSheets)
+          .where(isNull(timesheetSheets.staffId));
+        for (const sheet of orphan) {
+          if (normNi(sheet.ni) !== normNi(s.ni)) continue;
+          try {
+            const res = await recheckSheet(db, sheet.id);
+            if (res && res.status !== "staff_not_found") relinked++;
+          } catch {
+            /* locked month or similar: leave that sheet for a manual Check again */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     const lostLines =
       snap.salaryEntries.length - entries.length + (snap.payrollLines.length - lines.length);
-    const note =
-      lostLines > 0
-        ? `${lostLines} sheet line${lostLines === 1 ? "" : "s"} could not be restored because that month / sheet no longer exists.`
-        : "";
+    const parts: string[] = [];
+    if (lostLines > 0)
+      parts.push(
+        `${lostLines} sheet line${lostLines === 1 ? "" : "s"} could not be restored because that month / sheet no longer exists.`,
+      );
+    if (relinked > 0)
+      parts.push(
+        `${relinked} timesheet${relinked === 1 ? " was" : "s were"} linked back and checked again.`,
+      );
+    const note = parts.join(" ");
     return { name: s.name, note };
   } catch (err) {
     // Undo the partial restore (cascades away anything inserted above); the

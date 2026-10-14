@@ -5,10 +5,14 @@ import { useEffect, useState, useRef } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Circle,
   Download,
   ListChecks,
+  MoreHorizontal,
+  Printer,
   RefreshCw,
   Search,
   Upload,
@@ -17,6 +21,13 @@ import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import { EmptyState, Panel, PanelHeader } from "@/components/app/Panel";
 import { SummaryCard } from "@/components/app/SummaryCard";
+import { Skeleton, SkeletonRows } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -338,7 +349,17 @@ function TimesheetsPageContent() {
   if (openId) {
     const open = openQ.data;
     if (openQ.isLoading) {
-      return <p className="text-sm text-muted-foreground">Loading…</p>;
+      return (
+        <div className="space-y-4">
+          <Skeleton className="h-8 w-64" />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-20" />
+            ))}
+          </div>
+          <SkeletonRows rows={6} />
+        </div>
+      );
     }
     if (!open) {
       return (
@@ -476,34 +497,34 @@ function TimesheetsPageContent() {
               ))}
             </SelectContent>
           </Select>
-          {canEdit ? (
-            <Button
-              variant="outline"
-              disabled={busy || activeMonth === ALL || (sum?.total ?? 0) === 0}
-              onClick={() => void recheckMonth()}
-            >
-              <RefreshCw className="size-4" /> Check month again
-            </Button>
-          ) : null}
-          <Button
-            variant="outline"
-            disabled={busy || total === 0}
-            onClick={() => void downloadAll()}
-          >
-            <Download className="size-4" /> Download report
-          </Button>
-          <Button
-            variant="outline"
-            disabled={busy || total === 0}
-            onClick={() => void downloadAll("pdf")}
-          >
-            Print / PDF receipts
-          </Button>
           {canCreate ? (
             <Button disabled={busy || locked || lockUnknown} onClick={() => setUploadOpen(true)}>
               <Upload className="size-4" /> Upload timesheets
             </Button>
           ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" aria-label="More actions" disabled={busy}>
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {canEdit ? (
+                <DropdownMenuItem
+                  disabled={activeMonth === ALL || (sum?.total ?? 0) === 0}
+                  onSelect={() => void recheckMonth()}
+                >
+                  <RefreshCw className="mr-2 size-4" /> Check month again
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem disabled={total === 0} onSelect={() => void downloadAll()}>
+                <Download className="mr-2 size-4" /> Download report
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={total === 0} onSelect={() => void downloadAll("pdf")}>
+                <Printer className="mr-2 size-4" /> Print / PDF receipts
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -528,6 +549,16 @@ function TimesheetsPageContent() {
           tone={sum?.notFound ? "danger" : "success"}
         />
       </div>
+
+      {activeMonth !== ALL && (sum?.total ?? 0) > 0 ? (
+        <MonthChecklist
+          uploaded={sum?.total ?? 0}
+          notFound={sum?.notFound ?? 0}
+          needsReview={sum?.needsReview ?? 0}
+          ready={sum?.ready ?? 0}
+          locked={locked}
+        />
+      ) : null}
 
       <Panel>
         <PanelHeader
@@ -566,7 +597,7 @@ function TimesheetsPageContent() {
           }
         />
         {listQ.isLoading ? (
-          <p className="px-4 py-6 text-sm text-muted-foreground">Loading…</p>
+          <SkeletonRows rows={5} />
         ) : listQ.isError ? (
           <EmptyState
             title="The sheets could not be loaded"
@@ -580,6 +611,15 @@ function TimesheetsPageContent() {
                 ? "Upload the Excel or CSV timesheets your staff sent."
                 : "Try a different search or status."
             }
+            {...((sum?.total ?? 0) === 0 && canCreate && !locked
+              ? {
+                  action: (
+                    <Button size="sm" onClick={() => setUploadOpen(true)}>
+                      <Upload className="size-4" /> Upload first timesheet
+                    </Button>
+                  ),
+                }
+              : {})}
           />
         ) : (
           <>
@@ -637,5 +677,55 @@ function TimesheetsPageContent() {
         }}
       />
     </div>
+  );
+}
+
+/** The month in four steps, so it is always clear what is left before it can be locked. */
+function MonthChecklist({
+  uploaded,
+  notFound,
+  needsReview,
+  ready,
+  locked,
+}: {
+  uploaded: number;
+  notFound: number;
+  needsReview: number;
+  ready: number;
+  locked: boolean;
+}) {
+  const steps = [
+    { done: uploaded > 0, label: `${uploaded} sheet${uploaded === 1 ? "" : "s"} uploaded` },
+    {
+      done: notFound === 0,
+      label: notFound === 0 ? "Every person found in Staff" : `${notFound} to find in Staff`,
+    },
+    {
+      done: needsReview === 0 && notFound === 0,
+      label:
+        needsReview === 0
+          ? "No differences left to review"
+          : `${needsReview} with differences to review or accept`,
+    },
+    { done: locked, label: locked ? "Month locked" : `${ready} of ${uploaded} ready to lock` },
+  ];
+  return (
+    <ol
+      aria-label="Steps for this month"
+      className="flex flex-wrap gap-x-6 gap-y-2 rounded-lg border border-border bg-card px-4 py-3 text-sm"
+    >
+      {steps.map((step) => (
+        <li key={step.label} className="flex items-center gap-2">
+          {step.done ? (
+            <CheckCircle2 className="size-4 text-success" aria-label="Done" />
+          ) : (
+            <Circle className="size-4 text-muted-foreground" aria-label="To do" />
+          )}
+          <span className={step.done ? "text-foreground" : "text-muted-foreground"}>
+            {step.label}
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }
