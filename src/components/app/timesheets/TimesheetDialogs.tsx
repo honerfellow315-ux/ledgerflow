@@ -320,7 +320,7 @@ export function UploadTimesheetDialog({
             {
               ...WAITING,
               draft: doc.parsed,
-              message: "Check staff name, NI and date of birth before importing.",
+              message: "Check staff name and NI number before importing (date of birth is optional).",
             },
           ]);
           setFinished(false);
@@ -505,7 +505,7 @@ export function UploadTimesheetDialog({
                               />
                             </label>
                             <label className="space-y-1">
-                              <span>Date of birth</span>
+                              <span>Date of birth (optional)</span>
                               <Input
                                 type="date"
                                 value={sheet.personDob ?? ""}

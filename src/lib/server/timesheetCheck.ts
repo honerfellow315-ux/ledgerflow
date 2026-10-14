@@ -3,7 +3,8 @@
  * so it can be tested against a real Postgres. The server functions in
  * src/lib/actions/timesheets.ts check who is asking and then call this.
  *
- * Name, NI number and date of birth must all agree with one Staff record.
+ * Name and NI number must agree with one Staff record (both compulsory). Date of birth is
+ * optional: when the sheet has one AND Staff has one, they must agree; otherwise it is skipped.
  * Matching queries the NI candidates rather than loading every staff record.
  */
 import { and, asc, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
@@ -61,7 +62,11 @@ const NO_MATCH = (note: string): StaffMatch => ({
   note,
 });
 
-/** All three fields must agree with one Staff record before a new upload can be saved. */
+/**
+ * Name and NI number are compulsory and must agree with one Staff record.
+ * Date of birth is optional: it is compared only when BOTH the sheet and the Staff record
+ * have a valid one. A missing DOB (on either side) never blocks a match, a wrong one does.
+ */
 export async function findStaff(
   db: Db,
   rawNi: string,
@@ -70,13 +75,12 @@ export async function findStaff(
 ): Promise<StaffMatch> {
   const niKey = normNi(rawNi);
   const nameKey = normName(rawName).replace(/\s+/g, " ");
-  const dob = normalizeDob(rawDob);
-  if (!nameKey || !niKey || !rawDob.trim())
+  if (!nameKey || !niKey)
     return NO_MATCH(
-      "The sheet is missing the staff name, NI number or date of birth. Use Correct identity on this sheet to add what is missing.",
+      "The sheet is missing the staff name or NI number. Use Correct identity on this sheet to add what is missing.",
     );
   if (!isValidNi(rawNi)) return NO_MATCH("Enter a valid NI number before importing.");
-  if (!dob) return NO_MATCH("Enter a valid date of birth using the date field.");
+  const sheetDob = normalizeDob(rawDob);
   const res = await db.execute(sql`
     SELECT id, name, dob FROM payroll_staff
     WHERE regexp_replace(upper(ni), '[^A-Z0-9]', '', 'g') = ${niKey}
@@ -93,13 +97,10 @@ export async function findStaff(
     return NO_MATCH(
       `The name on the sheet ("${rawName.trim()}") does not match the name in Staff for this NI number ("${hit.name}"). Correct one of them.`,
     );
-  if (!normalizeDob(hit.dob ?? ""))
+  const staffDob = normalizeDob(hit.dob ?? "");
+  if (sheetDob && staffDob && sheetDob !== staffDob)
     return NO_MATCH(
-      `The Staff record for ${hit.name} has no date of birth yet. Add it in Staff, then press Check again on this sheet.`,
-    );
-  if (normalizeDob(hit.dob ?? "") !== dob)
-    return NO_MATCH(
-      `The date of birth on the sheet does not match the one in Staff for ${hit.name}. Correct one of them, then press Check again.`,
+      `The date of birth on the sheet does not match the one in Staff for ${hit.name}. Correct one of them, or clear the date from the sheet, then press Check again.`,
     );
   return { staffId: hit.id, matchedBy: "ni", staffName: hit.name, note: "" };
 }
@@ -748,7 +749,7 @@ export async function saveParsedSheet(
   });
 
   if (!ev.staff.staffId) {
-    // Nobody matched (for example the staff record has no date of birth yet). Keep the sheet
+    // Nobody matched (for example a name or NI number that does not match Staff). Keep the sheet
     // as "staff not found" instead of throwing the upload away: fix Staff, press Check again,
     // and nothing has to be uploaded a second time. A sheet like this can never be locked.
     const holdingId = uid("ts");

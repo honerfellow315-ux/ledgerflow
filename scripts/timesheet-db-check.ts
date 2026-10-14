@@ -313,14 +313,14 @@ ok(threw, "cannot upload into a locked month");
 await db.execute(sql`SELECT set_timesheet_month_lock('2026-09', false, 'Admin')`);
 ok(true, "month reopened");
 
-// ---- holding area: unmatched person is kept, not rejected
+// ---- identity: name + NI compulsory, DOB optional
 await db
   .insert(schema.payrollStaff)
   .values({ id: "st2", name: "Sara Noor", ni: "CE654321A", dob: null, rssId: "R2" });
-const held = await saveParsedSheet(db, {
+const noStaffDob = await saveParsedSheet(db, {
   actor,
   fileName: "sara.xlsx",
-  fileHash: "f".repeat(64),
+  fileHash: "7".repeat(64),
   sheet: {
     ...sheetOf("", [row("2026-10-01", 8)]),
     personName: "Sara Noor",
@@ -329,22 +329,58 @@ const held = await saveParsedSheet(db, {
   },
 });
 ok(
-  held.outcome === "saved" && held.status === "staff_not_found",
-  "no DOB in Staff => saved as staff not found (" + held.status + ")",
+  noStaffDob.outcome === "saved" && noStaffDob.status !== "staff_not_found",
+  "Staff has no DOB => still matched on name + NI (" + noStaffDob.status + ")",
 );
+const noSheetDob = await saveParsedSheet(db, {
+  actor,
+  fileName: "sara2.xlsx",
+  fileHash: "8".repeat(64),
+  sheet: {
+    ...sheetOf("", [row("2026-10-02", 8)]),
+    personName: "Sara Noor",
+    personNi: "CE654321A",
+    personDob: "",
+  },
+});
 ok(
-  held.message.includes("Sara Noor") && held.message.includes("date of birth"),
-  "message names the record: " + held.message.slice(0, 90),
+  noSheetDob.outcome === "saved" && noSheetDob.status !== "staff_not_found",
+  "Sheet has no DOB => matched on name + NI (" + noSheetDob.status + ")",
 );
 await db
   .update(schema.payrollStaff)
   .set({ dob: "1992-02-02" })
   .where(eq(schema.payrollStaff.id, "st2"));
-const rr = await recheckSheet(db, held.sheetId);
+const wrongDob = await saveParsedSheet(db, {
+  actor,
+  fileName: "sara3.xlsx",
+  fileHash: "9".repeat(64),
+  sheet: {
+    ...sheetOf("", [row("2026-10-03", 8)]),
+    personName: "Sara Noor",
+    personNi: "CE654321A",
+    personDob: "1991-01-01",
+  },
+});
 ok(
-  rr && (rr.status === "needs_review" || rr.status === "ready"),
-  "after fixing Staff, Check again links it without re-uploading (" + rr?.status + ")",
+  wrongDob.outcome === "saved" && wrongDob.status === "staff_not_found",
+  "both DOBs present but different => held as staff not found (" + wrongDob.status + ")",
 );
+ok(wrongDob.message.includes("date of birth"), "message mentions date of birth");
+const rr = await recheckSheet(db, wrongDob.sheetId);
+ok(rr?.status === "staff_not_found", "wrong DOB stays held on recheck");
+const noName = await saveParsedSheet(db, {
+  actor,
+  fileName: "sara4.xlsx",
+  fileHash: "0".repeat(64),
+  sheet: {
+    ...sheetOf("", [row("2026-10-04", 8)]),
+    personName: "",
+    personNi: "CE654321A",
+    personDob: "1992-02-02",
+  },
+});
+ok(noName.outcome === "saved" && noName.status === "staff_not_found", "no name => not matched");
 
 // ---- lock => salary shift import refused
 const { importShiftRows } = await import("../src/lib/server/shiftImport");

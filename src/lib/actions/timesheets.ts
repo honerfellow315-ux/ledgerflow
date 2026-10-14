@@ -405,9 +405,9 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
         id: z.string().min(1).max(100),
         name: z.string().trim().max(120),
         ni: z.string().trim().max(20),
-        dob: z.string().trim().max(30),
+        dob: z.string().trim().max(30).default(""),
       })
-      .refine((value) => !!value.name || !!value.ni, "Enter a name or NI number."),
+      .refine((value) => !!value.name && !!value.ni, "Enter both the name and the NI number."),
   )
   .handler(async ({ data }) => {
     const actor = await requirePermission("timesheets", "edit");

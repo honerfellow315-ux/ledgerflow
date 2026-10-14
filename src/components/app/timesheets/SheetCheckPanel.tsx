@@ -150,8 +150,9 @@ export function SheetCheckPanel({
             {editIdentity ? (
               <div className="mt-3 space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Use the exact identity from Staff. Name, NI and date of birth must all match. This
-                  updates the uploaded sheet only.
+                  Use the exact identity from Staff. Name and NI number are required and must match.
+                  Date of birth is optional: add it only if the sheet has it (it is then checked
+                  against Staff). This updates the uploaded sheet only.
                 </p>
                 <label className="block text-xs">
                   Name on sheet
@@ -172,7 +173,7 @@ export function SheetCheckPanel({
                   />
                 </label>
                 <label className="block text-xs">
-                  Date of birth on sheet
+                  Date of birth on sheet (optional)
                   <input
                     type="date"
                     value={sourceDob}
@@ -182,7 +183,7 @@ export function SheetCheckPanel({
                 </label>
                 <Button
                   size="sm"
-                  disabled={busy || !sourceName.trim() || !sourceNi.trim() || !sourceDob}
+                  disabled={busy || !sourceName.trim() || !sourceNi.trim()}
                   onClick={() => onCorrectIdentity(sourceName.trim(), sourceNi.trim(), sourceDob)}
                 >
                   Save identity and check again
@@ -196,7 +197,7 @@ export function SheetCheckPanel({
         <Notice tone="warn">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
-              This older sheet was matched by name only. Complete the name, NI and date of birth
+              This older sheet was matched by name only. Complete the name and NI number
               check before confirming the staff identity.
             </span>
             {onCorrectIdentity ? (
