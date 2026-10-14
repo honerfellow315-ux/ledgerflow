@@ -82,6 +82,10 @@ export async function exportSalarySheet(
   const status = account + 1;
   const flag = status + 1;
   const area = flag + 1;
+  // Bank details (only filled for users who may see Staff details), kept as text.
+  const holder = area + 1;
+  const accNo = area + 2;
+  const sortCodeCol = area + 3;
 
   const groups: [number, string][] = [
     [C.rssId, "Profile of Staff"],
@@ -92,6 +96,7 @@ export async function exportSalarySheet(
     [C.check, "Check status"],
     [firstPay, "Payroll data"],
     [p1, "Payment Data"],
+    [holder, "Bank details"],
   ];
   groups.forEach(([c, t]) => (ws.getCell(2, c).value = t));
 
@@ -125,6 +130,9 @@ export async function exportSalarySheet(
     [status, "Pay status"],
     [flag, "Client"],
     [area, "area"],
+    [holder, "Account Holder Name"],
+    [accNo, "Account Number"],
+    [sortCodeCol, "Sort Code"],
   ];
   headers.forEach(([c, t]) => (ws.getCell(3, c).value = t));
   for (const r of [2, 3]) {
@@ -193,7 +201,11 @@ export async function exportSalarySheet(
       formula: `ROUND(${L(C.totAmt)}-${L(totPayroll)}-${L(totCash)}-${L(deduction)},2)`,
       result: r.computed.outstanding,
     });
-    set(account, r.staff.accountDetail);
+    // Old free-text detail first; otherwise build it from the structured bank fields.
+    const bank = [r.staff.accountHolderName, r.staff.accountNumber, r.staff.sortCode]
+      .map((v) => (v ?? "").trim())
+      .filter(Boolean);
+    set(account, r.staff.accountDetail || (bank.length ? bank.join(" | ") : null));
     const o = L(outstanding);
     set(status, {
       formula: `IF(${o}>0,"Current",IF(${o}<0,"OverPaid","Paid in Full"))`,
@@ -201,6 +213,11 @@ export async function exportSalarySheet(
     });
     set(flag, e.flag || null);
     set(area, r.staff.area);
+    set(holder, r.staff.accountHolderName || null);
+    set(accNo, r.staff.accountNumber || null);
+    set(sortCodeCol, r.staff.sortCode || null);
+    ws.getCell(n, accNo).numFmt = "@";
+    ws.getCell(n, sortCodeCol).numFmt = "@";
   });
 
   // totals row
@@ -268,11 +285,14 @@ export async function exportSalarySheet(
   ws.getColumn(account).width = 36;
   ws.getColumn(flag).width = 14;
   ws.getColumn(area).width = 16;
+  ws.getColumn(holder).width = 26;
+  ws.getColumn(accNo).width = 16;
+  ws.getColumn(sortCodeCol).width = 12;
   ws.getColumn(status).width = 14;
   ws.getColumn(C.check).width = 12;
   for (const c of moneyCols) ws.getColumn(c).width = Math.max(ws.getColumn(c).width ?? 0, 13);
   ws.getRow(3).height = 32;
-  ws.autoFilter = { from: { row: 3, column: 2 }, to: { row: 3, column: area } };
+  ws.autoFilter = { from: { row: 3, column: 2 }, to: { row: 3, column: sortCodeCol } };
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {

@@ -1,5 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowLeft, Check, Download, Info, RefreshCw, Trash2 } from "@/lib/icons";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  Download,
+  Info,
+  Pencil,
+  RefreshCw,
+  Trash2,
+} from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
@@ -43,6 +52,7 @@ export function SheetCheckPanel({
   onPrint,
   onRecheck,
   onDelete,
+  onConfirm,
   onCorrectIdentity,
   onAcceptRow,
   onUnacceptRow,
@@ -73,7 +83,7 @@ export function SheetCheckPanel({
   const [sourceName, setSourceName] = useState(sheet.sourceName ?? "");
   const [sourceNi, setSourceNi] = useState(sheet.sourceNi ?? "");
   const [sourceDob, setSourceDob] = useState(sheet.sourceDob ?? "");
-  const [editIdentity, setEditIdentity] = useState(false);
+  const [editIdentity, setEditIdentity] = useState(sheet.status === "staff_not_found");
   const [onlyIssues, setOnlyIssues] = useState(false);
   const [lastIssueId, setLastIssueId] = useState<string | null>(null);
   const t = useMemo(() => sheetTotals(sheet), [sheet]);
@@ -129,85 +139,129 @@ export function SheetCheckPanel({
         </div>
       </div>
 
-      {notFound ? (
-        <Notice tone="warn">
-          The identity read from this sheet did not match a unique staff member. If the person is
-          already in Staff, check the name and NI on the upload, correct them below, then check
-          again. Different NI numbers are never merged automatically.
-        </Notice>
-      ) : null}
-      {onCorrectIdentity ? (
-        <Panel>
-          <div className="p-4">
-            <button
-              type="button"
-              className="text-sm text-primary hover:underline"
-              disabled={busy}
-              onClick={() => setEditIdentity(!editIdentity)}
-            >
-              Correct staff identity
-            </button>
-            {editIdentity ? (
-              <div className="mt-3 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Use the exact identity from Staff. Name and NI number are required and must match.
-                  Date of birth is optional: add it only if the sheet has it (it is then checked
-                  against Staff). This updates the uploaded sheet only.
+      {(() => {
+        const suggested = sheet.matchedBy === "name" && !sheet.staffConfirmed && !notFound;
+        const verified = !notFound && !suggested;
+        const frame = notFound
+          ? "border-destructive/40 bg-destructive/5"
+          : suggested
+            ? "border-warning/40 bg-warning-soft"
+            : "border-primary/30 bg-primary/5";
+        return (
+          <section
+            aria-label="Staff identity"
+            className={cn("rounded-xl border-2 p-4 sm:p-5", frame)}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-semibold text-foreground">Staff identity</h2>
+                  <Pill tone={notFound ? "bad" : suggested ? "warn" : "good"}>
+                    {notFound
+                      ? "Not verified"
+                      : suggested
+                        ? "Waiting for your approval"
+                        : sheet.matchedBy === "ni"
+                          ? "Verified by NI number"
+                          : "Approved"}
+                  </Pill>
+                </div>
+                <p className="mt-1.5 text-sm text-foreground">
+                  {notFound ? (
+                    <>
+                      No staff member could be matched yet. Enter the <strong>NI number</strong> (or
+                      the <strong>name</strong> if there is no NI number) below and press{" "}
+                      <strong>Verify identity</strong>.
+                    </>
+                  ) : suggested ? (
+                    <>
+                      Suggested staff member: <strong>{sheet.staffName}</strong>. It was found by
+                      name, which is not final because two people can share a name or a date of
+                      birth. Check it is the right person, then approve.
+                    </>
+                  ) : (
+                    <>
+                      Staff member: <strong>{sheet.staffName}</strong>
+                      {sheet.matchedBy === "ni"
+                        ? ". The NI number on the sheet matches Staff."
+                        : ". You approved this match."}
+                    </>
+                  )}
                 </p>
-                <label className="block text-xs">
-                  Name on sheet
-                  <input
-                    value={sourceName}
-                    onChange={(e) => setSourceName(e.target.value)}
-                    maxLength={120}
-                    className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
-                  />
-                </label>
-                <label className="block text-xs">
-                  NI on sheet
-                  <input
-                    value={sourceNi}
-                    onChange={(e) => setSourceNi(e.target.value)}
-                    maxLength={20}
-                    className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
-                  />
-                </label>
-                <label className="block text-xs">
-                  Date of birth on sheet (optional)
-                  <input
-                    type="date"
-                    value={sourceDob}
-                    onChange={(e) => setSourceDob(e.target.value)}
-                    className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
-                  />
-                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {suggested && onConfirm ? (
+                  <Button size="sm" disabled={busy} onClick={onConfirm}>
+                    <Check className="size-4" /> Approve {sheet.staffName}
+                  </Button>
+                ) : null}
+                {onCorrectIdentity ? (
+                  <Button
+                    size="sm"
+                    variant={notFound ? "default" : "outline"}
+                    disabled={busy}
+                    onClick={() => setEditIdentity(!editIdentity)}
+                  >
+                    <Pencil className="size-4" />
+                    {editIdentity
+                      ? "Hide identity form"
+                      : verified
+                        ? "Edit identity"
+                        : "Enter / correct identity"}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+            {onCorrectIdentity && editIdentity ? (
+              <div className="mt-4 space-y-3 border-t border-border/60 pt-4">
+                <p className="text-xs text-muted-foreground">
+                  The NI number is checked first and is final when it matches. With no NI number the
+                  name is used (and the date of birth, if you add it) to suggest a staff member,
+                  which you then approve. This changes the uploaded sheet only.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="block text-xs">
+                    NI number
+                    <input
+                      value={sourceNi}
+                      onChange={(e) => setSourceNi(e.target.value)}
+                      maxLength={20}
+                      autoComplete="off"
+                      className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    Name
+                    <input
+                      value={sourceName}
+                      onChange={(e) => setSourceName(e.target.value)}
+                      maxLength={120}
+                      autoComplete="off"
+                      className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    Date of birth (optional)
+                    <input
+                      type="date"
+                      value={sourceDob}
+                      onChange={(e) => setSourceDob(e.target.value)}
+                      className="mt-1 h-9 w-full rounded-lg border bg-background px-2"
+                    />
+                  </label>
+                </div>
                 <Button
                   size="sm"
-                  disabled={busy || !sourceName.trim() || !sourceNi.trim()}
+                  disabled={busy || (!sourceName.trim() && !sourceNi.trim())}
                   onClick={() => onCorrectIdentity(sourceName.trim(), sourceNi.trim(), sourceDob)}
                 >
-                  Save identity and check again
+                  <Check className="size-4" /> Verify identity
                 </Button>
               </div>
             ) : null}
-          </div>
-        </Panel>
-      ) : null}
-      {sheet.matchedBy === "name" && !sheet.staffConfirmed ? (
-        <Notice tone="warn">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>
-              This older sheet was matched by name only. Complete the name and NI number
-              check before confirming the staff identity.
-            </span>
-            {onCorrectIdentity ? (
-              <Button size="sm" disabled={busy} onClick={() => setEditIdentity(true)}>
-                <Check className="size-4" /> Complete staff identity
-              </Button>
-            ) : null}
-          </div>
-        </Notice>
-      ) : null}
+          </section>
+        );
+      })()}
       {t.statedMismatch ? (
         <Notice tone="warn">
           <div className="space-y-2">
@@ -269,7 +323,11 @@ export function SheetCheckPanel({
           </div>
         </Notice>
       ) : null}
-      {sheet.readNote ? <Notice tone="info">{sheet.readNote}</Notice> : null}
+      {sheet.readNote ? (
+        <Notice tone="info">
+          <span className="whitespace-pre-line">{sheet.readNote}</span>
+        </Notice>
+      ) : null}
 
       <div className="sticky top-0 z-10 -mx-1 grid gap-3 bg-background/95 px-1 py-2 backdrop-blur sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Hours on the sheet" value={fmtHours(t.sheetHours)} />

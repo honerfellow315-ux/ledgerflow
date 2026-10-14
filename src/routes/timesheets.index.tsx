@@ -372,7 +372,7 @@ function TimesheetsPageContent() {
       );
     }
     return (
-      <>
+      <div className="space-y-5">
         {lockControl}
         <SheetCheckPanel
           key={open.id + ":" + open.sourceName + ":" + open.sourceNi + ":" + open.sourceDob}
@@ -458,7 +458,7 @@ function TimesheetsPageContent() {
             : {})}
         />
         {deleteDialog}
-      </>
+      </div>
     );
   }
 

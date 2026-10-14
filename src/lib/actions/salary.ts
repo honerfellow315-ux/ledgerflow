@@ -46,7 +46,8 @@ import type {
 /**
  * The salary sheet's view of a person (ids, NI, tag, area, account detail). It is
  * what getPeriodSheet sends to anyone with the "salary" permission, so it must NOT
- * carry the personal / banking / contract fields below.
+ * carry the personal / contract fields below. The bank fields are added later, and only
+ * for users who also have the "staff" permission (see getPeriodSheet).
  */
 const toSheetStaff = (r: typeof payrollStaff.$inferSelect): Staff => ({
   id: r.id,
@@ -831,7 +832,15 @@ export const getPeriodSheet = createServerFn({ method: "POST" })
         const s = toSheetStaff(r);
         // NI and bank details belong behind the separate "staff" permission
         // (payroll already masks them the same way).
-        return canSeeStaffDetails ? s : { ...s, ni: "", accountDetail: "" };
+        if (!canSeeStaffDetails) return { ...s, ni: "", accountDetail: "" };
+        // Bank details travel with the sheet only for people who may see Staff details.
+        const d = toStaffDetails(r);
+        return {
+          ...s,
+          ...(d.accountHolderName ? { accountHolderName: d.accountHolderName } : {}),
+          ...(d.accountNumber ? { accountNumber: d.accountNumber } : {}),
+          ...(d.sortCode ? { sortCode: d.sortCode } : {}),
+        };
       }),
       companies: companies.map(toCompany),
       unmatchedShifts,

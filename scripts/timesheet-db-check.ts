@@ -9,6 +9,7 @@ import { eq, sql } from "drizzle-orm";
 import {
   saveParsedSheet,
   recheckSheet,
+  confirmNameMatch,
   acceptRow,
   unacceptRow,
   setStatedAccepted,
@@ -313,74 +314,94 @@ ok(threw, "cannot upload into a locked month");
 await db.execute(sql`SELECT set_timesheet_month_lock('2026-09', false, 'Admin')`);
 ok(true, "month reopened");
 
-// ---- identity: name + NI compulsory, DOB optional
+// ---- identity: NI is final; name / DOB only suggest and a person must approve
 await db
   .insert(schema.payrollStaff)
   .values({ id: "st2", name: "Sara Noor", ni: "CE654321A", dob: null, rssId: "R2" });
-const noStaffDob = await saveParsedSheet(db, {
-  actor,
-  fileName: "sara.xlsx",
-  fileHash: "7".repeat(64),
-  sheet: {
-    ...sheetOf("", [row("2026-10-01", 8)]),
-    personName: "Sara Noor",
-    personNi: "CE654321A",
-    personDob: "1992-02-02",
-  },
-});
+let h = 0;
+const upload = (month: string, person: { name: string; ni: string; dob: string }) =>
+  saveParsedSheet(db, {
+    actor,
+    fileName: `id${h}.xlsx`,
+    fileHash: String(++h).padStart(2, "0").repeat(32),
+    sheet: {
+      ...sheetOf("", [row(`${month}-01`, 8)]),
+      personName: person.name,
+      personNi: person.ni,
+      personDob: person.dob,
+    },
+  });
+const sheetRow = async (id: string | null) =>
+  (await db.select().from(schema.timesheetSheets).where(eq(schema.timesheetSheets.id, id!)))[0];
+
+// 1. NI matches, Staff has no DOB: final, no approval needed
+const niOk = await upload("2026-11", { name: "Sara Noor", ni: "CE654321A", dob: "1992-02-02" });
 ok(
-  noStaffDob.outcome === "saved" && noStaffDob.status !== "staff_not_found",
-  "Staff has no DOB => still matched on name + NI (" + noStaffDob.status + ")",
+  niOk.matchedBy === "ni" && niOk.status !== "staff_not_found",
+  "NI match is final (" + niOk.matchedBy + ")",
 );
-const noSheetDob = await saveParsedSheet(db, {
-  actor,
-  fileName: "sara2.xlsx",
-  fileHash: "8".repeat(64),
-  sheet: {
-    ...sheetOf("", [row("2026-10-02", 8)]),
-    personName: "Sara Noor",
-    personNi: "CE654321A",
-    personDob: "",
-  },
-});
+// 2. NI matches but the name on the sheet is spelt differently: still matched by NI, warning only
+const niNameDiff = await upload("2026-12", { name: "Sarah Nur", ni: "CE 65 43 21 A", dob: "" });
 ok(
-  noSheetDob.outcome === "saved" && noSheetDob.status !== "staff_not_found",
-  "Sheet has no DOB => matched on name + NI (" + noSheetDob.status + ")",
+  niNameDiff.matchedBy === "ni" && niNameDiff.staffName === "Sara Noor",
+  "NI wins over a different name",
 );
+ok(
+  ((await sheetRow(niNameDiff.sheetId))?.readNote ?? "").includes("Sara Noor"),
+  "the Staff name is suggested in the note",
+);
+// 3. No NI, unique name: suggestion only, needs approval, then approved
 await db
-  .update(schema.payrollStaff)
-  .set({ dob: "1992-02-02" })
-  .where(eq(schema.payrollStaff.id, "st2"));
-const wrongDob = await saveParsedSheet(db, {
-  actor,
-  fileName: "sara3.xlsx",
-  fileHash: "9".repeat(64),
-  sheet: {
-    ...sheetOf("", [row("2026-10-03", 8)]),
-    personName: "Sara Noor",
-    personNi: "CE654321A",
-    personDob: "1991-01-01",
-  },
-});
+  .insert(schema.payrollStaff)
+  .values({ id: "st3", name: "Bilal Khan", ni: "", dob: "1990-01-01", rssId: "R3" });
+const byName = await upload("2027-01", { name: "BILAL KHAN", ni: "", dob: "" });
 ok(
-  wrongDob.outcome === "saved" && wrongDob.status === "staff_not_found",
-  "both DOBs present but different => held as staff not found (" + wrongDob.status + ")",
+  byName.matchedBy === "name" && byName.status === "needs_review",
+  "name only => suggested, needs review (" + byName.matchedBy + "/" + byName.status + ")",
 );
-ok(wrongDob.message.includes("date of birth"), "message mentions date of birth");
-const rr = await recheckSheet(db, wrongDob.sheetId);
-ok(rr?.status === "staff_not_found", "wrong DOB stays held on recheck");
-const noName = await saveParsedSheet(db, {
-  actor,
-  fileName: "sara4.xlsx",
-  fileHash: "0".repeat(64),
-  sheet: {
-    ...sheetOf("", [row("2026-10-04", 8)]),
-    personName: "",
-    personNi: "CE654321A",
-    personDob: "1992-02-02",
-  },
-});
-ok(noName.outcome === "saved" && noName.status === "staff_not_found", "no name => not matched");
+ok(await confirmNameMatch(db, byName.sheetId!), "user approves the name match");
+ok(!!(await sheetRow(byName.sheetId))?.staffConfirmedAt, "approval is stored");
+// 4. Wrong / unknown NI falls back to the name (still only a suggestion)
+const badNi = await upload("2027-02", { name: "Bilal Khan", ni: "ZZ999999Z", dob: "" });
+ok(badNi.matchedBy === "name", "NI not in Staff => looked up by name, suggestion only");
+// 5. Name with a DOB that disagrees is not suggested
+const dobClash = await upload("2027-03", { name: "Bilal Khan", ni: "", dob: "1985-05-05" });
+ok(dobClash.status === "staff_not_found", "name matches but DOB clashes => not suggested");
+// 6. Two staff with the same name: DOB picks one, otherwise nothing is guessed
+await db
+  .insert(schema.payrollStaff)
+  .values({ id: "st4", name: "Bilal Khan", ni: "", dob: "1999-09-09", rssId: "R4" });
+const twin = await upload("2027-04", { name: "Bilal Khan", ni: "", dob: "" });
+ok(twin.status === "staff_not_found", "two people share the name and no DOB => not guessed");
+const twinDob = await upload("2027-05", { name: "Bilal Khan", ni: "", dob: "1999-09-09" });
+ok(
+  twinDob.matchedBy === "name" && twinDob.staffName === "Bilal Khan",
+  "DOB narrows the same-name staff to one suggestion",
+);
+// 7. Nothing to go on
+const empty = await upload("2027-06", { name: "", ni: "", dob: "1992-02-02" });
+ok(empty.status === "staff_not_found", "no name and no NI => not matched");
+// 8. Stale identity text is replaced when the sheet is checked again
+const heldSheet = await sheetRow(dobClash.sheetId);
+await db
+  .update(schema.timesheetSheets)
+  .set({ readNote: "The sheet is missing the staff name or NI number. Use Correct identity." })
+  .where(eq(schema.timesheetSheets.id, heldSheet!.id));
+await db
+  .update(schema.timesheetSheets)
+  .set({ personDob: "" })
+  .where(eq(schema.timesheetSheets.id, heldSheet!.id));
+await db.delete(schema.payrollStaff).where(eq(schema.payrollStaff.id, "st4"));
+const rr = await recheckSheet(db, heldSheet!.id);
+ok(
+  rr?.status !== "staff_not_found",
+  "recheck after fixing the data links the sheet (" + rr?.status + ")",
+);
+const after = await sheetRow(heldSheet!.id);
+ok(
+  !(after?.readNote ?? "").includes("missing the staff name"),
+  "old stale note is gone after recheck",
+);
 
 // ---- lock => salary shift import refused
 const { importShiftRows } = await import("../src/lib/server/shiftImport");

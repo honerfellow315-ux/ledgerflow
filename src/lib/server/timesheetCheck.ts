@@ -3,8 +3,8 @@
  * so it can be tested against a real Postgres. The server functions in
  * src/lib/actions/timesheets.ts check who is asking and then call this.
  *
- * Name and NI number must agree with one Staff record (both compulsory). Date of birth is
- * optional: when the sheet has one AND Staff has one, they must agree; otherwise it is skipped.
+ * The NI number identifies the person (final). Without one, the name (and date of birth) only
+ * suggests a staff member, and a person must approve it. See findStaff.
  * Matching queries the NI candidates rather than loading every staff record.
  */
 import { and, asc, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
@@ -62,10 +62,19 @@ const NO_MATCH = (note: string): StaffMatch => ({
   note,
 });
 
+/** Every identity message starts with this, so it can be replaced when a sheet is checked again. */
+export const IDENTITY_NOTE_PREFIX = "Staff check: ";
+const SAME_NAME_SQL = (key: string) =>
+  sql`trim(regexp_replace(regexp_replace(regexp_replace(lower(name), '[(][^)]*[)]', ' ', 'g'), '[^a-z0-9]+', ' ', 'g'), ' +', ' ', 'g')) = ${key}`;
+
 /**
- * Name and NI number are compulsory and must agree with one Staff record.
- * Date of birth is optional: it is compared only when BOTH the sheet and the Staff record
- * have a valid one. A missing DOB (on either side) never blocks a match, a wrong one does.
+ * Who is this sheet for?
+ *  1. NI number found in Staff  -> matched (final). The Staff name is suggested/shown; a different
+ *     name or date of birth on the sheet only adds a warning, because the NI number is unique.
+ *  2. No NI number (or not valid / not in Staff) -> the NAME is looked up, and the date of birth
+ *     (when the sheet has one) narrows or rejects the candidates. A name/DOB match is only a
+ *     SUGGESTION: matchedBy "name" keeps the sheet on "needs review" until a person approves it,
+ *     because two people can share a name or even a birthday.
  */
 export async function findStaff(
   db: Db,
@@ -73,36 +82,103 @@ export async function findStaff(
   rawName: string,
   rawDob = "",
 ): Promise<StaffMatch> {
+  const P = IDENTITY_NOTE_PREFIX;
   const niKey = normNi(rawNi);
   const nameKey = normName(rawName).replace(/\s+/g, " ");
-  if (!nameKey || !niKey)
-    return NO_MATCH(
-      "The sheet is missing the staff name or NI number. Use Correct identity on this sheet to add what is missing.",
-    );
-  if (!isValidNi(rawNi)) return NO_MATCH("Enter a valid NI number before importing.");
   const sheetDob = normalizeDob(rawDob);
+  if (!niKey && !nameKey)
+    return NO_MATCH(
+      `${P}the sheet has no NI number and no staff name. Enter at least one in "Staff identity" below.`,
+    );
+
+  let niProblem = "";
+  if (niKey) {
+    if (!isValidNi(rawNi)) {
+      niProblem = "The NI number on the sheet is not a valid NI number.";
+    } else {
+      const res = await db.execute(sql`
+        SELECT id, name, dob FROM payroll_staff
+        WHERE regexp_replace(upper(ni), '[^A-Z0-9]', '', 'g') = ${niKey}
+        LIMIT 3`);
+      const hits = res.rows as { id: string; name: string; dob: string | null }[];
+      if (hits.length > 1)
+        return NO_MATCH(
+          `${P}more than one staff member has this NI number. Fix it in Staff first.`,
+        );
+      const hit = hits[0];
+      if (hit) {
+        const warnings: string[] = [];
+        if (nameKey && normName(hit.name).replace(/\s+/g, " ") !== nameKey)
+          warnings.push(
+            `The name on the sheet ("${rawName.trim()}") is different from the Staff name.`,
+          );
+        const staffDob = normalizeDob(hit.dob ?? "");
+        if (sheetDob && staffDob && sheetDob !== staffDob)
+          warnings.push("The date of birth on the sheet is different from the one in Staff.");
+        return {
+          staffId: hit.id,
+          matchedBy: "ni",
+          staffName: hit.name,
+          note: `${P}matched by NI number to ${hit.name}.${warnings.length ? " " + warnings.join(" ") + " Check it is the right person." : ""}`,
+        };
+      }
+      niProblem = "No staff member has the NI number on the sheet.";
+    }
+  }
+
+  if (!nameKey)
+    return NO_MATCH(
+      `${P}${niProblem} Add the staff name in "Staff identity" below so the person can be looked up by name.`,
+    );
+
   const res = await db.execute(sql`
-    SELECT id, name, dob FROM payroll_staff
-    WHERE regexp_replace(upper(ni), '[^A-Z0-9]', '', 'g') = ${niKey}
-    LIMIT 3`);
-  const hits = res.rows as { id: string; name: string; dob: string | null }[];
-  if (hits.length > 1)
-    return NO_MATCH("More than one staff member has this NI number. Fix it in Staff first.");
-  const hit = hits[0];
-  if (!hit)
+    SELECT id, name, dob FROM payroll_staff WHERE ${SAME_NAME_SQL(nameKey)} LIMIT 6`);
+  let cands = res.rows as { id: string; name: string; dob: string | null }[];
+  const lead = niProblem ? `${niProblem} ` : "";
+  if (cands.length === 0)
     return NO_MATCH(
-      "No staff member has this NI number. Check the details or add the person in Staff first.",
+      `${P}${lead}No staff member has the name "${rawName.trim()}". Check the spelling, or add the person in Staff first.`,
     );
-  if (normName(hit.name).replace(/\s+/g, " ") !== nameKey)
+  if (sheetDob) {
+    const sameDob = cands.filter((c) => normalizeDob(c.dob ?? "") === sheetDob);
+    const noDob = cands.filter((c) => !normalizeDob(c.dob ?? ""));
+    if (sameDob.length > 0) cands = sameDob;
+    else if (noDob.length > 0) cands = noDob;
+    else
+      return NO_MATCH(
+        `${P}${lead}A staff member has this name, but the date of birth on the sheet is different from Staff. Check both before matching.`,
+      );
+  }
+  if (cands.length > 1)
     return NO_MATCH(
-      `The name on the sheet ("${rawName.trim()}") does not match the name in Staff for this NI number ("${hit.name}"). Correct one of them.`,
+      `${P}${lead}More than one staff member has the name "${rawName.trim()}". Add the NI number (or date of birth) in "Staff identity" below.`,
     );
-  const staffDob = normalizeDob(hit.dob ?? "");
-  if (sheetDob && staffDob && sheetDob !== staffDob)
-    return NO_MATCH(
-      `The date of birth on the sheet does not match the one in Staff for ${hit.name}. Correct one of them, or clear the date from the sheet, then press Check again.`,
-    );
-  return { staffId: hit.id, matchedBy: "ni", staffName: hit.name, note: "" };
+  const hit = cands[0]!;
+  const dobAgrees = !!sheetDob && normalizeDob(hit.dob ?? "") === sheetDob;
+  return {
+    staffId: hit.id,
+    matchedBy: "name",
+    staffName: hit.name,
+    note: `${P}${lead}Suggested by name${dobAgrees ? " and date of birth" : ""}: ${hit.name}. Approve this staff member before the sheet can be marked ready.`,
+  };
+}
+
+/** The identity line first, then anything the file reader noted. */
+export function composeReadNote(identityNote: string, others: string | null): string | null {
+  const text = [identityNote.trim(), (others ?? "").trim()].filter(Boolean).join("\n");
+  return text ? text.slice(0, 700) : null;
+}
+
+const LEGACY_IDENTITY_NOTE =
+  /^(The sheet is missing the staff|No staff member has this NI|More than one staff member has this NI|The name on the sheet|The Staff record for|The date of birth on the sheet does not match|Enter a valid (NI|date of birth))/;
+
+/** Drops an earlier identity message (new or older wording) so a fresh check can replace it. */
+export function stripIdentityNote(note: string | null): string | null {
+  if (!note) return null;
+  const [first = "", ...rest] = note.split("\n");
+  const isIdentity = first.startsWith(IDENTITY_NOTE_PREFIX) || LEGACY_IDENTITY_NOTE.test(first);
+  const kept = (isIdentity ? rest : [first, ...rest]).join("\n").trim();
+  return kept || null;
 }
 
 /* ------------------------------ our own records ------------------------------ */
@@ -782,7 +858,10 @@ export async function saveParsedSheet(
         rowCount: sheet.rows.length,
         issueCount: ev.answers.filter((x) => x.result !== "match").length,
         status: "staff_not_found",
-        readNote: ev.staff.note.slice(0, 500),
+        readNote: composeReadNote(
+          ev.staff.note,
+          sheet.warnings.length > 0 ? sheet.warnings.join(" ") : null,
+        ),
         comparedAt: new Date(),
       })
       .onConflictDoNothing()
@@ -874,7 +953,10 @@ export async function saveParsedSheet(
       rowCount: totalRows,
       issueCount: ev.issues + (mismatch ? 1 : 0),
       status,
-      readNote: sheet.warnings.length > 0 ? sheet.warnings.join(" ") : null,
+      readNote: composeReadNote(
+        ev.staff.note,
+        sheet.warnings.length > 0 ? sheet.warnings.join(" ") : null,
+      ),
       comparedAt: new Date(),
     })
     .onConflictDoNothing()
@@ -1010,6 +1092,7 @@ export async function recheckSheet(db: Db, sheetId: string): Promise<RecheckResu
       matchedBy: staff.matchedBy,
       staffConfirmedAt: keepConfirmed ? sheet.staffConfirmedAt : null,
       personKey: key,
+      readNote: composeReadNote(staff.note, stripIdentityNote(sheet.readNote)),
     })
     .where(eq(timesheetSheets.id, sheetId));
 
@@ -1110,7 +1193,13 @@ export async function confirmNameMatch(db: Db, sheetId: string): Promise<boolean
   await assertTimesheetMonthOpen(db, sheet.month);
   await db
     .update(timesheetSheets)
-    .set({ staffConfirmedAt: new Date() })
+    .set({
+      staffConfirmedAt: new Date(),
+      readNote: composeReadNote(
+        `${IDENTITY_NOTE_PREFIX}${identity.staffName} was approved as the staff member for this sheet.`,
+        stripIdentityNote(sheet.readNote),
+      ),
+    })
     .where(eq(timesheetSheets.id, sheetId));
   await recomputeStaffMonth(db, sheet.staffId, sheet.month);
   return true;
