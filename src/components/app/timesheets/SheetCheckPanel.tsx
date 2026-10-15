@@ -28,6 +28,22 @@ import {
 } from "@/lib/timesheets/data";
 import { AcceptDifferenceDialog } from "@/components/app/timesheets/AcceptDifferenceDialog";
 
+
+/** Start / end of a shift. A missing time is said in words instead of a bare dash. */
+function ShiftTimes({ start, end }: { start: string; end: string }) {
+  const has = (t: string) => Boolean(t) && t !== "—";
+  if (!has(start) && !has(end)) {
+    return <span className="font-sans text-xs text-muted-foreground">No times on sheet</span>;
+  }
+  return (
+    <span>
+      {has(start) ? start : <span className="text-muted-foreground">not given</span>}
+      <span className="px-1.5 text-muted-foreground">→</span>
+      {has(end) ? end : <span className="text-muted-foreground">not given</span>}
+    </span>
+  );
+}
+
 function Notice({ tone, children }: { tone: "warn" | "info"; children: ReactNode }) {
   const Icon = tone === "warn" ? AlertTriangle : Info;
   return (
@@ -452,7 +468,7 @@ export function SheetCheckPanel({
                         {row.site || "Not provided"}
                       </TD>
                       <TD mono className="whitespace-nowrap">
-                        {row.start} to {row.end}
+                        <ShiftTimes start={row.start} end={row.end} />
                       </TD>
                       <TD align="right" mono>
                         {fmtHours(row.sheetHours)}
