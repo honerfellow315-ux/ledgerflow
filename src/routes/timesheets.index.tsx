@@ -56,6 +56,7 @@ import {
   getTimesheetSheet,
   listTimesheetMonths,
   listTimesheetSheets,
+  calculateTimesheetPay,
   recheckTimesheetBatch,
   recheckTimesheetSheet,
   acceptTimesheetRow,
@@ -219,6 +220,27 @@ function TimesheetsPageContent() {
     ) : null;
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["timesheets"] });
+
+  // Sheets uploaded before pay existed have no pay yet: fill it in by itself, once, so nobody
+  // has to press "Check again" just to see Rate / Pay hours / Amount.
+  const payCalcTried = useRef(false);
+  const payMissing = list?.summary.payMissing ?? 0;
+  useEffect(() => {
+    if (!canEdit || payMissing === 0 || payCalcTried.current) return;
+    payCalcTried.current = true;
+    void (async () => {
+      try {
+        for (let i = 0; i < 300; i++) {
+          const step = await unwrap(calculateTimesheetPay({ data: { limit: 10 } }));
+          if (step.processed === 0 || step.remaining === 0) break;
+        }
+        await refresh();
+      } catch {
+        // Silent: the summary card still says how many sheets are not calculated yet.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, payMissing]);
 
   async function guarded(fn: () => Promise<void>, fallback: string) {
     setBusy(true);
@@ -554,7 +576,7 @@ function TimesheetsPageContent() {
           value={fmtHours(sum?.payHours ?? 0)}
           sublabel={
             sum?.payMissing
-              ? `${sum.payMissing} sheet(s) not calculated yet: press Check again`
+              ? `${sum.payMissing} sheet(s) not calculated yet (locked month or still working)`
               : "Matched rows + accepted actual hours"
           }
           tone={sum?.payMissing ? "warning" : "default"}

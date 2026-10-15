@@ -23,8 +23,10 @@ import {
   fmtHours,
   maskNi,
   sheetTotals,
+  type SheetRow,
   type TimesheetSheet,
 } from "@/lib/timesheets/data";
+import { AcceptDifferenceDialog } from "@/components/app/timesheets/AcceptDifferenceDialog";
 
 function Notice({ tone, children }: { tone: "warn" | "info"; children: ReactNode }) {
   const Icon = tone === "warn" ? AlertTriangle : Info;
@@ -77,9 +79,8 @@ export function SheetCheckPanel({
   onAcceptStated?: (note: string) => void;
   onUnacceptStated?: () => void;
 }) {
-  const [acceptingId, setAcceptingId] = useState<string | null>(null);
-  const [acceptNote, setAcceptNote] = useState("");
-  const [acceptHours, setAcceptHours] = useState("");
+  /** The row whose "Accept with note" pop-up is open. */
+  const [dialogRow, setDialogRow] = useState<SheetRow | null>(null);
   const [statedNote, setStatedNote] = useState("");
   const [statedOpen, setStatedOpen] = useState(false);
   const [sourceName, setSourceName] = useState(sheet.sourceName ?? "");
@@ -433,189 +434,135 @@ export function SheetCheckPanel({
                 </TR>
               </THead>
               <TBody>
-                {rows.map((row) => (
-                  <TR
-                    key={row.id}
-                    id={`ts-row-${row.id}`}
-                    className={cn(
-                      row.result === "match" || row.accepted ? "" : "bg-warning-soft/30",
-                      row.id === lastIssueId && "ring-2 ring-inset ring-primary/60",
-                    )}
-                  >
-                    <TD>{fmtDate(row.date)}</TD>
-                    <TD className="max-w-[200px] whitespace-normal break-words">
-                      {row.site || "Not provided"}
-                    </TD>
-                    <TD mono>
-                      {row.start} to {row.end}
-                    </TD>
-                    <TD align="right" mono>
-                      {fmtHours(row.sheetHours)}
-                    </TD>
-                    <TD align="right" mono>
-                      {row.recordHours === null ? "—" : fmtHours(row.recordHours)}
-                    </TD>
-                    <TD align="right" mono>
-                      {row.accepted
-                        ? fmtDiff(0)
-                        : row.recordHours === null
+                {rows.map((row) => {
+                  const open = row.result !== "match" && !row.accepted;
+                  const calculated = row.payAmount !== null && row.payAmount !== undefined;
+                  return (
+                    <TR
+                      key={row.id}
+                      id={`ts-row-${row.id}`}
+                      className={cn(
+                        "transition-colors hover:bg-surface-muted/50",
+                        open ? "bg-warning-soft/30" : row.accepted ? "bg-success-soft/20" : "",
+                        row.id === lastIssueId && "ring-2 ring-inset ring-primary/60",
+                      )}
+                    >
+                      <TD className="whitespace-nowrap font-medium">{fmtDate(row.date)}</TD>
+                      <TD className="w-[190px] max-w-[190px] whitespace-normal break-words">
+                        {row.site || "Not provided"}
+                      </TD>
+                      <TD mono className="whitespace-nowrap">
+                        {row.start} to {row.end}
+                      </TD>
+                      <TD align="right" mono>
+                        {fmtHours(row.sheetHours)}
+                      </TD>
+                      <TD align="right" mono>
+                        {row.recordHours === null ? "—" : fmtHours(row.recordHours)}
+                      </TD>
+                      <TD align="right" mono>
+                        {row.accepted
+                          ? fmtDiff(0)
+                          : row.recordHours === null
+                            ? "—"
+                            : fmtDiff(row.sheetHours - row.recordHours)}
+                      </TD>
+                      <TD align="right" mono className="text-muted-foreground">
+                        {row.payRate === null || row.payRate === undefined
                           ? "—"
-                          : fmtDiff(row.sheetHours - row.recordHours)}
-                    </TD>
-                    <TD align="right" mono>
-                      {row.payRate === null || row.payRate === undefined
-                        ? "—"
-                        : formatMoney(row.payRate)}
-                    </TD>
-                    <TD align="right" mono>
-                      {row.payHours === null || row.payHours === undefined
-                        ? "—"
-                        : row.result !== "match" && !row.accepted
-                          ? "Pending"
-                          : fmtHours(row.payHours)}
-                    </TD>
-                    <TD align="right" mono>
-                      {row.payAmount === null || row.payAmount === undefined
-                        ? "—"
-                        : row.result !== "match" && !row.accepted
-                          ? "Pending"
-                          : formatMoney(row.payAmount)}
-                    </TD>
-                    <TD>
-                      <RowResultBadge result={row.result} />
-                      {row.accepted ? (
-                        <div className="mt-1">
-                          <Pill tone="good">Accepted</Pill>
-                        </div>
-                      ) : null}
-                    </TD>
-                    <TD className="max-w-[320px] whitespace-normal break-words text-muted-foreground">
-                      {row.note ?? ""}
-                      {row.accepted ? (
-                        <div className="mt-1 text-foreground">
-                          Accepted by {row.accepted.by}
-                          {row.accepted.actualHours !== null &&
-                          row.accepted.actualHours !== undefined
-                            ? ` · actual hours ${fmtHours(row.accepted.actualHours)}`
-                            : ""}
-                          : {row.accepted.note}
-                          {onUnacceptRow ? (
-                            <button
-                              type="button"
-                              className="ml-2 text-primary hover:underline"
-                              disabled={busy}
-                              onClick={() => onUnacceptRow(row.id)}
-                            >
-                              Withdraw
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : row.result !== "match" && onAcceptRow ? (
-                        acceptingId === row.id ? (
-                          <div className="mt-2 space-y-2 rounded-md border border-border bg-background p-2">
-                            <div className="flex flex-wrap items-end gap-2">
-                              <label className="text-xs text-muted-foreground">
-                                Actual hours worked
-                                <input
-                                  type="number"
-                                  inputMode="decimal"
-                                  min={0}
-                                  max={24}
-                                  step={0.25}
-                                  value={acceptHours}
-                                  onChange={(e) => setAcceptHours(e.target.value)}
-                                  aria-label="Actual hours worked"
-                                  className="mt-1 block h-8 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground"
-                                />
-                              </label>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                type="button"
-                                onClick={() => setAcceptHours(String(row.sheetHours))}
-                              >
-                                Sheet {fmtHours(row.sheetHours)}
-                              </Button>
-                              {row.recordHours !== null ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  type="button"
-                                  onClick={() => setAcceptHours(String(row.recordHours))}
-                                >
-                                  Record {fmtHours(row.recordHours)}
-                                </Button>
-                              ) : null}
-                            </div>
-                            <input
-                              value={acceptNote}
-                              onChange={(e) => setAcceptNote(e.target.value)}
-                              placeholder="Reason (required)"
-                              aria-label="Reason for accepting this difference"
-                              className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
-                            />
-                            {acceptHours !== "" && Number.isFinite(Number(acceptHours)) ? (
-                              <p className="text-xs text-foreground">
-                                Pay: {fmtHours(Number(acceptHours))} ×{" "}
-                                {formatMoney(row.payRate ?? row.rate)} ={" "}
-                                <strong>
-                                  {formatMoney(
-                                    Math.round(
-                                      Number(acceptHours) * (row.payRate ?? row.rate) * 100,
-                                    ) / 100,
-                                  )}
-                                </strong>
-                              </p>
-                            ) : null}
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Button
-                                size="sm"
-                                disabled={
-                                  busy ||
-                                  acceptNote.trim().length < 3 ||
-                                  acceptHours === "" ||
-                                  !Number.isFinite(Number(acceptHours)) ||
-                                  Number(acceptHours) < 0 ||
-                                  Number(acceptHours) > 24
-                                }
-                                onClick={() => {
-                                  onAcceptRow(row.id, acceptNote.trim(), Number(acceptHours));
-                                  setAcceptingId(null);
-                                  setAcceptNote("");
-                                  setAcceptHours("");
-                                }}
-                              >
-                                Accept
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setAcceptingId(null)}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
+                          : row.payRate > 0
+                            ? formatMoney(row.payRate)
+                            : "No rate"}
+                      </TD>
+                      <TD align="right" mono>
+                        {!calculated ? (
+                          "—"
+                        ) : open ? (
+                          <span className="text-xs font-medium text-warning">Pending</span>
                         ) : (
+                          fmtHours(row.payHours ?? 0)
+                        )}
+                      </TD>
+                      <TD align="right" mono className="font-semibold">
+                        {!calculated ? (
+                          "—"
+                        ) : open ? (
+                          <span className="text-xs font-medium text-warning">Pending</span>
+                        ) : (
+                          <span className="text-primary">{formatMoney(row.payAmount ?? 0)}</span>
+                        )}
+                      </TD>
+                      <TD>
+                        <RowResultBadge result={row.result} />
+                        {row.accepted ? (
                           <div className="mt-1">
-                            <button
-                              type="button"
-                              className="text-primary hover:underline"
-                              disabled={busy}
-                              onClick={() => {
-                                setAcceptingId(row.id);
-                                setAcceptNote("");
-                                setAcceptHours("");
-                              }}
-                            >
-                              Accept with note
-                            </button>
+                            <Pill tone="good">Accepted</Pill>
                           </div>
-                        )
-                      ) : null}
-                    </TD>
-                  </TR>
-                ))}
+                        ) : null}
+                      </TD>
+                      <TD className="w-[270px] max-w-[270px] whitespace-normal break-words text-xs">
+                        {row.note ? (
+                          <p className="line-clamp-3 text-muted-foreground" title={row.note}>
+                            {row.note}
+                          </p>
+                        ) : null}
+                        {row.accepted ? (
+                          <div className="mt-1.5 space-y-1">
+                            <p className="text-foreground">
+                              <span className="font-medium">
+                                {row.accepted.actualHours !== null &&
+                                row.accepted.actualHours !== undefined
+                                  ? `Actual ${fmtHours(row.accepted.actualHours)}`
+                                  : "Accepted"}
+                              </span>
+                              <span className="text-muted-foreground"> · {row.accepted.by}</span>
+                            </p>
+                            <p
+                              className="line-clamp-2 text-muted-foreground"
+                              title={row.accepted.note}
+                            >
+                              {row.accepted.note}
+                            </p>
+                            {onAcceptRow || onUnacceptRow ? (
+                              <div className="flex gap-3">
+                                {onAcceptRow ? (
+                                  <button
+                                    type="button"
+                                    className="text-primary hover:underline"
+                                    disabled={busy}
+                                    onClick={() => setDialogRow(row)}
+                                  >
+                                    Edit
+                                  </button>
+                                ) : null}
+                                {onUnacceptRow ? (
+                                  <button
+                                    type="button"
+                                    className="text-muted-foreground hover:text-foreground hover:underline"
+                                    disabled={busy}
+                                    onClick={() => onUnacceptRow(row.id)}
+                                  >
+                                    Withdraw
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : open && onAcceptRow ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-2 h-7 border-primary/40 text-primary hover:bg-primary/10"
+                            disabled={busy}
+                            onClick={() => setDialogRow(row)}
+                          >
+                            Accept with note
+                          </Button>
+                        ) : null}
+                      </TD>
+                    </TR>
+                  );
+                })}
               </TBody>
             </Table>
           </TableWrap>
@@ -639,6 +586,17 @@ export function SheetCheckPanel({
           <Download className="size-4" /> Download receipt
         </Button>
       </div>
+      {onAcceptRow ? (
+        <AcceptDifferenceDialog
+          row={dialogRow}
+          busy={busy}
+          onClose={() => setDialogRow(null)}
+          onSubmit={(note, hours) => {
+            if (dialogRow) onAcceptRow(dialogRow.id, note, hours);
+            setDialogRow(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

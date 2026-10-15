@@ -405,6 +405,63 @@ export function acceptKey(a: {
   );
 }
 
+/**
+ * The rate to use for a row that has no record shift: the staff member's own Salary Sheet
+ * rate for the month (the most used rate of their shifts), else their Payroll sheet rate.
+ */
+async function staffMonthRate(
+  db: Db,
+  staffId: string,
+  month: string,
+  records: readonly RecordShift[],
+): Promise<number> {
+  const used = new Map<number, number>();
+  for (const r of records) if (r.rate > 0) used.set(r.rate, (used.get(r.rate) ?? 0) + 1);
+  let best = 0;
+  let bestN = 0;
+  for (const [rate, n] of used) {
+    if (n > bestN) {
+      best = rate;
+      bestN = n;
+    }
+  }
+  if (best > 0) return best;
+  const res = await db.execute(sql`
+    SELECT l.rate::float8 AS rate FROM payroll_lines l
+    JOIN payroll_sheets p ON p.id = l.sheet_id
+    WHERE l.staff_id = ${staffId} AND p.month = ${month} AND l.rate > 0
+    ORDER BY l.rate DESC LIMIT 1`);
+  return Number((res.rows[0] as { rate?: number } | undefined)?.rate ?? 0);
+}
+
+/**
+ * Fills in the pay of sheets that were uploaded before pay existed (pay not calculated yet).
+ * Locked months are left alone. Call again until `remaining` is 0 (or `processed` is 0).
+ */
+export async function calculateMissingPay(
+  db: Db,
+  limit: number,
+): Promise<{ processed: number; remaining: number }> {
+  const todo = sql`s.staff_id IS NOT NULL AND s.pay_amount IS NULL
+    AND NOT EXISTS (SELECT 1 FROM timesheet_month_locks l WHERE l.month = s.month AND l.locked)`;
+  const pairs = await db.execute(
+    sql`SELECT DISTINCT s.staff_id, s.month FROM timesheet_sheets s WHERE ${todo} LIMIT ${limit}`,
+  );
+  let processed = 0;
+  for (const p of pairs.rows as { staff_id: string; month: string }[]) {
+    try {
+      await recomputeStaffMonth(db, p.staff_id, p.month);
+      processed++;
+    } catch {
+      // One person's problem must not stop the others; they stay "not calculated".
+    }
+  }
+  const left = await db.execute(
+    sql`SELECT count(*)::int AS n FROM (SELECT DISTINCT s.staff_id, s.month FROM timesheet_sheets s WHERE ${todo}) x`,
+  );
+  return { processed, remaining: Number((left.rows[0] as { n?: number } | undefined)?.n ?? 0) };
+}
+
 /** Fingerprint of "the sheet's stated total differs from its rows". */
 export const statedKey = (stated: number | null, sheetHours: number): string =>
   `${stated === null ? "-" : stated.toFixed(2)}|${sheetHours.toFixed(2)}`;
@@ -531,7 +588,7 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
   };
   const outs: Out[] = [];
   // What each sheet is paid, and which accepted differences leave its "difference" figure.
-  const fallbackRate = loaded.records.find((r) => r.rate > 0)?.rate ?? 0;
+  const fallbackRate = await staffMonthRate(db, staffId, month, loaded.records);
   const aggs = new Map<string, { hours: number[]; amount: number[]; accepted: number[] }>();
   const aggOf = (sheetId: string) => {
     let a = aggs.get(sheetId);

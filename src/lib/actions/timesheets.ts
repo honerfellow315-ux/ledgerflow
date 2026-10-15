@@ -34,6 +34,7 @@ import { recordActivity } from "../server/activity";
 import { formatMonthLabel } from "../payroll/calc";
 import {
   acceptRow,
+  calculateMissingPay,
   confirmNameMatch,
   findStaff,
   setStatedAccepted,
@@ -491,6 +492,17 @@ export const acceptTimesheetRow = createServerFn({ method: "POST" })
       details: `${res.label}: actual hours ${data.actualHours}. ${data.note}`,
     });
     return { ok: true };
+  });
+
+/**
+ * Calculates the pay of sheets uploaded before pay existed. The screen calls it by itself
+ * until nothing is left, so nobody has to press "Check again" for it.
+ */
+export const calculateTimesheetPay = createServerFn({ method: "POST" })
+  .validator(z.object({ limit: z.number().int().min(1).max(15).default(10) }))
+  .handler(async ({ data }) => {
+    await requirePermission("timesheets", "edit");
+    return calculateMissingPay(db, data.limit);
   });
 
 /** Take an acceptance back, so the difference counts as an issue again. */
