@@ -27,11 +27,12 @@ import {
 import { z } from "zod";
 import { assertTimesheetMonthOpen } from "../server/timesheetLocks";
 import { db } from "../server/db";
-import { payrollStaff, timesheetRows, timesheetSheets } from "../../../drizzle/schema";
+import { payrollStaff, salaryEntries, salaryPeriods, timesheetRows, timesheetSheets } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
 import { hasPermission } from "../permissions";
 import { recordActivity } from "../server/activity";
-import { formatMonthLabel } from "../payroll/calc";
+import { computeEntry, formatMonthLabel, round2 } from "../payroll/calc";
+import { salaryPayments } from "../../../drizzle/schema";
 import {
   acceptRow,
   confirmNameMatch,
@@ -580,4 +581,47 @@ export const setTimesheetMonthLock = createServerFn({ method: "POST" })
       label: `Timesheet month ${data.month} ${data.locked ? "locked" : "reopened"}`,
     });
     return { ok: true };
+  });
+
+/* Payment decisions are approvals, not actual disbursements. Salary Sheet remains authoritative. */
+export const getTimesheetPayment = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string().min(1) }))
+  .handler(async ({ data }) => {
+    await requirePermission("timesheets", "view");
+    await requirePermission("salary", "view");
+    const [sheet] = await db.select().from(timesheetSheets).where(eq(timesheetSheets.id, data.id)).limit(1);
+    if (!sheet) throw new Error("Timesheet not found.");
+    const [period] = await db.select().from(salaryPeriods).where(eq(salaryPeriods.month, sheet.month)).limit(1);
+    const [entry] = sheet.staffId && period ? await db.select().from(salaryEntries).where(and(eq(salaryEntries.staffId, sheet.staffId), eq(salaryEntries.periodId, period.id))).limit(1) : [];
+    const payments = entry ? await db.select().from(salaryPayments).where(eq(salaryPayments.entryId, entry.id)) : [];
+    const computed = entry ? computeEntry(entry as Parameters<typeof computeEntry>[0], payments as Parameters<typeof computeEntry>[1]) : null;
+    const existing = await db.execute(sql`SELECT mode, adjustment, final_amount, note, approved_by, approved_at FROM timesheet_payment_approvals WHERE sheet_id = ${data.id}`);
+    return { salaryAmount: computed?.totalAmount ?? null, outstanding: computed?.outstanding ?? null, salaryHours: computed?.totalHours ?? null, sheetHours: sheet.sheetHours, recordedHours: sheet.recordHours, decision: existing.rows[0] ?? null, salaryClosed: period?.status === "closed" };
+  });
+
+export const saveTimesheetPayment = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string().min(1), mode: z.enum(["full", "deduct", "custom"]), adjustment: z.number().finite().min(0).max(1000000), note: z.string().trim().min(3).max(500) }))
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("timesheets", "approve");
+    await requirePermission("salary", "view");
+    const [sheet] = await db.select().from(timesheetSheets).where(eq(timesheetSheets.id, data.id)).limit(1);
+    if (!sheet?.staffId || sheet.status === "staff_not_found") throw new Error("Verify staff identity first.");
+    await assertTimesheetMonthOpen(db, sheet.month);
+    const [period] = await db.select().from(salaryPeriods).where(eq(salaryPeriods.month, sheet.month)).limit(1);
+    if (!period || period.status === "closed") throw new Error("Salary period unavailable or closed.");
+    const [entry] = await db.select().from(salaryEntries).where(and(eq(salaryEntries.periodId, period.id), eq(salaryEntries.staffId, sheet.staffId))).limit(1);
+    if (!entry) throw new Error("Staff salary entry not found for this month.");
+    const pays = await db.select().from(salaryPayments).where(eq(salaryPayments.entryId, entry.id));
+    const calc = computeEntry(entry as Parameters<typeof computeEntry>[0], pays as Parameters<typeof computeEntry>[1]);
+    const base = Math.max(0, calc.outstanding);
+    const rate = calc.totalHours > 0 ? calc.totalAmount / calc.totalHours : 0;
+    const hoursShort = Math.max(0, sheet.recordHours - sheet.sheetHours);
+    const deduction = round2(Math.min(base, hoursShort * rate));
+    const final = data.mode === "full" ? base : data.mode === "deduct" ? round2(base - deduction) : round2(data.adjustment);
+    if (data.mode === "custom" && final > base) throw new Error("Custom payment cannot exceed outstanding salary.");
+    await db.execute(sql`INSERT INTO timesheet_payment_approvals (sheet_id, mode, adjustment, final_amount, note, approved_by, approved_at)
+      VALUES (${data.id}, ${data.mode}, ${data.mode === "custom" ? data.adjustment : deduction}, ${final}, ${data.note}, ${actor.id}, now())
+      ON CONFLICT (sheet_id) DO UPDATE SET mode=excluded.mode, adjustment=excluded.adjustment, final_amount=excluded.final_amount, note=excluded.note, approved_by=excluded.approved_by, approved_at=now()`);
+    await recordActivity({ actor, action: "updated", module: "timesheets", entityId: data.id, label: "Timesheet payment approved", details: `${data.mode}: GBP ${final.toFixed(2)}. ${data.note}` });
+    return { final };
   });

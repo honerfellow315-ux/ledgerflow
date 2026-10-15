@@ -1,3 +1,4 @@
+import { PaymentApprovalPanel } from "@/components/app/timesheets/PaymentApprovalPanel";
 import { TimesheetList } from "@/components/app/timesheets/TimesheetList";
 import { printTimesheetReport } from "@/lib/timesheets/print";
 import { createFileRoute } from "@tanstack/react-router";
@@ -374,6 +375,7 @@ function TimesheetsPageContent() {
     return (
       <div className="space-y-5">
         {lockControl}
+        <PaymentApprovalPanel sheetId={open.id} month={open.month} canApprove={canApprove && !locked && !lockUnknown} />
         <SheetCheckPanel
           key={open.id + ":" + open.sourceName + ":" + open.sourceNi + ":" + open.sourceDob}
           sheet={open}
