@@ -45,9 +45,27 @@ export async function downloadTimesheetReport(sheets: readonly TimesheetSheet[])
     { header: "Hours on sheet", key: "sheet", width: 16 },
     { header: "Hours in our records", key: "rec", width: 20 },
     { header: "Difference", key: "diff", width: 13 },
+    { header: "Hours to pay", key: "payHours", width: 14 },
+    { header: "Amount to pay", key: "payAmount", width: 15 },
     { header: "Result", key: "result", width: 36 },
   ];
   headRow(sum);
+
+  // One line per row with what is paid, so every amount can be proved (actual hours + reason).
+  const pay = wb.addWorksheet("Pay details");
+  pay.columns = [
+    { header: "Staff", key: "name", width: 26 },
+    { header: "Date", key: "date", width: 14 },
+    { header: "Site", key: "site", width: 26 },
+    { header: "Sheet hours", key: "sheet", width: 13 },
+    { header: "Our hours", key: "rec", width: 12 },
+    { header: "Actual hours (accepted)", key: "actual", width: 22 },
+    { header: "Pay hours", key: "payHours", width: 12 },
+    { header: "Rate", key: "rate", width: 10 },
+    { header: "Amount", key: "amount", width: 12 },
+    { header: "Reason", key: "reason", width: 44 },
+  ];
+  headRow(pay);
 
   const issues = wb.addWorksheet("Issues");
   issues.columns = [
@@ -80,8 +98,27 @@ export async function downloadTimesheetReport(sheets: readonly TimesheetSheet[])
       sheet: t.sheetHours,
       rec: notFound ? "" : t.recordHours,
       diff: notFound ? "" : t.diff,
+      payHours: notFound || !t.payCalculated ? "" : t.payHours,
+      payAmount: notFound || !t.payCalculated ? "" : t.payAmount,
       result,
     });
+    if (!notFound) {
+      for (const r of s.rows) {
+        const pending = r.result !== "match" && !r.accepted;
+        pay.addRow({
+          name: s.staffName,
+          date: fmtDate(r.date),
+          site: r.site,
+          sheet: r.sheetHours,
+          rec: r.recordHours ?? "",
+          actual: r.accepted?.actualHours ?? "",
+          payHours: pending ? "Pending" : (r.payHours ?? ""),
+          rate: r.payRate ?? "",
+          amount: pending ? "Pending" : (r.payAmount ?? ""),
+          reason: r.accepted ? r.accepted.note : "",
+        });
+      }
+    }
     row.getCell("result").fill = fill(notFound ? RED : problems === 0 ? GREEN : AMBER);
 
     if (problems === 0) continue;

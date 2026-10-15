@@ -67,7 +67,8 @@ import {
 } from "@/lib/actions/timesheets";
 import { errorMessage } from "@/lib/payroll/queries";
 import { unwrap } from "@/lib/unwrap";
-import { type SheetStatus, type TimesheetSheet } from "@/lib/timesheets/data";
+import { fmtHours, type SheetStatus, type TimesheetSheet } from "@/lib/timesheets/data";
+import { formatMoney } from "@/lib/ledger/calc";
 
 export const Route = createFileRoute("/timesheets/")({
   head: () => ({
@@ -421,9 +422,9 @@ function TimesheetsPageContent() {
             : {})}
           {...(canApprove
             ? {
-                onAcceptRow: (rowId: string, note: string) =>
+                onAcceptRow: (rowId: string, note: string, actualHours: number) =>
                   void guarded(async () => {
-                    await unwrap(acceptTimesheetRow({ data: { rowId, note } }));
+                    await unwrap(acceptTimesheetRow({ data: { rowId, note, actualHours } }));
                     await refresh();
                     toast.success("Difference accepted.");
                   }, "Could not accept this difference."),
@@ -530,7 +531,7 @@ function TimesheetsPageContent() {
 
       {progress ? <p className="text-[13px] text-muted-foreground">{progress}</p> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <SummaryCard
           label={activeMonth === ALL ? "Sheets" : "Sheets this month"}
           value={String(sum?.total ?? 0)}
@@ -547,6 +548,24 @@ function TimesheetsPageContent() {
           value={String(sum?.notFound ?? 0)}
           sublabel="Check the name / NI read from the sheet"
           tone={sum?.notFound ? "danger" : "success"}
+        />
+        <SummaryCard
+          label="Hours to pay"
+          value={fmtHours(sum?.payHours ?? 0)}
+          sublabel={
+            sum?.payMissing
+              ? `${sum.payMissing} sheet(s) not calculated yet: press Check again`
+              : "Matched rows + accepted actual hours"
+          }
+          tone={sum?.payMissing ? "warning" : "default"}
+        />
+        <SummaryCard
+          label="Total payment"
+          value={formatMoney(sum?.payAmount ?? 0)}
+          sublabel={
+            sum?.needsReview ? "Rows still to look at are not included yet" : "Hours to pay × rate"
+          }
+          tone={sum?.needsReview || sum?.payMissing ? "warning" : "success"}
         />
       </div>
 

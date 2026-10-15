@@ -1,4 +1,5 @@
 import { sheetTotals, maskNi, type TimesheetSheet } from "./data";
+import { formatMoney } from "../ledger/calc";
 const esc = (value: unknown) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -11,11 +12,11 @@ export function timesheetReportHtml(sheets: readonly TimesheetSheet[]): string {
       return `<section><header><h1>Timesheet check receipt</h1><p>${esc(sheet.monthLabel)} · ${esc(sheet.staffName)}</p></header>
       <p>NI: ${esc(maskNi(sheet.ni))} · Source: ${esc(sheet.fileName)}</p>
       <p><strong>Status: ${esc(sheet.status.replace(/_/g, " "))}</strong>${sheet.matchedBy === "name" && !sheet.staffConfirmed ? " · Name match awaiting confirmation" : ""}</p>
-      <p>Sheet hours: <b>${total.sheetHours}</b> · Recorded hours: <b>${total.recordHours}</b> · Difference: <b>${total.diff}</b> · Issues: <b>${total.issues}</b></p>
+      <p>Sheet hours: <b>${total.sheetHours}</b> · Recorded hours: <b>${total.recordHours}</b> · Difference: <b>${total.diff}</b> · Issues: <b>${total.issues}</b>${total.payCalculated && sheet.status !== "staff_not_found" ? ` · Hours to pay: <b>${total.payHours}</b> · Amount to pay: <b>${formatMoney(total.payAmount)}</b>` : ""}</p>
       ${sheet.statedAccepted ? `<p class="notice">Stated total differs from the rows. Accepted by ${esc(sheet.statedAccepted.by)}: ${esc(sheet.statedAccepted.note)}</p>` : ""}
       ${total.statedMismatch ? `<p class="notice">Stated total (${sheet.statedHours}) differs from the row total (${total.sheetHours}).</p>` : ""}
       ${sheet.readNote ? `<p class="notice">${esc(sheet.readNote)}</p>` : ""}
-      <table><thead><tr><th>Date</th><th>Site</th><th>Time</th><th>Sheet h</th><th>Record h</th><th>Result</th></tr></thead><tbody>${sheet.rows.map((row) => `<tr><td>${esc(row.date || "Unreadable")}</td><td>${esc(row.site)}</td><td>${esc(row.start)}–${esc(row.end)}</td><td>${row.sheetHours}</td><td>${row.recordHours ?? "—"}</td><td>${esc(row.result.replace(/_/g, " "))}${row.accepted ? ` · <b>accepted</b>` : ""}${row.note ? `<br><small>${esc(row.note)}</small>` : ""}${row.accepted ? `<br><small>Accepted by ${esc(row.accepted.by)}: ${esc(row.accepted.note)}</small>` : ""}</td></tr>`).join("")}</tbody></table></section>`;
+      <table><thead><tr><th>Date</th><th>Site</th><th>Time</th><th>Sheet h</th><th>Record h</th><th>Rate</th><th>Pay h</th><th>Amount</th><th>Result</th></tr></thead><tbody>${sheet.rows.map((row) => `<tr><td>${esc(row.date || "Unreadable")}</td><td>${esc(row.site)}</td><td>${esc(row.start)}–${esc(row.end)}</td><td>${row.sheetHours}</td><td>${row.recordHours ?? "—"}</td><td>${row.payRate == null ? "—" : formatMoney(row.payRate)}</td><td>${row.result !== "match" && !row.accepted ? "Pending" : (row.payHours ?? "—")}</td><td>${row.result !== "match" && !row.accepted ? "Pending" : row.payAmount == null ? "—" : formatMoney(row.payAmount)}</td><td>${esc(row.result.replace(/_/g, " "))}${row.accepted ? ` · <b>accepted</b>` : ""}${row.note ? `<br><small>${esc(row.note)}</small>` : ""}${row.accepted ? `<br><small>Accepted by ${esc(row.accepted.by)}${row.accepted.actualHours == null ? "" : ` · actual hours ${row.accepted.actualHours}`}: ${esc(row.accepted.note)}</small>` : ""}</td></tr>`).join("")}</tbody></table></section>`;
     })
     .join("");
 }

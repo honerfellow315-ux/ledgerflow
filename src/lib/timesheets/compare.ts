@@ -48,6 +48,8 @@ export interface RowAnswer {
   key: number;
   result: RowResult;
   recordHours: number | null;
+  /** Rate of the record shift this row was paired with (null = no record shift). */
+  recordRate?: number | null;
   note: string;
 }
 
@@ -266,6 +268,7 @@ export function compareRows(args: {
         key: r.key,
         result,
         recordHours: rec.hours,
+        recordRate: rec.rate,
         note: withParse(r, note),
       });
     }
@@ -302,6 +305,7 @@ export function compareRows(args: {
             key: r.key,
             result: "match",
             recordHours: r.hours ?? 0,
+            recordRate: pairs.get(r.key)?.rate ?? recs[0]?.rate ?? null,
             note: `Day total matches: ${sheetRows.length} sheet row(s), ${fmt(sheetTotal / 60)}, against ${recs.length} shift(s) in our records, ${fmt(recTotal / 60)}.`,
           });
         }

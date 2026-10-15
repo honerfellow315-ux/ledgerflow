@@ -17,10 +17,14 @@ export interface SheetRow {
   sheetHours: number;
   recordHours: number | null;
   rate: number;
+  /** Rate used for pay (our record's rate), hours paid and the amount. null = not calculated yet. */
+  payRate?: number | null;
+  payHours?: number | null;
+  payAmount?: number | null;
   result: RowResult;
   note?: string;
-  /** An approver accepted this difference. */
-  accepted?: { note: string; by: string; at: string };
+  /** An approver accepted this difference; actualHours = the hours they said were worked. */
+  accepted?: { note: string; by: string; at: string; actualHours?: number | null };
 }
 
 export interface TimesheetSheet {
@@ -62,10 +66,19 @@ const round = (n: number) => Math.round(n * 100) / 100;
 export function sheetTotals(s: TimesheetSheet) {
   const sheetHours = round(s.rows.reduce((a, r) => a + r.sheetHours, 0));
   const recordHours = round(s.rows.reduce((a, r) => a + (r.recordHours ?? 0), 0));
+  // An accepted difference is settled: it no longer counts in the difference.
+  const settled = s.rows
+    .filter((r) => r.accepted)
+    .reduce((a, r) => a + (r.sheetHours - (r.recordHours ?? 0)), 0);
+  const payHours = round(s.rows.reduce((a, r) => a + (r.payHours ?? 0), 0));
+  const payAmount = round(s.rows.reduce((a, r) => a + (r.payAmount ?? 0), 0));
   return {
     sheetHours,
     recordHours,
-    diff: round(sheetHours - recordHours),
+    diff: round(sheetHours - recordHours - settled),
+    payHours,
+    payAmount,
+    payCalculated: s.rows.every((r) => r.payAmount !== null && r.payAmount !== undefined),
     issues: s.rows.filter((r) => r.result !== "match" && !r.accepted).length,
     statedMismatch: Math.abs(s.statedHours - sheetHours) > 0.001 && !s.statedAccepted,
   };

@@ -14,6 +14,7 @@ import { EmptyState, Panel, PanelHeader, TableWrap } from "@/components/app/Pane
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { SummaryCard } from "@/components/app/SummaryCard";
 import { cn } from "@/lib/utils";
+import { formatMoney } from "@/lib/ledger/calc";
 import { Pill, RowResultBadge, SheetStatusBadge } from "@/components/app/timesheets/badges";
 import {
   FORMAT_LABEL,
@@ -70,14 +71,15 @@ export function SheetCheckPanel({
   onDelete?: () => void;
   busy?: boolean;
   onCorrectIdentity?: (name: string, ni: string, dob: string) => void;
-  /** Accept a difference with a reason (approvers). Left out for everyone else. */
-  onAcceptRow?: (rowId: string, note: string) => void;
+  /** Accept a difference with the actual hours and a reason (approvers). Left out for everyone else. */
+  onAcceptRow?: (rowId: string, note: string, actualHours: number) => void;
   onUnacceptRow?: (rowId: string) => void;
   onAcceptStated?: (note: string) => void;
   onUnacceptStated?: () => void;
 }) {
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [acceptNote, setAcceptNote] = useState("");
+  const [acceptHours, setAcceptHours] = useState("");
   const [statedNote, setStatedNote] = useState("");
   const [statedOpen, setStatedOpen] = useState(false);
   const [sourceName, setSourceName] = useState(sheet.sourceName ?? "");
@@ -329,7 +331,7 @@ export function SheetCheckPanel({
         </Notice>
       ) : null}
 
-      <div className="sticky top-0 z-10 -mx-1 grid gap-3 bg-background/95 px-1 py-2 backdrop-blur sm:grid-cols-2 lg:grid-cols-4">
+      <div className="sticky top-0 z-10 -mx-1 grid gap-3 bg-background/95 px-1 py-2 backdrop-blur sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <SummaryCard label="Hours on the sheet" value={fmtHours(t.sheetHours)} />
         <SummaryCard
           label="Hours in our records"
@@ -353,6 +355,25 @@ export function SheetCheckPanel({
           value={String(t.issues)}
           sublabel={`of ${sheet.rows.length} rows`}
           tone={t.issues ? "warning" : "success"}
+        />
+        <SummaryCard
+          label="Payable hours"
+          value={notFound || !t.payCalculated ? "—" : fmtHours(t.payHours)}
+          sublabel={
+            notFound
+              ? "Match this sheet to a staff member first"
+              : !t.payCalculated
+                ? "Press Check again to calculate"
+                : t.issues
+                  ? "Rows still to look at are not included"
+                  : "Matched rows + accepted actual hours"
+          }
+        />
+        <SummaryCard
+          label="Amount to pay"
+          value={notFound || !t.payCalculated ? "—" : formatMoney(t.payAmount)}
+          sublabel="Payable hours × rate"
+          tone={t.payCalculated && !notFound && t.issues === 0 ? "success" : "warning"}
         />
       </div>
 
@@ -395,7 +416,7 @@ export function SheetCheckPanel({
           <EmptyState title="Nothing to look at" description="Every row matches our records." />
         ) : (
           <TableWrap>
-            <Table className="min-w-[860px]">
+            <Table className="min-w-[1180px]">
               <THead>
                 <TR>
                   <TH>Date</TH>
@@ -404,6 +425,9 @@ export function SheetCheckPanel({
                   <TH align="right">Sheet hours</TH>
                   <TH align="right">Recorded hours</TH>
                   <TH align="right">Difference</TH>
+                  <TH align="right">Rate</TH>
+                  <TH align="right">Pay hours</TH>
+                  <TH align="right">Amount</TH>
                   <TH>Result</TH>
                   <TH>Note</TH>
                 </TR>
@@ -432,7 +456,30 @@ export function SheetCheckPanel({
                       {row.recordHours === null ? "—" : fmtHours(row.recordHours)}
                     </TD>
                     <TD align="right" mono>
-                      {row.recordHours === null ? "—" : fmtDiff(row.sheetHours - row.recordHours)}
+                      {row.accepted
+                        ? fmtDiff(0)
+                        : row.recordHours === null
+                          ? "—"
+                          : fmtDiff(row.sheetHours - row.recordHours)}
+                    </TD>
+                    <TD align="right" mono>
+                      {row.payRate === null || row.payRate === undefined
+                        ? "—"
+                        : formatMoney(row.payRate)}
+                    </TD>
+                    <TD align="right" mono>
+                      {row.payHours === null || row.payHours === undefined
+                        ? "—"
+                        : row.result !== "match" && !row.accepted
+                          ? "Pending"
+                          : fmtHours(row.payHours)}
+                    </TD>
+                    <TD align="right" mono>
+                      {row.payAmount === null || row.payAmount === undefined
+                        ? "—"
+                        : row.result !== "match" && !row.accepted
+                          ? "Pending"
+                          : formatMoney(row.payAmount)}
                     </TD>
                     <TD>
                       <RowResultBadge result={row.result} />
@@ -446,7 +493,12 @@ export function SheetCheckPanel({
                       {row.note ?? ""}
                       {row.accepted ? (
                         <div className="mt-1 text-foreground">
-                          Accepted by {row.accepted.by}: {row.accepted.note}
+                          Accepted by {row.accepted.by}
+                          {row.accepted.actualHours !== null &&
+                          row.accepted.actualHours !== undefined
+                            ? ` · actual hours ${fmtHours(row.accepted.actualHours)}`
+                            : ""}
+                          : {row.accepted.note}
                           {onUnacceptRow ? (
                             <button
                               type="button"
@@ -460,32 +512,89 @@ export function SheetCheckPanel({
                         </div>
                       ) : row.result !== "match" && onAcceptRow ? (
                         acceptingId === row.id ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <div className="mt-2 space-y-2 rounded-md border border-border bg-background p-2">
+                            <div className="flex flex-wrap items-end gap-2">
+                              <label className="text-xs text-muted-foreground">
+                                Actual hours worked
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min={0}
+                                  max={24}
+                                  step={0.25}
+                                  value={acceptHours}
+                                  onChange={(e) => setAcceptHours(e.target.value)}
+                                  aria-label="Actual hours worked"
+                                  className="mt-1 block h-8 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                                />
+                              </label>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                type="button"
+                                onClick={() => setAcceptHours(String(row.sheetHours))}
+                              >
+                                Sheet {fmtHours(row.sheetHours)}
+                              </Button>
+                              {row.recordHours !== null ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  type="button"
+                                  onClick={() => setAcceptHours(String(row.recordHours))}
+                                >
+                                  Record {fmtHours(row.recordHours)}
+                                </Button>
+                              ) : null}
+                            </div>
                             <input
                               value={acceptNote}
                               onChange={(e) => setAcceptNote(e.target.value)}
                               placeholder="Reason (required)"
                               aria-label="Reason for accepting this difference"
-                              className="h-8 min-w-[180px] flex-1 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                              className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
                             />
-                            <Button
-                              size="sm"
-                              disabled={busy || acceptNote.trim().length < 3}
-                              onClick={() => {
-                                onAcceptRow(row.id, acceptNote.trim());
-                                setAcceptingId(null);
-                                setAcceptNote("");
-                              }}
-                            >
-                              Accept
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setAcceptingId(null)}
-                            >
-                              Cancel
-                            </Button>
+                            {acceptHours !== "" && Number.isFinite(Number(acceptHours)) ? (
+                              <p className="text-xs text-foreground">
+                                Pay: {fmtHours(Number(acceptHours))} ×{" "}
+                                {formatMoney(row.payRate ?? row.rate)} ={" "}
+                                <strong>
+                                  {formatMoney(
+                                    Math.round(
+                                      Number(acceptHours) * (row.payRate ?? row.rate) * 100,
+                                    ) / 100,
+                                  )}
+                                </strong>
+                              </p>
+                            ) : null}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                size="sm"
+                                disabled={
+                                  busy ||
+                                  acceptNote.trim().length < 3 ||
+                                  acceptHours === "" ||
+                                  !Number.isFinite(Number(acceptHours)) ||
+                                  Number(acceptHours) < 0 ||
+                                  Number(acceptHours) > 24
+                                }
+                                onClick={() => {
+                                  onAcceptRow(row.id, acceptNote.trim(), Number(acceptHours));
+                                  setAcceptingId(null);
+                                  setAcceptNote("");
+                                  setAcceptHours("");
+                                }}
+                              >
+                                Accept
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setAcceptingId(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
                           </div>
                         ) : (
                           <div className="mt-1">
@@ -496,6 +605,7 @@ export function SheetCheckPanel({
                               onClick={() => {
                                 setAcceptingId(row.id);
                                 setAcceptNote("");
+                                setAcceptHours("");
                               }}
                             >
                               Accept with note

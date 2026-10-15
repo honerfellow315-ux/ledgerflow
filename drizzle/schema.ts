@@ -711,6 +711,11 @@ export const timesheetSheets = pgTable(
     statedAcceptedKey: text("stated_accepted_key").notNull().default(""),
     statedAcceptedByName: text("stated_accepted_by_name").notNull().default(""),
     statedAcceptedAt: timestamp("stated_accepted_at", { withTimezone: true }),
+    /** Pay for this sheet (actual hours x rate). null = not calculated yet ("Check again"). */
+    payHours: numeric("pay_hours", { precision: 10, scale: 2, mode: "number" }),
+    payAmount: money("pay_amount"),
+    /** Sheet hours minus record hours on rows that are NOT accepted. null = not calculated yet. */
+    openDiff: numeric("open_diff", { precision: 10, scale: 2, mode: "number" }),
   },
   (t) => [
     // Several sheets per person per month are allowed (see timesheet-multi-sheet-migration.sql).
@@ -749,6 +754,12 @@ export const timesheetRows = pgTable(
     acceptedNote: text("accepted_note").notNull().default(""),
     acceptedByName: text("accepted_by_name").notNull().default(""),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    /** The hours the approver said were really worked (null = old acceptance, or not accepted). */
+    acceptedHours: numeric("accepted_hours", { precision: 10, scale: 2, mode: "number" }),
+    /** What this row is paid: pay hours x pay rate. null = not calculated yet. */
+    payRate: money("pay_rate"),
+    payHours: numeric("pay_hours", { precision: 10, scale: 2, mode: "number" }),
+    payAmount: money("pay_amount"),
   },
   (t) => [index("timesheet_rows_sheet_idx").on(t.sheetId, t.lineNo)],
 );
@@ -769,6 +780,8 @@ export const timesheetAcceptances = pgTable(
     month: text("month").notNull(),
     rowKey: text("row_key").notNull(),
     note: text("note").notNull(),
+    /** Hours really worked, as decided by the approver (null = accepted before this existed). */
+    actualHours: numeric("actual_hours", { precision: 10, scale: 2, mode: "number" }),
     acceptedBy: text("accepted_by").notNull().default(""),
     acceptedByName: text("accepted_by_name").notNull().default(""),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),

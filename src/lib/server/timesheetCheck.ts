@@ -18,6 +18,7 @@ import {
 } from "../../../drizzle/schema";
 import { formatMonthLabel, isValidNi, normName, normNi, round2 } from "../payroll/calc";
 import { normalizeDob } from "../timesheets/identity";
+import { payForRow } from "../timesheets/pay";
 import { assertTimesheetMonthOpen } from "./timesheetLocks";
 import { uid } from "./id";
 import { chunk, type Db } from "./shiftImport";
@@ -523,8 +524,23 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
     accNote: string;
     accBy: string;
     accAt: string | null;
+    accHours: number | null;
+    payRate: number;
+    payHours: number;
+    payAmount: number;
   };
   const outs: Out[] = [];
+  // What each sheet is paid, and which accepted differences leave its "difference" figure.
+  const fallbackRate = loaded.records.find((r) => r.rate > 0)?.rate ?? 0;
+  const aggs = new Map<string, { hours: number[]; amount: number[]; accepted: number[] }>();
+  const aggOf = (sheetId: string) => {
+    let a = aggs.get(sheetId);
+    if (!a) {
+      a = { hours: [], amount: [], accepted: [] };
+      aggs.set(sheetId, a);
+    }
+    return a;
+  };
   const issuesBySheet = new Map<string, number>();
   const bump = (sheetId: string) =>
     issuesBySheet.set(sheetId, (issuesBySheet.get(sheetId) ?? 0) + 1);
@@ -538,6 +554,10 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
         accNote: "",
         accBy: "",
         accAt: null,
+        accHours: null,
+        payRate: 0,
+        payHours: 0,
+        payAmount: 0,
       });
       continue;
     }
@@ -550,6 +570,21 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       ans.recordHours,
     );
     if (ans.result !== "match" && !acc) bump(it.sheet.id);
+    const pay = payForRow({
+      result: ans.result,
+      sheetHours: it.row.sheetHours,
+      recordHours: ans.recordHours,
+      recordRate: ans.recordRate,
+      sheetRate: it.row.rate,
+      fallbackRate,
+      accepted: Boolean(acc),
+      actualHours: acc?.actualHours ?? null,
+    });
+    const own = aggOf(it.sheet.id);
+    own.hours.push(pay.hours);
+    own.amount.push(pay.amount);
+    // An accepted difference no longer counts as a difference.
+    if (acc) own.accepted.push((it.row.sheetHours ?? 0) - (ans.recordHours ?? 0));
     outs.push({
       id: it.row.id,
       result: ans.result,
@@ -558,13 +593,17 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       accNote: acc?.note ?? "",
       accBy: acc?.acceptedByName ?? "",
       accAt: acc ? acc.acceptedAt.toISOString() : null,
+      accHours: acc?.actualHours ?? null,
+      payRate: pay.rate,
+      payHours: pay.hours,
+      payAmount: pay.amount,
     });
   }
   for (const part of chunk(outs, 200)) {
     const list = sql.join(
       part.map(
         (o) =>
-          sql`(${o.id}::text, ${o.result}::text, ${o.recordHours}::numeric, ${o.note}::text, ${o.accNote}::text, ${o.accBy}::text, ${o.accAt}::timestamptz)`,
+          sql`(${o.id}::text, ${o.result}::text, ${o.recordHours}::numeric, ${o.note}::text, ${o.accNote}::text, ${o.accBy}::text, ${o.accAt}::timestamptz, ${o.accHours}::numeric, ${o.payRate}::numeric, ${o.payHours}::numeric, ${o.payAmount}::numeric)`,
       ),
       sql`, `,
     );
@@ -572,8 +611,9 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       UPDATE timesheet_rows t
       SET result = v.result, record_hours = v.record_hours, note = v.note,
           accepted_note = v.accepted_note, accepted_by_name = v.accepted_by_name,
-          accepted_at = v.accepted_at
-      FROM (VALUES ${list}) AS v(id, result, record_hours, note, accepted_note, accepted_by_name, accepted_at)
+          accepted_at = v.accepted_at, accepted_hours = v.accepted_hours,
+          pay_rate = v.pay_rate, pay_hours = v.pay_hours, pay_amount = v.pay_amount
+      FROM (VALUES ${list}) AS v(id, result, record_hours, note, accepted_note, accepted_by_name, accepted_at, accepted_hours, pay_rate, pay_hours, pay_amount)
       WHERE t.id = v.id`);
   }
 
@@ -585,6 +625,20 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
   const extra: (typeof timesheetRows.$inferInsert)[] = missing.map((m, i) => {
     const acc = acceptance("not_on_sheet", m.date, m.site, 0, m.recordHours);
     if (!acc) bump(latest.id);
+    const pay = payForRow({
+      result: "not_on_sheet",
+      sheetHours: 0,
+      recordHours: m.recordHours,
+      recordRate: m.rate,
+      sheetRate: null,
+      fallbackRate,
+      accepted: Boolean(acc),
+      actualHours: acc?.actualHours ?? null,
+    });
+    const own = aggOf(latest.id);
+    own.hours.push(pay.hours);
+    own.amount.push(pay.amount);
+    if (acc) own.accepted.push(0 - m.recordHours);
     return {
       id: uid("tr"),
       sheetId: latest.id,
@@ -600,6 +654,10 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       acceptedNote: acc?.note ?? "",
       acceptedByName: acc?.acceptedByName ?? "",
       acceptedAt: acc?.acceptedAt ?? null,
+      acceptedHours: acc?.actualHours ?? null,
+      payRate: pay.rate,
+      payHours: pay.hours,
+      payAmount: pay.amount,
     };
   });
   for (const part of chunk(extra, 250)) await db.insert(timesheetRows).values(part);
@@ -634,6 +692,9 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
         issueCount: issues,
         status,
         comparedAt: new Date(),
+        payHours: sumHours(aggOf(sh.id).hours),
+        payAmount: sumHours(aggOf(sh.id).amount),
+        openDiff: round2(sheetHours - recordHours - sumHours(aggOf(sh.id).accepted)),
         // An acceptance only counts while both figures are unchanged; otherwise it lapses.
         ...(statedOk
           ? {}
@@ -667,10 +728,19 @@ async function loadRowForAccept(db: Db, rowId: string) {
 /** Accept one difference with a reason. The reason is required. */
 export async function acceptRow(
   db: Db,
-  a: { rowId: string; note: string; actor: { id: string; name: string } },
+  a: {
+    rowId: string;
+    note: string;
+    /** The hours really worked. Pay is calculated on this figure. */
+    actualHours: number;
+    actor: { id: string; name: string };
+  },
 ): Promise<{ sheetId: string; month: string; label: string }> {
   const note = a.note.trim();
   if (note.length < 3) throw new Error("Write the reason for accepting this difference.");
+  if (!Number.isFinite(a.actualHours) || a.actualHours < 0 || a.actualHours > 24)
+    throw new Error("Write the actual hours worked (between 0 and 24).");
+  const actualHours = round2(a.actualHours);
   const { row, sheet, staffId } = await loadRowForAccept(db, a.rowId);
   if (row.result === "match")
     throw new Error("This row already matches; there is nothing to accept.");
@@ -689,6 +759,7 @@ export async function acceptRow(
       month: sheet.month,
       rowKey: key,
       note: note.slice(0, 500),
+      actualHours,
       acceptedBy: a.actor.id,
       acceptedByName: a.actor.name,
     })
@@ -700,6 +771,7 @@ export async function acceptRow(
       ],
       set: {
         note: note.slice(0, 500),
+        actualHours,
         acceptedBy: a.actor.id,
         acceptedByName: a.actor.name,
         acceptedAt: new Date(),
@@ -1256,7 +1328,10 @@ export function toListItem(x: SheetWithStaff): SheetListItem {
     monthLabel: formatMonthLabel(s.month),
     sheetHours: s.sheetHours,
     recordHours: s.recordHours,
-    diff: round2(s.sheetHours - s.recordHours),
+    // Accepted differences are gone from the difference; old sheets fall back to the plain figure.
+    diff: s.openDiff ?? round2(s.sheetHours - s.recordHours),
+    payHours: s.payHours,
+    payAmount: s.payAmount,
     issues: s.issueCount,
     statedMismatch:
       statedMismatch(s.statedHours, s.sheetHours) &&
@@ -1276,6 +1351,9 @@ export function toTimesheetSheet(x: SheetWithStaff, rows: readonly RowRec[]): Ti
     sheetHours: r.sheetHours ?? 0,
     recordHours: r.recordHours,
     rate: r.rate ?? 0,
+    payRate: r.payRate,
+    payHours: r.payHours,
+    payAmount: r.payAmount,
     result: asResult(r.result),
     ...(r.note ? { note: r.note } : {}),
     ...(r.acceptedAt
@@ -1284,6 +1362,7 @@ export function toTimesheetSheet(x: SheetWithStaff, rows: readonly RowRec[]): Ti
             note: r.acceptedNote,
             by: r.acceptedByName,
             at: r.acceptedAt.toISOString(),
+            actualHours: r.acceptedHours,
           },
         }
       : {}),

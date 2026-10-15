@@ -16,7 +16,11 @@ export interface SheetListItem {
   monthLabel: string;
   sheetHours: number;
   recordHours: number;
+  /** Sheet hours minus record hours, NOT counting differences that were accepted. */
   diff: number;
+  /** What is paid for this sheet (null = not calculated yet: use "Check again"). */
+  payHours: number | null;
+  payAmount: number | null;
   issues: number;
   statedMismatch: boolean;
   status: SheetStatus;
@@ -27,6 +31,11 @@ export interface SheetListSummary {
   ready: number;
   needsReview: number;
   notFound: number;
+  /** Total pay of the sheets in the month (accepted differences use their actual hours). */
+  payHours: number;
+  payAmount: number;
+  /** Matched sheets whose pay has not been calculated yet (uploaded before this update). */
+  payMissing: number;
 }
 
 export interface SheetListPage {

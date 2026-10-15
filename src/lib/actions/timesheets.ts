@@ -216,7 +216,10 @@ export const listTimesheetSheets = createServerFn({ method: "GET" })
       SELECT count(*)::int AS total,
              count(*) FILTER (WHERE staff_id IS NOT NULL AND status = 'ready')::int AS ready,
              count(*) FILTER (WHERE staff_id IS NOT NULL AND status <> 'ready')::int AS needs_review,
-             count(*) FILTER (WHERE staff_id IS NULL)::int AS not_found
+             count(*) FILTER (WHERE staff_id IS NULL)::int AS not_found,
+             COALESCE(sum(pay_hours), 0)::float8 AS pay_hours,
+             COALESCE(sum(pay_amount), 0)::float8 AS pay_amount,
+             count(*) FILTER (WHERE staff_id IS NOT NULL AND pay_amount IS NULL)::int AS pay_missing
       FROM timesheet_sheets WHERE ${monthWhere}`);
     const s = (sum.rows[0] ?? {}) as Record<string, number | undefined>;
 
@@ -230,6 +233,9 @@ export const listTimesheetSheets = createServerFn({ method: "GET" })
         ready: Number(s["ready"] ?? 0),
         needsReview: Number(s["needs_review"] ?? 0),
         notFound: Number(s["not_found"] ?? 0),
+        payHours: Number(s["pay_hours"] ?? 0),
+        payAmount: Number(s["pay_amount"] ?? 0),
+        payMissing: Number(s["pay_missing"] ?? 0),
       },
     };
   });
@@ -462,13 +468,18 @@ export const correctTimesheetIdentity = createServerFn({ method: "POST" })
 /** Accept one difference with a reason (approvers and admins only). */
 export const acceptTimesheetRow = createServerFn({ method: "POST" })
   .validator(
-    z.object({ rowId: z.string().min(1).max(100), note: z.string().trim().min(3).max(500) }),
+    z.object({
+      rowId: z.string().min(1).max(100),
+      note: z.string().trim().min(3).max(500),
+      actualHours: z.number().min(0).max(24),
+    }),
   )
   .handler(async ({ data }) => {
     const actor = await requirePermission("timesheets", "approve");
     const res = await acceptRow(db, {
       rowId: data.rowId,
       note: data.note,
+      actualHours: data.actualHours,
       actor: { id: actor.id, name: actorName(actor) },
     });
     await recordActivity({
@@ -477,7 +488,7 @@ export const acceptTimesheetRow = createServerFn({ method: "POST" })
       module: "timesheets",
       entityId: res.sheetId,
       label: `Timesheet difference accepted — ${formatMonthLabel(res.month)}`,
-      details: `${res.label}: ${data.note}`,
+      details: `${res.label}: actual hours ${data.actualHours}. ${data.note}`,
     });
     return { ok: true };
   });
