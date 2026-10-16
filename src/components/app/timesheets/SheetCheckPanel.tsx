@@ -375,7 +375,7 @@ export function SheetCheckPanel({
         </Notice>
       ) : null}
 
-      <div className="lf-glass-bar sticky top-[3.4rem] z-10 -mx-1 grid gap-3 px-1 py-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="-mx-1 grid gap-3 px-1 py-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <SummaryCard label="Hours on the sheet" value={fmtHours(t.sheetHours)} />
         <SummaryCard
           label="Hours in our records"
