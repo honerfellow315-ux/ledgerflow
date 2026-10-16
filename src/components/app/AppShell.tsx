@@ -8,6 +8,7 @@ import {
   Building2,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   ClipboardList,
   Clock,
   FileMinus,
@@ -272,17 +273,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
 
-          {/* Footer card */}
+          {/* Signed-in user */}
           <div className="lf-footer">
-            <div className="lf-footer-card">
-              <span className="lf-dot" />
-              <div className="lf-footer-text">
-                <b>LedgerFlow</b>
-                <span>Receivables Suite</span>
-                <span>Workspace</span>
-              </div>
-              <ChevronRight className="lf-chev" style={{ marginLeft: "auto" }} />
-            </div>
+            <SidebarUser collapsed={collapsed} />
           </div>
         </aside>
 
@@ -294,6 +287,67 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </div>
     </TooltipProvider>
+  );
+}
+
+function SidebarUser({ collapsed }: { collapsed: boolean }) {
+  const { user } = usePermissions();
+  const displayName = user?.displayName || user?.username || "Account";
+  const initials =
+    displayName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w.charAt(0).toUpperCase())
+      .join("") || "U";
+  const roleLabel = user?.role === "admin" ? "Administrator" : "Team member";
+
+  return (
+    <div className="lf-profile">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className="lf-profile-btn" aria-label="Account menu">
+            <span className="lf-profile-avatar">
+              {initials}
+              <span className="lf-profile-status" aria-hidden="true" />
+            </span>
+            <span className="lf-profile-text">
+              <b>{displayName}</b>
+              <span>{roleLabel}</span>
+            </span>
+            <ChevronsUpDown className="lf-profile-caret" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side={collapsed ? "right" : "top"} align="start" className="w-60">
+          <DropdownMenuLabel className="font-normal">
+            <p className="truncate text-[13px] font-semibold text-foreground">{displayName}</p>
+            {user?.username ? (
+              <p className="truncate text-xs text-muted-foreground">@{user.username}</p>
+            ) : null}
+            <p className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+              {roleLabel}
+            </p>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => void signOutAndReload()}
+            className="cursor-pointer text-[13px]"
+          >
+            <LogOut />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <button
+        type="button"
+        className="lf-profile-out"
+        onClick={() => void signOutAndReload()}
+        aria-label="Sign out"
+        title="Sign out"
+      >
+        <LogOut />
+      </button>
+    </div>
   );
 }
 

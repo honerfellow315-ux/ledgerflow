@@ -509,41 +509,108 @@ div.min-h-screen.bg-background:has(> aside.sidebar-shell) {
   padding: 0.3rem 0.6rem 0.6rem;
 }
 
-.lf-footer-card {
+.lf-profile {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  padding: 0.5rem 0.65rem;
-  border-radius: 0.8rem;
+  gap: 0.3rem;
+  padding: 0.35rem;
+  border-radius: 0.9rem;
   border: 1px solid oklch(1 0 0 / 0.1);
   background: oklch(1 0 0 / 0.04);
 }
 
-.lf-dot {
-  width: 0.45rem;
-  height: 0.45rem;
+.lf-profile-btn {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: 0.65rem;
+  text-align: left;
+  color: inherit;
+  transition: background 0.15s ease;
+}
+
+.lf-profile-btn:hover {
+  background: oklch(1 0 0 / 0.07);
+}
+
+.lf-profile-avatar {
+  position: relative;
+  display: grid;
+  width: 2.1rem;
+  height: 2.1rem;
   flex-shrink: 0;
+  place-items: center;
   border-radius: 999px;
   background: var(--brand-mark);
-  box-shadow: 0 0 8px oklch(0.74 0.15 170 / 0.9);
+  color: oklch(0.2 0.03 180);
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
-.lf-footer-text {
+.lf-profile-status {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: oklch(0.74 0.17 150);
+  border: 2px solid oklch(0.2 0.02 190);
+}
+
+.lf-profile-text {
   min-width: 0;
-  line-height: 1.3;
+  flex: 1;
+  line-height: 1.25;
 }
 
-.lf-footer-text b {
+.lf-profile-text b {
   display: block;
-  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--sidebar-accent-foreground);
 }
 
-.lf-footer-text span {
+.lf-profile-text span {
   display: block;
-  font-size: 0.62rem;
+  font-size: 0.65rem;
   color: oklch(0.88 0.015 185 / 0.6);
+}
+
+.lf-profile-caret {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.lf-profile-out {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 0.6rem;
+  color: oklch(0.88 0.015 185 / 0.7);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.lf-profile-out:hover {
+  background: oklch(0.6 0.2 25 / 0.18);
+  color: oklch(0.85 0.1 25);
+}
+
+.lf-profile-out svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 /* ---- Content area ---- */
@@ -827,7 +894,9 @@ div.min-h-screen.bg-background:has(> aside.sidebar-shell) {
   .lf-shell[data-collapsed="true"] .lf-group-title,
   .lf-shell[data-collapsed="true"] .lf-item-label,
   .lf-shell[data-collapsed="true"] .lf-chev,
-  .lf-shell[data-collapsed="true"] .lf-footer-text {
+  .lf-shell[data-collapsed="true"] .lf-profile-text,
+  .lf-shell[data-collapsed="true"] .lf-profile-caret,
+  .lf-shell[data-collapsed="true"] .lf-profile-out {
     display: none;
   }
 
@@ -860,13 +929,16 @@ div.min-h-screen.bg-background:has(> aside.sidebar-shell) {
     padding: 0.2rem 0 0.7rem;
   }
 
-  .lf-shell[data-collapsed="true"] .lf-footer-card {
-    width: 2.4rem;
-    height: 2.4rem;
-    margin: 0 auto;
-    padding: 0;
+  .lf-shell[data-collapsed="true"] .lf-profile {
     justify-content: center;
-    border-radius: 999px;
+    padding: 0.2rem;
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .lf-shell[data-collapsed="true"] .lf-profile-btn {
+    flex: none;
+    padding: 0;
   }
 }
 
