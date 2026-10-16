@@ -61,6 +61,11 @@ import {
   recheckTimesheetSheet,
   acceptTimesheetRow,
   unacceptTimesheetRow,
+  editTimesheetRow,
+  getTimesheetPayInfo,
+  saveTimesheetAccount,
+  addTimesheetPayment,
+  deleteTimesheetPayment,
   setTimesheetStatedAccepted,
   correctTimesheetIdentity,
   timesheetMonthLock,
@@ -158,6 +163,12 @@ function TimesheetsPageContent() {
     enabled: ready && canView && openId !== null,
   });
 
+  const payQ = useQuery({
+    queryKey: ["timesheets", "pay", openId],
+    queryFn: () => unwrap(getTimesheetPayInfo({ data: { sheetId: openId ?? "" } })),
+    enabled: ready && canView && openId !== null && openQ.data?.status !== "staff_not_found",
+  });
+
   const lockMonth = openQ.data?.month ?? activeMonth;
   const lockQ = useQuery({
     queryKey: ["timesheets", "lock", lockMonth],
@@ -219,7 +230,12 @@ function TimesheetsPageContent() {
       </div>
     ) : null;
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["timesheets"] });
+  // Salary Sheet figures change when a shift is edited or a payment is added, so refresh those too.
+  const refresh = async () => {
+    await qc.invalidateQueries({ queryKey: ["timesheets"] });
+    void qc.invalidateQueries({ queryKey: ["salary"] });
+    void qc.invalidateQueries({ queryKey: ["staff"] });
+  };
 
   // Sheets uploaded before pay existed have no pay yet: fill it in by itself, once, so nobody
   // has to press "Check again" just to see Rate / Pay hours / Amount.
@@ -440,6 +456,75 @@ function TimesheetsPageContent() {
                         : "Identity saved and checked again.",
                     );
                   }, "Could not correct the sheet identity."),
+              }
+            : {})}
+          payBusy={busy}
+          payInfo={payQ.data ?? null}
+          {...(canApprove && can("salary", "edit")
+            ? {
+                onEditRow: (rowId: string, hours: number, rate: number, note: string) =>
+                  void guarded(async () => {
+                    const res = await unwrap(
+                      editTimesheetRow({ data: { rowId, hours, rate, note } }),
+                    );
+                    await refresh();
+                    if (res.salaryUpdated)
+                      toast.success("Shift saved here and in the Salary Sheet.");
+                    else
+                      toast.warning(
+                        res.salaryNote
+                          ? `Shift saved on the timesheet only. ${res.salaryNote}`
+                          : "Shift saved on the timesheet only.",
+                      );
+                  }, "Could not save this shift."),
+              }
+            : {})}
+          {...(canEdit && canSeeStaff && can("staff", "edit")
+            ? {
+                onSaveAccount: (a: {
+                  accountHolderName: string;
+                  accountNumber: string;
+                  sortCode: string;
+                }) =>
+                  void guarded(async () => {
+                    await unwrap(saveTimesheetAccount({ data: { sheetId: open.id, ...a } }));
+                    await refresh();
+                    toast.success("Account details saved.");
+                  }, "Could not save the account details."),
+              }
+            : {})}
+          {...(can("salary", "edit")
+            ? {
+                onAddPayment: (p: {
+                  date: string;
+                  amount: number;
+                  method: string;
+                  reference: string;
+                  notes: string;
+                }) =>
+                  void guarded(async () => {
+                    await unwrap(
+                      addTimesheetPayment({
+                        data: {
+                          sheetId: open.id,
+                          ...p,
+                          method: p.method as "Cash" | "Bank Transfer" | "Cheque" | "Other",
+                        },
+                      }),
+                    );
+                    await refresh();
+                    toast.success("Payment added (also in the Salary Sheet).");
+                  }, "Could not add the payment."),
+              }
+            : {})}
+          {...(can("salary", "delete")
+            ? {
+                onDeletePayment: (paymentId: string) =>
+                  void guarded(async () => {
+                    await unwrap(deleteTimesheetPayment({ data: { sheetId: open.id, paymentId } }));
+                    await refresh();
+                    toast.success("Payment removed.");
+                  }, "Could not remove the payment."),
               }
             : {})}
           {...(canApprove

@@ -23,6 +23,8 @@ export interface SheetRow {
   payAmount?: number | null;
   result: RowResult;
   note?: string;
+  /** A person edited this row by hand (hours and rate). The same figures were written to the Salary Sheet. */
+  edited?: { hours: number; rate: number; note: string; by: string; at: string };
   /** An approver accepted this difference; actualHours = the hours they said were worked. */
   accepted?: { note: string; by: string; at: string; actualHours?: number | null };
 }
@@ -68,7 +70,7 @@ export function sheetTotals(s: TimesheetSheet) {
   const recordHours = round(s.rows.reduce((a, r) => a + (r.recordHours ?? 0), 0));
   // An accepted difference is settled: it no longer counts in the difference.
   const settled = s.rows
-    .filter((r) => r.accepted)
+    .filter((r) => r.accepted || r.edited)
     .reduce((a, r) => a + (r.sheetHours - (r.recordHours ?? 0)), 0);
   const payHours = round(s.rows.reduce((a, r) => a + (r.payHours ?? 0), 0));
   const payAmount = round(s.rows.reduce((a, r) => a + (r.payAmount ?? 0), 0));
@@ -79,7 +81,7 @@ export function sheetTotals(s: TimesheetSheet) {
     payHours,
     payAmount,
     payCalculated: s.rows.every((r) => r.payAmount !== null && r.payAmount !== undefined),
-    issues: s.rows.filter((r) => r.result !== "match" && !r.accepted).length,
+    issues: s.rows.filter((r) => r.result !== "match" && !r.accepted && !r.edited).length,
     statedMismatch: Math.abs(s.statedHours - sheetHours) > 0.001 && !s.statedAccepted,
   };
 }

@@ -24,6 +24,10 @@ export interface RowPayInput {
   accepted: boolean;
   /** Hours the approver typed when accepting (null = older acceptance). */
   actualHours: number | null;
+  /** A person edited this row by hand: these hours win over everything (null = not edited). */
+  editHours?: number | null;
+  /** A person edited this row's rate by hand (null = not edited). */
+  editRate?: number | null;
 }
 
 export interface RowPay {
@@ -39,14 +43,20 @@ const positive = (n: number | null | undefined): n is number =>
   typeof n === "number" && Number.isFinite(n) && n > 0;
 
 export function payForRow(a: RowPayInput): RowPay {
-  const rate = positive(a.recordRate)
-    ? a.recordRate
-    : positive(a.sheetRate)
-      ? a.sheetRate
-      : a.fallbackRate;
+  const edited = typeof a.editRate === "number" && Number.isFinite(a.editRate) && a.editRate >= 0;
+  const rate = edited
+    ? (a.editRate as number)
+    : positive(a.recordRate)
+      ? a.recordRate
+      : positive(a.sheetRate)
+        ? a.sheetRate
+        : a.fallbackRate;
   let hours = 0;
   let pending = false;
-  if (a.result === "match") {
+  if (typeof a.editHours === "number" && Number.isFinite(a.editHours)) {
+    // A hand edit settles the row: it is paid on exactly these hours.
+    hours = a.editHours;
+  } else if (a.result === "match") {
     hours = a.recordHours ?? a.sheetHours ?? 0;
   } else if (a.accepted) {
     if (a.actualHours !== null) hours = a.actualHours;

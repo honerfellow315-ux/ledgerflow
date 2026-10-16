@@ -23,6 +23,12 @@ produces per-client statements of account.
   on an existing DB (after the salary and staff-details migrations).
 - **Reports and Settings** — receivables reports; business, VAT and payment configuration
 
+- **Timesheet Check: edit, account details, payments** — every shift row can be edited (hours and rate);
+  the same figures are written to the Salary Sheet shift, so pay matches in both places. The sheet screen
+  also shows the staff bank details (editable) and the cash / bank payments for the month, which are saved
+  as normal Salary Sheet payments. Run `schema/timesheet-edit-migration.sql` once (after
+  `timesheet-pay-migration.sql`), before deploying.
+
 ## Tech stack
 
 TanStack Start (React 19, file-based routing), Vite, Tailwind CSS v4, Radix UI /

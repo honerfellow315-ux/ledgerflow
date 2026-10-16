@@ -27,7 +27,13 @@ import {
   type TimesheetSheet,
 } from "@/lib/timesheets/data";
 import { AcceptDifferenceDialog } from "@/components/app/timesheets/AcceptDifferenceDialog";
-
+import { EditRowDialog } from "@/components/app/timesheets/EditRowDialog";
+import {
+  PayPanel,
+  type AccountInput,
+  type PaymentInput,
+} from "@/components/app/timesheets/PayPanel";
+import type { TimesheetPayInfo } from "@/lib/actions/timesheets";
 
 /** Start / end of a shift. A missing time is said in words instead of a bare dash. */
 function ShiftTimes({ start, end }: { start: string; end: string }) {
@@ -77,6 +83,12 @@ export function SheetCheckPanel({
   onUnacceptRow,
   onAcceptStated,
   onUnacceptStated,
+  onEditRow,
+  payInfo,
+  onSaveAccount,
+  onAddPayment,
+  onDeletePayment,
+  payBusy,
   busy = false,
 }: {
   sheet: TimesheetSheet;
@@ -94,7 +106,17 @@ export function SheetCheckPanel({
   onUnacceptRow?: (rowId: string) => void;
   onAcceptStated?: (note: string) => void;
   onUnacceptStated?: () => void;
+  /** Change the hours / rate of one shift. The Salary Sheet gets the same figures. */
+  onEditRow?: (rowId: string, hours: number, rate: number, note: string) => void;
+  /** Bank details and payments of this staff member for the month. */
+  payInfo?: TimesheetPayInfo | null;
+  onSaveAccount?: (a: AccountInput) => void;
+  onAddPayment?: (p: PaymentInput) => void;
+  onDeletePayment?: (paymentId: string) => void;
+  /** Payments stay possible in a locked month; only a running request blocks them. */
+  payBusy?: boolean;
 }) {
+  const [editRow, setEditRow] = useState<SheetRow | null>(null);
   /** The row whose "Accept with note" pop-up is open. */
   const [dialogRow, setDialogRow] = useState<SheetRow | null>(null);
   const [statedNote, setStatedNote] = useState("");
@@ -106,7 +128,9 @@ export function SheetCheckPanel({
   const [onlyIssues, setOnlyIssues] = useState(false);
   const [lastIssueId, setLastIssueId] = useState<string | null>(null);
   const t = useMemo(() => sheetTotals(sheet), [sheet]);
-  const openIssues = sheet.rows.filter((row) => row.result !== "match" && !row.accepted);
+  const openIssues = sheet.rows.filter(
+    (row) => row.result !== "match" && !row.accepted && !row.edited,
+  );
   const goToNextIssue = () => {
     if (openIssues.length === 0) return;
     const at = openIssues.findIndex((row) => row.id === lastIssueId);
@@ -121,7 +145,7 @@ export function SheetCheckPanel({
     }, 50);
   };
   const rows = onlyIssues
-    ? sheet.rows.filter((row) => row.result !== "match" && !row.accepted)
+    ? sheet.rows.filter((row) => row.result !== "match" && !row.accepted && !row.edited)
     : sheet.rows;
   const notFound = sheet.status === "staff_not_found";
   const allMatch = t.issues === 0 && !t.statedMismatch && !notFound;
@@ -447,11 +471,12 @@ export function SheetCheckPanel({
                   <TH align="right">Amount</TH>
                   <TH>Result</TH>
                   <TH>Note</TH>
+                  {onEditRow ? <TH>Edit</TH> : null}
                 </TR>
               </THead>
               <TBody>
                 {rows.map((row) => {
-                  const open = row.result !== "match" && !row.accepted;
+                  const open = row.result !== "match" && !row.accepted && !row.edited;
                   const calculated = row.payAmount !== null && row.payAmount !== undefined;
                   return (
                     <TR
@@ -459,7 +484,11 @@ export function SheetCheckPanel({
                       id={`ts-row-${row.id}`}
                       className={cn(
                         "transition-colors hover:bg-surface-muted/50",
-                        open ? "bg-warning-soft/30" : row.accepted ? "bg-success-soft/20" : "",
+                        open
+                          ? "bg-warning-soft/30"
+                          : row.accepted || row.edited
+                            ? "bg-success-soft/20"
+                            : "",
                         row.id === lastIssueId && "ring-2 ring-inset ring-primary/60",
                       )}
                     >
@@ -477,7 +506,7 @@ export function SheetCheckPanel({
                         {row.recordHours === null ? "—" : fmtHours(row.recordHours)}
                       </TD>
                       <TD align="right" mono>
-                        {row.accepted
+                        {row.accepted || row.edited
                           ? fmtDiff(0)
                           : row.recordHours === null
                             ? "—"
@@ -513,6 +542,11 @@ export function SheetCheckPanel({
                         {row.accepted ? (
                           <div className="mt-1">
                             <Pill tone="good">Accepted</Pill>
+                          </div>
+                        ) : null}
+                        {row.edited ? (
+                          <div className="mt-1">
+                            <Pill tone="good">Edited</Pill>
                           </div>
                         ) : null}
                       </TD>
@@ -564,6 +598,21 @@ export function SheetCheckPanel({
                               </div>
                             ) : null}
                           </div>
+                        ) : row.edited ? (
+                          <p className="mt-1.5 text-foreground">
+                            <span className="font-medium">
+                              Edited: {fmtHours(row.edited.hours)} × {formatMoney(row.edited.rate)}
+                            </span>
+                            <span className="text-muted-foreground"> · {row.edited.by}</span>
+                            {row.edited.note ? (
+                              <span
+                                className="line-clamp-2 block text-muted-foreground"
+                                title={row.edited.note}
+                              >
+                                {row.edited.note}
+                              </span>
+                            ) : null}
+                          </p>
                         ) : open && onAcceptRow ? (
                           <Button
                             size="sm"
@@ -576,6 +625,21 @@ export function SheetCheckPanel({
                           </Button>
                         ) : null}
                       </TD>
+                      {onEditRow ? (
+                        <TD>
+                          {row.note?.startsWith("Counted once") ? null : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7"
+                              disabled={busy}
+                              onClick={() => setEditRow(row)}
+                            >
+                              <Pencil className="size-3.5" /> Edit
+                            </Button>
+                          )}
+                        </TD>
+                      ) : null}
                     </TR>
                   );
                 })}
@@ -584,6 +648,17 @@ export function SheetCheckPanel({
           </TableWrap>
         )}
       </Panel>
+
+      {payInfo ? (
+        <PayPanel
+          info={payInfo}
+          busy={payBusy ?? busy}
+          monthLabel={sheet.monthLabel}
+          {...(onSaveAccount ? { onSaveAccount } : {})}
+          {...(onAddPayment ? { onAddPayment } : {})}
+          {...(onDeletePayment ? { onDeletePayment } : {})}
+        />
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-muted/50 px-4 py-3">
         <p className="text-[13px] text-muted-foreground">
@@ -602,6 +677,17 @@ export function SheetCheckPanel({
           <Download className="size-4" /> Download receipt
         </Button>
       </div>
+      {onEditRow ? (
+        <EditRowDialog
+          row={editRow}
+          busy={busy}
+          onClose={() => setEditRow(null)}
+          onSubmit={(hours, rate, note) => {
+            if (editRow) onEditRow(editRow.id, hours, rate, note);
+            setEditRow(null);
+          }}
+        />
+      ) : null}
       {onAcceptRow ? (
         <AcceptDifferenceDialog
           row={dialogRow}

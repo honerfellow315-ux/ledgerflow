@@ -50,10 +50,14 @@ export interface RowAnswer {
   recordHours: number | null;
   /** Rate of the record shift this row was paired with (null = no record shift). */
   recordRate?: number | null;
+  /** The record shift (salary_shifts.id) this row was paired with, if any. */
+  recordId?: string | null;
   note: string;
 }
 
 export interface MissingFromSheet {
+  /** The record shift (salary_shifts.id) that is missing from the sheet. */
+  recordId?: string;
   date: string;
   site: string;
   recordHours: number;
@@ -269,6 +273,7 @@ export function compareRows(args: {
         result,
         recordHours: rec.hours,
         recordRate: rec.rate,
+        recordId: rec.id,
         note: withParse(r, note),
       });
     }
@@ -306,6 +311,7 @@ export function compareRows(args: {
             result: "match",
             recordHours: r.hours ?? 0,
             recordRate: pairs.get(r.key)?.rate ?? recs[0]?.rate ?? null,
+            recordId: pairs.get(r.key)?.id ?? null,
             note: `Day total matches: ${sheetRows.length} sheet row(s), ${fmt(sheetTotal / 60)}, against ${recs.length} shift(s) in our records, ${fmt(recTotal / 60)}.`,
           });
         }
@@ -317,6 +323,7 @@ export function compareRows(args: {
       for (const rec of recs) {
         if (takenRec.has(rec.id)) continue;
         missing.push({
+          recordId: rec.id,
           date,
           site: rec.siteName || rec.clientName,
           recordHours: rec.hours,
@@ -338,6 +345,7 @@ export function compareRows(args: {
     if (rowsByDate.has(date) || !date.startsWith(args.month)) continue;
     for (const rec of recs) {
       missing.push({
+        recordId: rec.id,
         date,
         site: rec.siteName || rec.clientName,
         recordHours: rec.hours,

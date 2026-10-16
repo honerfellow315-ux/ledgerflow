@@ -760,6 +760,14 @@ export const timesheetRows = pgTable(
     payRate: money("pay_rate"),
     payHours: numeric("pay_hours", { precision: 10, scale: 2, mode: "number" }),
     payAmount: money("pay_amount"),
+    /** The salary shift (salary_shifts.id) this row is paired with; an edit updates it. */
+    recordShiftId: text("record_shift_id"),
+    /** A person's own correction of this row (null = not edited). It wins over everything else. */
+    editHours: numeric("edit_hours", { precision: 10, scale: 2, mode: "number" }),
+    editRate: money("edit_rate"),
+    editNote: text("edit_note").notNull().default(""),
+    editedByName: text("edited_by_name").notNull().default(""),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
   },
   (t) => [index("timesheet_rows_sheet_idx").on(t.sheetId, t.lineNo)],
 );

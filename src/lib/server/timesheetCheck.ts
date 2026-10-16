@@ -582,6 +582,7 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
     accBy: string;
     accAt: string | null;
     accHours: number | null;
+    recordId: string | null;
     payRate: number;
     payHours: number;
     payAmount: number;
@@ -612,6 +613,7 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
         accBy: "",
         accAt: null,
         accHours: null,
+        recordId: null,
         payRate: 0,
         payHours: 0,
         payAmount: 0,
@@ -626,7 +628,8 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       it.row.sheetHours,
       ans.recordHours,
     );
-    if (ans.result !== "match" && !acc) bump(it.sheet.id);
+    const edited = it.row.editHours !== null;
+    if (ans.result !== "match" && !acc && !edited) bump(it.sheet.id);
     const pay = payForRow({
       result: ans.result,
       sheetHours: it.row.sheetHours,
@@ -636,12 +639,14 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       fallbackRate,
       accepted: Boolean(acc),
       actualHours: acc?.actualHours ?? null,
+      editHours: it.row.editHours,
+      editRate: it.row.editRate,
     });
     const own = aggOf(it.sheet.id);
     own.hours.push(pay.hours);
     own.amount.push(pay.amount);
-    // An accepted difference no longer counts as a difference.
-    if (acc) own.accepted.push((it.row.sheetHours ?? 0) - (ans.recordHours ?? 0));
+    // An accepted (or hand-edited) difference no longer counts as a difference.
+    if (acc || edited) own.accepted.push((it.row.sheetHours ?? 0) - (ans.recordHours ?? 0));
     outs.push({
       id: it.row.id,
       result: ans.result,
@@ -651,6 +656,7 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       accBy: acc?.acceptedByName ?? "",
       accAt: acc ? acc.acceptedAt.toISOString() : null,
       accHours: acc?.actualHours ?? null,
+      recordId: ans.recordId ?? null,
       payRate: pay.rate,
       payHours: pay.hours,
       payAmount: pay.amount,
@@ -660,7 +666,7 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
     const list = sql.join(
       part.map(
         (o) =>
-          sql`(${o.id}::text, ${o.result}::text, ${o.recordHours}::numeric, ${o.note}::text, ${o.accNote}::text, ${o.accBy}::text, ${o.accAt}::timestamptz, ${o.accHours}::numeric, ${o.payRate}::numeric, ${o.payHours}::numeric, ${o.payAmount}::numeric)`,
+          sql`(${o.id}::text, ${o.result}::text, ${o.recordHours}::numeric, ${o.note}::text, ${o.accNote}::text, ${o.accBy}::text, ${o.accAt}::timestamptz, ${o.accHours}::numeric, ${o.recordId}::text, ${o.payRate}::numeric, ${o.payHours}::numeric, ${o.payAmount}::numeric)`,
       ),
       sql`, `,
     );
@@ -668,20 +674,31 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       UPDATE timesheet_rows t
       SET result = v.result, record_hours = v.record_hours, note = v.note,
           accepted_note = v.accepted_note, accepted_by_name = v.accepted_by_name,
-          accepted_at = v.accepted_at, accepted_hours = v.accepted_hours,
+          accepted_at = v.accepted_at, accepted_hours = v.accepted_hours, record_shift_id = v.record_shift_id,
           pay_rate = v.pay_rate, pay_hours = v.pay_hours, pay_amount = v.pay_amount
-      FROM (VALUES ${list}) AS v(id, result, record_hours, note, accepted_note, accepted_by_name, accepted_at, accepted_hours, pay_rate, pay_hours, pay_amount)
+      FROM (VALUES ${list}) AS v(id, result, record_hours, note, accepted_note, accepted_by_name, accepted_at, accepted_hours, record_shift_id, pay_rate, pay_hours, pay_amount)
       WHERE t.id = v.id`);
   }
 
   // 5. "in our records but on no sheet" rows live on the newest sheet only
   const latest = sheets[sheets.length - 1]!;
+  // Hand edits of these rows are kept (they are matched again by the record shift's id).
+  const oldMissing = await db
+    .select()
+    .from(timesheetRows)
+    .where(and(inArray(timesheetRows.sheetId, ids), eq(timesheetRows.fromRecords, true)));
+  const editOf = new Map(
+    oldMissing
+      .filter((x) => x.recordShiftId && x.editHours !== null)
+      .map((x) => [x.recordShiftId!, x]),
+  );
   await db
     .delete(timesheetRows)
     .where(and(inArray(timesheetRows.sheetId, ids), eq(timesheetRows.fromRecords, true)));
   const extra: (typeof timesheetRows.$inferInsert)[] = missing.map((m, i) => {
     const acc = acceptance("not_on_sheet", m.date, m.site, 0, m.recordHours);
-    if (!acc) bump(latest.id);
+    const was = m.recordId ? editOf.get(m.recordId) : undefined;
+    if (!acc && !was) bump(latest.id);
     const pay = payForRow({
       result: "not_on_sheet",
       sheetHours: 0,
@@ -691,11 +708,13 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       fallbackRate,
       accepted: Boolean(acc),
       actualHours: acc?.actualHours ?? null,
+      editHours: was?.editHours ?? null,
+      editRate: was?.editRate ?? null,
     });
     const own = aggOf(latest.id);
     own.hours.push(pay.hours);
     own.amount.push(pay.amount);
-    if (acc) own.accepted.push(0 - m.recordHours);
+    if (acc || was) own.accepted.push(0 - m.recordHours);
     return {
       id: uid("tr"),
       sheetId: latest.id,
@@ -712,6 +731,12 @@ export async function recomputeStaffMonth(db: Db, staffId: string, month: string
       acceptedByName: acc?.acceptedByName ?? "",
       acceptedAt: acc?.acceptedAt ?? null,
       acceptedHours: acc?.actualHours ?? null,
+      recordShiftId: m.recordId ?? null,
+      editHours: was?.editHours ?? null,
+      editRate: was?.editRate ?? null,
+      editNote: was?.editNote ?? "",
+      editedByName: was?.editedByName ?? "",
+      editedAt: was?.editedAt ?? null,
       payRate: pay.rate,
       payHours: pay.hours,
       payAmount: pay.amount,
@@ -1413,6 +1438,17 @@ export function toTimesheetSheet(x: SheetWithStaff, rows: readonly RowRec[]): Ti
     payAmount: r.payAmount,
     result: asResult(r.result),
     ...(r.note ? { note: r.note } : {}),
+    ...(r.editHours !== null && r.editedAt
+      ? {
+          edited: {
+            hours: r.editHours,
+            rate: r.editRate ?? 0,
+            note: r.editNote,
+            by: r.editedByName,
+            at: r.editedAt.toISOString(),
+          },
+        }
+      : {}),
     ...(r.acceptedAt
       ? {
           accepted: {

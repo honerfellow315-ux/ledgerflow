@@ -46,6 +46,17 @@ import {
   toTimesheetSheet,
   type SheetWithStaff,
 } from "../server/timesheetCheck";
+import {
+  addStaffPayment,
+  deleteStaffPayment,
+  editRow,
+  getAccountDetails,
+  getStaffMonthPay,
+  PAYMENT_METHODS,
+  saveAccountDetails,
+  type AccountDetails,
+  type StaffMonthPay,
+} from "../server/timesheetEdit";
 import { MAX_ROWS_PER_SHEET, MAX_SHEETS_PER_FILE } from "../timesheets/parsed";
 import type { SheetListPage, UploadOutcome } from "../timesheets/listTypes";
 import type { TimesheetSheet } from "../timesheets/data";
@@ -601,6 +612,175 @@ export const setTimesheetMonthLock = createServerFn({ method: "POST" })
       action: "updated",
       module: "timesheets",
       label: `Timesheet month ${data.month} ${data.locked ? "locked" : "reopened"}`,
+    });
+    return { ok: true };
+  });
+
+/* ------------------------------ editing a shift by hand ------------------------------ */
+
+/**
+ * Edit the hours and rate of ONE row. The same figures are written to our shift record, so the
+ * Salary Sheet shows them too (approvers and admins only: it changes what is paid).
+ */
+export const editTimesheetRow = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      rowId: z.string().min(1).max(100),
+      hours: z.number().finite().min(0).max(24),
+      rate: z.number().finite().min(0).max(1000),
+      note: z.string().trim().max(500).default(""),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("timesheets", "approve");
+    // The row also changes Salary Sheet figures, so the person needs that permission too.
+    await requirePermission("salary", "edit");
+    const res = await editRow(db, {
+      rowId: data.rowId,
+      hours: data.hours,
+      rate: data.rate,
+      note: data.note,
+      actor: { id: actor.id, name: actorName(actor) },
+    });
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "timesheets",
+      entityId: res.sheetId,
+      label: `Timesheet row edited — ${formatMonthLabel(res.month)}`,
+      details: `${res.label}: ${data.hours} h at £${data.rate}. ${data.note}`.trim(),
+    });
+    return { ok: true, salaryUpdated: res.salaryUpdated, salaryNote: res.salaryNote };
+  });
+
+/* ------------------------------ account details and payments ------------------------------ */
+
+export interface TimesheetPayInfo {
+  staffId: string | null;
+  month: string;
+  account: AccountDetails | null;
+  /** false = the viewer may not see bank details (Staff permission). */
+  canSeeAccount: boolean;
+  pay: StaffMonthPay | null;
+  methods: readonly string[];
+}
+
+async function sheetOwner(sheetId: string) {
+  const [sheet] = await db
+    .select({ staffId: timesheetSheets.staffId, month: timesheetSheets.month })
+    .from(timesheetSheets)
+    .where(eq(timesheetSheets.id, sheetId))
+    .limit(1);
+  if (!sheet) throw new Error("That sheet no longer exists.");
+  return sheet;
+}
+
+export const getTimesheetPayInfo = createServerFn({ method: "GET" })
+  .validator(z.object({ sheetId: z.string().min(1).max(100) }))
+  .handler(async ({ data }): Promise<TimesheetPayInfo> => {
+    const viewer = await requirePermission("timesheets", "view");
+    const sheet = await sheetOwner(data.sheetId);
+    const canSeeAccount = seesIdentity(viewer);
+    if (!sheet.staffId) {
+      return {
+        staffId: null,
+        month: sheet.month,
+        account: null,
+        canSeeAccount,
+        pay: null,
+        methods: PAYMENT_METHODS,
+      };
+    }
+    return {
+      staffId: sheet.staffId,
+      month: sheet.month,
+      account: canSeeAccount ? await getAccountDetails(db, sheet.staffId) : null,
+      canSeeAccount,
+      pay: await getStaffMonthPay(db, sheet.staffId, sheet.month),
+      methods: PAYMENT_METHODS,
+    };
+  });
+
+export const saveTimesheetAccount = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      sheetId: z.string().min(1).max(100),
+      accountHolderName: z.string().trim().max(120),
+      accountNumber: z.string().trim().max(20),
+      sortCode: z.string().trim().max(12),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("staff", "edit");
+    await requirePermission("timesheets", "edit");
+    const sheet = await sheetOwner(data.sheetId);
+    if (!sheet.staffId) throw new Error("Match this sheet to a staff member first.");
+    await saveAccountDetails(db, sheet.staffId, {
+      accountHolderName: data.accountHolderName,
+      accountNumber: data.accountNumber,
+      sortCode: data.sortCode,
+    });
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "staff",
+      entityId: sheet.staffId,
+      label: "Staff bank details updated (from Timesheet Check)",
+    });
+    return { ok: true };
+  });
+
+export const addTimesheetPayment = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      sheetId: z.string().min(1).max(100),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      amount: z.number().finite().gt(0).max(10_000_000),
+      method: z.enum(PAYMENT_METHODS),
+      reference: z.string().trim().max(120).default(""),
+      notes: z.string().trim().max(300).default(""),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("salary", "edit");
+    await requirePermission("timesheets", "view");
+    const sheet = await sheetOwner(data.sheetId);
+    if (!sheet.staffId) throw new Error("Match this sheet to a staff member first.");
+    const res = await addStaffPayment(db, {
+      staffId: sheet.staffId,
+      month: sheet.month,
+      date: data.date,
+      amount: data.amount,
+      method: data.method,
+      reference: data.reference,
+      notes: data.notes,
+    });
+    await recordActivity({
+      actor,
+      action: "created",
+      module: "salary",
+      entityId: res.id,
+      label: `Salary payment £${data.amount.toFixed(2)} ${data.method} (${formatMonthLabel(sheet.month)}) — from Timesheet Check`,
+    });
+    return { ok: true };
+  });
+
+export const deleteTimesheetPayment = createServerFn({ method: "POST" })
+  .validator(
+    z.object({ sheetId: z.string().min(1).max(100), paymentId: z.string().min(1).max(100) }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("salary", "delete");
+    await requirePermission("timesheets", "view");
+    const sheet = await sheetOwner(data.sheetId);
+    if (!sheet.staffId) throw new Error("Match this sheet to a staff member first.");
+    await deleteStaffPayment(db, sheet.staffId, data.paymentId);
+    await recordActivity({
+      actor,
+      action: "deleted",
+      module: "salary",
+      entityId: data.paymentId,
+      label: `Salary payment removed (${formatMonthLabel(sheet.month)}) — from Timesheet Check`,
     });
     return { ok: true };
   });

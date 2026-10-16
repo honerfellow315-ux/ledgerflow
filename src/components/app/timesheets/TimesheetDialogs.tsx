@@ -320,7 +320,8 @@ export function UploadTimesheetDialog({
             {
               ...WAITING,
               draft: doc.parsed,
-              message: "Check staff name and NI number before importing (date of birth is optional).",
+              message:
+                "Check staff name and NI number before importing (date of birth is optional).",
             },
           ]);
           setFinished(false);
