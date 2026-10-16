@@ -125,7 +125,7 @@ export function TableWrap({ children }: { children: ReactNode }) {
           ref={bottomRef}
           onScroll={onBottomScroll}
           aria-hidden="true"
-          className="sticky bottom-0 z-20 w-full overflow-x-auto overscroll-x-contain rounded-b-xl border-t border-border bg-surface [&::-webkit-scrollbar]:h-2.5"
+          className="sticky bottom-0 z-20 w-full overflow-x-auto overscroll-x-contain rounded-b-xl border-t border-border bg-white/[0.04] backdrop-blur [&::-webkit-scrollbar]:h-2.5"
         >
           <div style={{ width: scrollWidth, height: 1 }} />
         </div>

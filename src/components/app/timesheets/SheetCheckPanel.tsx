@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Check,
   Download,
+  Eye,
   Info,
   Pencil,
   RefreshCw,
@@ -27,6 +28,7 @@ import {
   type TimesheetSheet,
 } from "@/lib/timesheets/data";
 import { AcceptDifferenceDialog } from "@/components/app/timesheets/AcceptDifferenceDialog";
+import { ReadRowDialog } from "@/components/app/timesheets/ReadRowDialog";
 import { EditRowDialog } from "@/components/app/timesheets/EditRowDialog";
 import {
   PayPanel,
@@ -119,6 +121,7 @@ export function SheetCheckPanel({
   const [editRow, setEditRow] = useState<SheetRow | null>(null);
   /** The row whose "Accept with note" pop-up is open. */
   const [dialogRow, setDialogRow] = useState<SheetRow | null>(null);
+  const [readRow, setReadRow] = useState<SheetRow | null>(null);
   const [statedNote, setStatedNote] = useState("");
   const [statedOpen, setStatedOpen] = useState(false);
   const [sourceName, setSourceName] = useState(sheet.sourceName ?? "");
@@ -372,7 +375,7 @@ export function SheetCheckPanel({
         </Notice>
       ) : null}
 
-      <div className="sticky top-0 z-10 -mx-1 grid gap-3 bg-background/95 px-1 py-2 backdrop-blur sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="lf-glass-bar sticky top-[3.4rem] z-10 -mx-1 grid gap-3 px-1 py-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <SummaryCard label="Hours on the sheet" value={fmtHours(t.sheetHours)} />
         <SummaryCard
           label="Hours in our records"
@@ -471,7 +474,7 @@ export function SheetCheckPanel({
                   <TH align="right">Amount</TH>
                   <TH>Result</TH>
                   <TH>Note</TH>
-                  {onEditRow ? <TH>Edit</TH> : null}
+                  <TH align="right">Actions</TH>
                 </TR>
               </THead>
               <TBody>
@@ -483,7 +486,7 @@ export function SheetCheckPanel({
                       key={row.id}
                       id={`ts-row-${row.id}`}
                       className={cn(
-                        "transition-colors hover:bg-surface-muted/50",
+                        "lf-eq-row transition-colors hover:bg-surface-muted/50",
                         open
                           ? "bg-warning-soft/30"
                           : row.accepted || row.edited
@@ -550,84 +553,86 @@ export function SheetCheckPanel({
                           </div>
                         ) : null}
                       </TD>
-                      <TD className="w-[270px] max-w-[270px] whitespace-normal break-words text-xs">
-                        {row.note ? (
-                          <p className="line-clamp-3 text-muted-foreground" title={row.note}>
-                            {row.note}
-                          </p>
-                        ) : null}
+                      <TD className="w-[300px] max-w-[300px] whitespace-normal break-words text-xs">
                         {row.accepted ? (
-                          <div className="mt-1.5 space-y-1">
-                            <p className="text-foreground">
-                              <span className="font-medium">
-                                {row.accepted.actualHours !== null &&
-                                row.accepted.actualHours !== undefined
-                                  ? `Actual ${fmtHours(row.accepted.actualHours)}`
-                                  : "Accepted"}
-                              </span>
-                              <span className="text-muted-foreground"> · {row.accepted.by}</span>
-                            </p>
-                            <p
-                              className="line-clamp-2 text-muted-foreground"
-                              title={row.accepted.note}
-                            >
-                              {row.accepted.note}
-                            </p>
-                            {onAcceptRow || onUnacceptRow ? (
-                              <div className="flex gap-3">
-                                {onAcceptRow ? (
-                                  <button
-                                    type="button"
-                                    className="text-primary hover:underline"
-                                    disabled={busy}
-                                    onClick={() => setDialogRow(row)}
-                                  >
-                                    Edit
-                                  </button>
-                                ) : null}
-                                {onUnacceptRow ? (
-                                  <button
-                                    type="button"
-                                    className="text-muted-foreground hover:text-foreground hover:underline"
-                                    disabled={busy}
-                                    onClick={() => onUnacceptRow(row.id)}
-                                  >
-                                    Withdraw
-                                  </button>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
+                          <p
+                            className="lf-clamp2 text-foreground"
+                            title={row.accepted.note}
+                          >
+                            <span className="font-medium">
+                              {row.accepted.actualHours !== null &&
+                              row.accepted.actualHours !== undefined
+                                ? `Actual ${fmtHours(row.accepted.actualHours)}`
+                                : "Accepted"}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {row.accepted.by} · {row.accepted.note}
+                            </span>
+                          </p>
                         ) : row.edited ? (
-                          <p className="mt-1.5 text-foreground">
+                          <p className="lf-clamp2 text-foreground" title={row.edited.note ?? ""}>
                             <span className="font-medium">
                               Edited: {fmtHours(row.edited.hours)} × {formatMoney(row.edited.rate)}
                             </span>
-                            <span className="text-muted-foreground"> · {row.edited.by}</span>
-                            {row.edited.note ? (
-                              <span
-                                className="line-clamp-2 block text-muted-foreground"
-                                title={row.edited.note}
-                              >
-                                {row.edited.note}
-                              </span>
-                            ) : null}
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {row.edited.by}
+                              {row.edited.note ? ` · ${row.edited.note}` : ""}
+                            </span>
                           </p>
-                        ) : open && onAcceptRow ? (
+                        ) : row.note ? (
+                          <p className="lf-clamp2 text-muted-foreground" title={row.note}>
+                            {row.note}
+                          </p>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TD>
+                      <TD align="right" className="w-[1%] whitespace-nowrap">
+                        <div className="flex flex-nowrap items-center justify-end gap-1.5">
                           <Button
                             size="sm"
                             variant="outline"
-                            className="mt-2 h-7 border-primary/40 text-primary hover:bg-primary/10"
-                            disabled={busy}
-                            onClick={() => setDialogRow(row)}
+                            className="h-7"
+                            onClick={() => setReadRow(row)}
                           >
-                            Accept with note
+                            <Eye className="size-3.5" /> Read
                           </Button>
-                        ) : null}
-                      </TD>
-                      {onEditRow ? (
-                        <TD>
-                          {row.note?.startsWith("Counted once") ? null : (
+                          {row.accepted && onAcceptRow ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7"
+                              disabled={busy}
+                              onClick={() => setDialogRow(row)}
+                            >
+                              Edit note
+                            </Button>
+                          ) : null}
+                          {row.accepted && onUnacceptRow ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-muted-foreground"
+                              disabled={busy}
+                              onClick={() => onUnacceptRow(row.id)}
+                            >
+                              Withdraw
+                            </Button>
+                          ) : null}
+                          {!row.accepted && !row.edited && open && onAcceptRow ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 border-primary/40 text-primary hover:bg-primary/10"
+                              disabled={busy}
+                              onClick={() => setDialogRow(row)}
+                            >
+                              Accept with note
+                            </Button>
+                          ) : null}
+                          {onEditRow && !row.note?.startsWith("Counted once") ? (
                             <Button
                               size="sm"
                               variant="outline"
@@ -637,9 +642,9 @@ export function SheetCheckPanel({
                             >
                               <Pencil className="size-3.5" /> Edit
                             </Button>
-                          )}
-                        </TD>
-                      ) : null}
+                          ) : null}
+                        </div>
+                      </TD>
                     </TR>
                   );
                 })}
@@ -677,6 +682,7 @@ export function SheetCheckPanel({
           <Download className="size-4" /> Download receipt
         </Button>
       </div>
+      <ReadRowDialog row={readRow} onClose={() => setReadRow(null)} />
       {onEditRow ? (
         <EditRowDialog
           row={editRow}

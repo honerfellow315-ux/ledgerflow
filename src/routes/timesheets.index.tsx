@@ -838,7 +838,7 @@ function MonthChecklist({
   return (
     <ol
       aria-label="Steps for this month"
-      className="flex flex-wrap gap-x-6 gap-y-2 rounded-lg border border-border bg-card px-4 py-3 text-sm"
+      className="flex flex-wrap gap-x-6 gap-y-2 rounded-lg border border-border bg-white/[0.04] px-4 py-3 text-sm"
     >
       {steps.map((step) => (
         <li key={step.label} className="flex items-center gap-2">

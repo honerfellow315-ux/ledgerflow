@@ -1967,3 +1967,230 @@ div.min-h-screen.bg-background:has(> aside.sidebar-shell) {
     .lf-main .num { overflow-wrap: anywhere; }
   }
 }
+
+
+/* ==========================================================================
+   Glass polish (UI only) — one place that lifts every route at once.
+   Unlayered on purpose: it wins over Tailwind utility classes (which live in
+   @layer utilities) without touching each component.
+   ========================================================================== */
+
+:root {
+  /* translucent instead of solid, so nothing paints a dark slab behind glass */
+  --surface-muted: oklch(0.34 0.04 195 / 0.38);
+  --popover: oklch(0.21 0.03 195 / 0.88);
+}
+
+/* ---- Header: no tinted band, so no colour seam between sidebar and search ---- */
+.lf-header {
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  isolation: isolate;
+}
+
+.lf-header::before,
+.lf-glass-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 -0.6rem;
+  z-index: -1;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+
+.lf-glass-bar {
+  isolation: isolate;
+}
+
+/* ---- Sidebar expand / collapse button: clear arrow + tooltip ---- */
+.lf-toggle {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-color: oklch(0.74 0.15 170 / 0.45);
+  background: oklch(0.74 0.15 170 / 0.18);
+  box-shadow: 0 0 0 0 oklch(0.74 0.15 170 / 0);
+}
+
+.lf-toggle:hover {
+  box-shadow: 0 0 0 4px oklch(0.74 0.15 170 / 0.16);
+}
+
+.lf-toggle svg {
+  width: 1rem;
+  height: 1rem;
+  transform: rotate(90deg); /* expanded: arrow points left = "collapse" */
+}
+
+/* ---- Tables: glass header, no dark slab ---- */
+table thead {
+  background-color: oklch(1 0 0 / 0.05);
+}
+
+table thead th {
+  border-bottom: 1px solid oklch(1 0 0 / 0.1);
+  color: oklch(0.82 0.03 190);
+  letter-spacing: 0.06em;
+}
+
+table thead th:first-child {
+  border-top-left-radius: 0;
+}
+
+/* sticky bits must stay solid or text shows through while scrolling sideways */
+thead.sticky,
+th.sticky,
+td.sticky {
+  background-color: oklch(0.22 0.03 195 / 0.97);
+}
+
+tbody tr {
+  border-color: oklch(1 0 0 / 0.07);
+}
+
+/* ---- Fields: glass instead of solid dark boxes ---- */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]),
+textarea,
+select,
+button[role="combobox"] {
+  background-color: oklch(1 0 0 / 0.055);
+  border-color: oklch(1 0 0 / 0.13);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):hover,
+textarea:hover,
+select:hover,
+button[role="combobox"]:hover {
+  border-color: oklch(1 0 0 / 0.24);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button[role="combobox"]:focus-visible,
+button[role="combobox"][data-state="open"] {
+  outline: none;
+  border-color: oklch(0.76 0.14 170 / 0.7);
+  background-color: oklch(1 0 0 / 0.085);
+  box-shadow: 0 0 0 3px oklch(0.76 0.14 170 / 0.18);
+}
+
+select option {
+  background-color: oklch(0.2 0.03 195);
+  color: var(--foreground);
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+  filter: invert(0.85);
+}
+
+/* ---- Dialogs, popovers, menus: frosted glass ---- */
+[role="dialog"],
+[role="alertdialog"] {
+  background-color: oklch(0.2 0.03 195 / 0.8);
+  background-image: linear-gradient(150deg, oklch(1 0 0 / 0.08) 0%, oklch(1 0 0 / 0.015) 60%);
+  border: 1px solid oklch(1 0 0 / 0.13);
+  border-radius: 1.25rem;
+  box-shadow:
+    0 30px 80px -20px oklch(0 0 0 / 0.75),
+    inset 0 1px 0 oklch(1 0 0 / 0.08);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  backdrop-filter: blur(28px) saturate(150%);
+}
+
+[role="menu"],
+[role="listbox"] {
+  background-color: oklch(0.21 0.03 195 / 0.86);
+  background-image: linear-gradient(150deg, oklch(1 0 0 / 0.07) 0%, oklch(1 0 0 / 0.01) 70%);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-menu);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+
+[role="menuitem"],
+[role="option"] {
+  border-radius: 0.6rem;
+}
+
+/* ---- Equal-size timesheet rows (Read mode shows the full text) ---- */
+.lf-eq-row {
+  height: 4.5rem;
+}
+
+.lf-eq-row > td {
+  padding-block: 0.4rem;
+  vertical-align: middle;
+}
+
+.lf-clamp2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+  max-height: 2.7em;
+}
+
+.lf-read-field {
+  border-radius: 0.8rem;
+  border: 1px solid oklch(1 0 0 / 0.09);
+  background: oklch(1 0 0 / 0.04);
+  padding: 0.55rem 0.75rem;
+}
+
+.lf-read-field dt {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.lf-read-field dd {
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Activity log ---- */
+.lf-filterbar {
+  background: oklch(1 0 0 / 0.025);
+}
+
+.lf-log td {
+  padding-block: 0.75rem;
+}
+
+.lf-log tbody tr:hover {
+  background-color: oklch(1 0 0 / 0.04);
+}
+
+/* ---- Cards lift ---- */
+.panel {
+  box-shadow:
+    0 14px 40px -18px oklch(0 0 0 / 0.7),
+    inset 0 1px 0 oklch(1 0 0 / 0.07);
+}
+
+@media (min-width: 1024px) {
+  .lf-shell[data-collapsed="true"] .lf-toggle svg {
+    transform: rotate(-90deg); /* collapsed: arrow points right = "expand" */
+  }
+}

@@ -223,7 +223,7 @@ function ActivityLogPageContent() {
           }
         />
 
-        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+        <div className="lf-filterbar flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -310,7 +310,7 @@ function ActivityLogPageContent() {
           />
         ) : (
           <TableWrap>
-            <Table>
+            <Table className="lf-log">
               <THead>
                 <TR>
                   <TH>Time</TH>

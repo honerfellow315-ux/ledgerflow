@@ -213,6 +213,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={toggleCollapsed}
               aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
               aria-expanded={!collapsed}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               className="lf-toggle"
             >
               <ChevronDown />
