@@ -95,6 +95,10 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
   const nameCount = new Map<string, number>();
   const byName = new Map<string, string>();
   const idsByName = new Map<string, string[]>(); // every staff record with that name
+  // Every staff record behind an ID / NI, so a duplicate can be named in the error.
+  const recsById = new Map<string, string[]>();
+  const recsByNi = new Map<string, string[]>();
+  const recInfo = new Map<string, string>();
   const have = new Map<string, { sid: string; ni: string }>();
   const register = (s: {
     id: string;
@@ -105,6 +109,14 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
     name: string;
   }) => {
     const sid = staffIdFor(s, data.source);
+    recInfo.set(
+      s.id,
+      `${s.name || "(no name)"} [${[s.rssId && `RSS ${s.rssId}`, s.essId && `ESS ${s.essId}`, s.ni && `NI ${s.ni}`]
+        .filter(Boolean)
+        .join(", ") || "no ID/NI"}]`,
+    );
+    if (sid) recsById.set(sid, [...(recsById.get(sid) ?? []), s.id]);
+    if (s.ni) recsByNi.set(normNi(s.ni), [...(recsByNi.get(normNi(s.ni)) ?? []), s.id]);
     if (sid) {
       if (byId.has(sid) && byId.get(sid) !== s.id) ambiguousIds.add(sid);
       byId.set(sid, s.id);
@@ -128,6 +140,31 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
   let matched = 0;
   let created = 0;
   let unmatched = 0;
+
+  // Report EVERY duplicated staff record this file touches in one go, naming the
+  // records, instead of stopping at the first one and making you retry.
+  {
+    const found = new Map<string, string>();
+    for (const r of data.rows) {
+      const ni = normNi(r.ni);
+      if (r.employeeId && ambiguousIds.has(r.employeeId))
+        found.set(
+          `ID ${r.employeeId}`,
+          (recsById.get(r.employeeId) ?? []).map((id) => recInfo.get(id)).join("  vs  "),
+        );
+      if (ni && ambiguousNis.has(ni))
+        found.set(
+          `NI ${formatNi(r.ni)}`,
+          (recsByNi.get(ni) ?? []).map((id) => recInfo.get(id)).join("  vs  "),
+        );
+    }
+    if (found.size > 0) {
+      const lines = [...found].slice(0, 8).map(([k, v]) => `${k}: ${v}`);
+      throw new Error(
+        `${found.size} staff ID/NI in this file belong to more than one Staff record. In Staff, delete or fix the extra record for each, then import again. ${lines.join(" | ")}${found.size > 8 ? ` | …and ${found.size - 8} more` : ""}`,
+      );
+    }
+  }
 
   const shiftValues = data.rows.map((r, rowIndex) => {
     // Say WHICH row and WHO, so one bad row can be found and fixed in the file.
