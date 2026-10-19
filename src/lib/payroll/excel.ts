@@ -135,6 +135,11 @@ function plain(v: unknown): Cell {
 export interface SheetMatrix {
   name: string;
   matrix: Matrix;
+  /** Same grid, but cells covered by a merged range (other than its top-left
+   * cell) are left empty. exceljs hands back the top-left value for every
+   * covered cell, which turns one merged shift into many copies. Shift
+   * imports read this grid. Only set for .xlsx files. */
+  unmerged?: Matrix;
 }
 
 export async function readFileToSheets(file: File): Promise<{ sheets: SheetMatrix[] }> {
@@ -152,15 +157,24 @@ export async function readFileToSheets(file: File): Promise<{ sheets: SheetMatri
   const sheets: SheetMatrix[] = [];
   wb.eachSheet((ws) => {
     const matrix: Matrix = [];
+    const unmerged: Matrix = [];
     const cols = ws.columnCount;
     ws.eachRow({ includeEmpty: true }, (row, r) => {
       const cells: Cell[] = [];
-      for (let c = 1; c <= cols; c++) cells.push(plain(row.getCell(c).value));
+      const bare: Cell[] = [];
+      for (let c = 1; c <= cols; c++) {
+        const cell = row.getCell(c);
+        const v = plain(cell.value);
+        cells.push(v);
+        bare.push(cell.type === ExcelJS.ValueType.Merge ? null : v);
+      }
       matrix[r - 1] = cells;
+      unmerged[r - 1] = bare;
     });
     // eachRow skips rows beyond the last used one but leaves holes before it
     for (let i = 0; i < matrix.length; i++) if (!matrix[i]) matrix[i] = [];
-    sheets.push({ name: ws.name, matrix });
+    for (let i = 0; i < unmerged.length; i++) if (!unmerged[i]) unmerged[i] = [];
+    sheets.push({ name: ws.name, matrix, unmerged });
   });
   return { sheets };
 }
@@ -427,7 +441,7 @@ export function parseShiftWorkbook(
   const pick = (list: readonly SheetMatrix[]): ShiftParse | null => {
     let best: ShiftParse | null = null;
     for (const s of list) {
-      const p = parseShiftExport(s.matrix);
+      const p = parseShiftExport(s.unmerged ?? s.matrix);
       p.sheetName = s.name;
       if (p.rows.length > (best?.rows.length ?? -1)) best = p;
     }

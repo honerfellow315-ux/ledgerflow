@@ -94,6 +94,7 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
   const byNi = new Map<string, string>();
   const nameCount = new Map<string, number>();
   const byName = new Map<string, string>();
+  const idsByName = new Map<string, string[]>(); // every staff record with that name
   const have = new Map<string, { sid: string; ni: string }>();
   const register = (s: {
     id: string;
@@ -116,6 +117,7 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
     const n = normName(s.name);
     nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
     byName.set(n, s.id);
+    idsByName.set(n, [...(idsByName.get(n) ?? []), s.id]);
     have.set(s.id, { sid, ni: s.ni });
   };
   staffRows.forEach(register);
@@ -135,6 +137,7 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
       throw new Error(
         `${where}: this staff ID or NI belongs to more than one staff record. Fix the duplicate in Staff, then import again.`,
       );
+    let nameIsAmbiguous = false;
     if (r.employeeId && byId.has(r.employeeId)) staffId = byId.get(r.employeeId) ?? null;
     else if (r.ni && byNi.has(normNi(r.ni))) staffId = byNi.get(normNi(r.ni)) ?? null;
     else if (r.employeeName && nameCount.get(normName(r.employeeName)) === 1) {
@@ -143,6 +146,21 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
       const rowNi = normNi(r.ni);
       // Same name but a DIFFERENT NI number is a different person — never merge them.
       if (cand && !(candNi && rowNi && candNi !== rowNi)) staffId = cand;
+    } else if (r.employeeName && (nameCount.get(normName(r.employeeName)) ?? 0) > 1) {
+      // Several staff share this name. Drop the ones that are provably someone
+      // else (different NI, or a different ID for this company). One left =
+      // that's them; none left = a new person; several left = can't tell.
+      const rowNi = normNi(r.ni);
+      const left = (idsByName.get(normName(r.employeeName)) ?? []).filter((sid) => {
+        const h = have.get(sid);
+        if (!h) return false;
+        const hNi = normNi(h.ni);
+        if (hNi && rowNi && hNi !== rowNi) return false;
+        if (h.sid && r.employeeId && h.sid !== r.employeeId) return false;
+        return true;
+      });
+      if (left.length === 1) staffId = left[0] ?? null;
+      else if (left.length > 1) nameIsAmbiguous = true;
     }
 
     if (staffId) {
@@ -156,7 +174,7 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
           `${where}: the staff ID and the NI point to different people (Staff has "${found.sid || "no ID"}" / "${found.ni || "no NI"}"). Correct the ID or NI in the file or in Staff.`,
         );
     }
-    if (!staffId && nameCount.get(normName(r.employeeName))! > 1)
+    if (!staffId && nameIsAmbiguous)
       throw new Error(
         `${where}: more than one staff record has this name. Add this person's ID or NI to the file (or to Staff) so they can be told apart.`,
       );
