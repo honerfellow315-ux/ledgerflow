@@ -32,6 +32,7 @@ const blank = {
   invoiceId: NO_INVOICE,
   date: "",
   reason: "",
+  description: "",
   amountExVat: "",
   vatIncluded: true,
   vatRate: "20",
@@ -70,6 +71,7 @@ export function CreditNoteDialog({
         invoiceId: note.invoiceId ?? NO_INVOICE,
         date: note.date,
         reason: note.reason,
+        description: note.description ?? "",
         amountExVat: String(note.amountExVat),
         vatIncluded: note.vatIncluded,
         vatRate: String(note.vatRate),
@@ -161,6 +163,7 @@ export function CreditNoteDialog({
       invoiceId: form.invoiceId === NO_INVOICE ? "" : form.invoiceId,
       date: form.date,
       reason: form.reason.trim(),
+      description: form.description.trim(),
       amountExVat: Number(form.amountExVat),
       vatIncluded: form.vatIncluded,
       vatRate: form.vatIncluded ? Number(form.vatRate) || 0 : 0,
@@ -260,6 +263,15 @@ export function CreditNoteDialog({
               value={form.reason}
               onChange={(e) => set("reason", e.target.value)}
               placeholder="Overcharge correction"
+            />
+          </Field>
+          <Field label="Description" htmlFor="cn-description" className="sm:col-span-2">
+            <Textarea
+              id="cn-description"
+              rows={2}
+              value={form.description}
+              onChange={(e) => set("description", e.target.value)}
+              placeholder="Optional — more detail about this credit"
             />
           </Field>
           <Field label="Amount ex VAT (£)" htmlFor="cn-amount" error={errors.amountExVat}>

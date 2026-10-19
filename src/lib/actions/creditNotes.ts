@@ -15,6 +15,11 @@ const creditNoteInput = z.object({
   invoiceId: z.string().optional(),
   date: z.string().min(1),
   reason: z.string().default(""),
+  // Optional; "" clears it (stored as NULL).
+  description: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v.trim() || null)),
   amountExVat: money,
   vatIncluded: z.boolean().default(false),
   vatRate: vatPercent.default(20),

@@ -366,6 +366,7 @@ export const creditNotes = pgTable("credit_notes", {
   invoiceId: text("invoice_id").references(() => invoices.id, { onDelete: "set null" }),
   date: text("date").notNull(),
   reason: text("reason").notNull().default(""),
+  description: text("description"),
   amountExVat: money("amount_ex_vat").notNull(),
   vatIncluded: boolean("vat_included").notNull().default(false),
   vatRate: numeric("vat_rate", { precision: 5, scale: 2, mode: "number" }).notNull().default(20),

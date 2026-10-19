@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Clock, FileText, Pencil, Plus, Search, Trash2 } from "@/lib/icons";
+import { Clock, Download, FileText, Pencil, Plus, Search, Trash2 } from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
 import { usePermissions } from "@/lib/ledger/permissions";
@@ -21,6 +21,7 @@ import { StatusBadge } from "@/components/app/StatusBadge";
 import { HoursDialog } from "@/components/app/HoursDialog";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { SummaryCard } from "@/components/app/SummaryCard";
+import { downloadXlsx } from "@/lib/ledger/excel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -53,6 +54,11 @@ export const Route = createFileRoute("/hours/")({
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
+/** An entry covers a whole month, so it matches a date range when that month
+ * overlaps it. (yyyy-mm-31 is only used for string comparison.) */
+const monthOverlaps = (month: string, from: string, to: string) =>
+  (from ? `${month}-31` >= from : true) && (to ? `${month}-01` <= to : true);
+
 function HoursPage() {
   return (
     <RequireView module="hours">
@@ -67,8 +73,8 @@ function HoursPageContent() {
   const [query, setQuery] = useState("");
   const [clientId, setClientId] = useState("all");
   const [companyId, setCompanyId] = useState("all");
-  const [fromMonth, setFromMonth] = useState("");
-  const [toMonth, setToMonth] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<HoursEntry | null>(null);
   const [toDelete, setToDelete] = useState<HoursEntry | null>(null);
@@ -90,8 +96,7 @@ function HoursPageContent() {
       .filter((h) =>
         companyId === "all" ? true : (clientById.get(h.clientId)?.companyId ?? null) === companyId,
       )
-      .filter((h) => (fromMonth ? h.month >= fromMonth : true))
-      .filter((h) => (toMonth ? h.month <= toMonth : true))
+      .filter((h) => monthOverlaps(h.month, fromDate, toDate))
       .filter((h) => {
         if (!q) return true;
         const client = clientById.get(h.clientId);
@@ -125,8 +130,8 @@ function HoursPageContent() {
     query,
     clientId,
     companyId,
-    fromMonth,
-    toMonth,
+    fromDate,
+    toDate,
   ]);
 
   const totals = useMemo(() => {
@@ -140,7 +145,46 @@ function HoursPageContent() {
     };
   }, [data.hours, rows]);
 
-  const filtered = query || clientId !== "all" || companyId !== "all" || fromMonth || toMonth;
+  const filtered = query || clientId !== "all" || companyId !== "all" || fromDate || toDate;
+
+  const exportExcel = () => {
+    downloadXlsx(
+      `hours-${new Date().toISOString().slice(0, 10)}`,
+      "Hours",
+      [
+        { header: "Month", width: 16 },
+        { header: "Client", width: 28 },
+        { header: "Company", width: 24 },
+        { header: "Total Hours", width: 13 },
+        { header: "Payroll Hours", width: 14 },
+        { header: "Mgmt Payroll Hours", width: 18 },
+        { header: "Unpaid Hours", width: 13 },
+        { header: "Remaining Hours", width: 16 },
+        { header: "Rate", width: 12, money: true },
+        { header: "Value", width: 14, money: true },
+        { header: "Hours Paid", width: 12 },
+        { header: "Remaining to Pay", width: 16 },
+        { header: "Invoice", width: 16 },
+        { header: "Notes", width: 32 },
+      ],
+      rows.map((r) => [
+        formatMonth(r.month),
+        r.clientCompany,
+        r.billingCompanyName === "—" ? "" : r.billingCompanyName,
+        r.totalHours,
+        r.payrollHours,
+        r.managementPayrollHours,
+        r.unpaidHours,
+        r.remaining,
+        r.rate,
+        r.value,
+        r.paidHours,
+        r.remainingToPay,
+        r.invoice?.number ?? "Not invoiced",
+        r.notes ?? "",
+      ]),
+    ).catch(() => toast.error("Export failed."));
+  };
 
   return (
     <div className="space-y-4">
@@ -164,17 +208,22 @@ function HoursPageContent() {
           title="Hours"
           description={`${rows.length} of ${data.hours.length} monthly entries`}
           actions={
-            can("hours", "create") ? (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditing(null);
-                  setFormOpen(true);
-                }}
-              >
-                <Plus className="size-4" /> Add Hours
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={exportExcel} disabled={rows.length === 0}>
+                <Download className="size-4" /> Export to Excel
               </Button>
-            ) : undefined
+              {can("hours", "create") ? (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditing(null);
+                    setFormOpen(true);
+                  }}
+                >
+                  <Plus className="size-4" /> Add Hours
+                </Button>
+              ) : null}
+            </div>
           }
         />
 
@@ -215,18 +264,20 @@ function HoursPageContent() {
             </SelectContent>
           </Select>
           <Input
-            type="month"
-            value={fromMonth}
-            onChange={(e) => setFromMonth(e.target.value)}
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
             className="h-8 w-40 text-[13px]"
-            aria-label="Month from"
+            aria-label="Date from"
+            title="Date from"
           />
           <Input
-            type="month"
-            value={toMonth}
-            onChange={(e) => setToMonth(e.target.value)}
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
             className="h-8 w-40 text-[13px]"
-            aria-label="Month to"
+            aria-label="Date to"
+            title="Date to"
           />
           {filtered ? (
             <Button
@@ -236,8 +287,8 @@ function HoursPageContent() {
                 setQuery("");
                 setClientId("all");
                 setCompanyId("all");
-                setFromMonth("");
-                setToMonth("");
+                setFromDate("");
+                setToDate("");
               }}
             >
               Clear

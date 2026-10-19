@@ -131,6 +131,12 @@ export function CreditNoteDocument({
                     <td>
                       {note.reason || "Credit"}
                       {invoiceNumber ? ` (against invoice ${invoiceNumber})` : ""}
+                      {note.description?.trim() ? (
+                        <>
+                          <br />
+                          {note.description.trim()}
+                        </>
+                      ) : null}
                     </td>
                     <td className="id-num">{formatMoney(note.amountExVat)}</td>
                   </tr>

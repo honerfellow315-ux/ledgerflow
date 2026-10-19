@@ -207,6 +207,8 @@ export interface CreditNote {
   invoiceId?: string;
   date: string;
   reason: string;
+  /** Optional longer description, shown under the reason. */
+  description?: string;
   amountExVat: number;
   vatIncluded: boolean;
   vatRate: number;

@@ -59,6 +59,15 @@ export const Route = createFileRoute("/subcontracting/")({
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
+/** Date filter: uses the entry's invoice date when it has one, otherwise the
+ * month it covers overlaps the range. (yyyy-mm-31 is only for string compare.) */
+const inDateRange = (s: { month: string; invoiceDate?: string | undefined }, from: string, to: string) => {
+  if (s.invoiceDate) {
+    return (from ? s.invoiceDate >= from : true) && (to ? s.invoiceDate <= to : true);
+  }
+  return (from ? `${s.month}-31` >= from : true) && (to ? `${s.month}-01` <= to : true);
+};
+
 function SubcontractingPage() {
   return (
     <RequireView module="subcontracting">
@@ -73,8 +82,8 @@ function SubcontractingPageContent() {
   const [query, setQuery] = useState("");
   const [clientId, setClientId] = useState("all");
   const [companyId, setCompanyId] = useState("all");
-  const [fromMonth, setFromMonth] = useState("");
-  const [toMonth, setToMonth] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SubcontractEntry | null>(null);
   const [toDelete, setToDelete] = useState<SubcontractEntry | null>(null);
@@ -121,8 +130,7 @@ function SubcontractingPageContent() {
     return data.subcontracts
       .filter((s) => (clientId === "all" ? true : s.clientId === clientId))
       .filter((s) => (companyId === "all" ? true : clientCompanyId.get(s.clientId) === companyId))
-      .filter((s) => (fromMonth ? s.month >= fromMonth : true))
-      .filter((s) => (toMonth ? s.month <= toMonth : true))
+      .filter((s) => inDateRange(s, fromDate, toDate))
       .filter((s) => {
         if (!q) return true;
         const client = clientById.get(s.clientId);
@@ -147,8 +155,8 @@ function SubcontractingPageContent() {
     query,
     clientId,
     companyId,
-    fromMonth,
-    toMonth,
+    fromDate,
+    toDate,
   ]);
 
   // "Company: ABC Company → Invoice #101 → Total: 1,500 → Remaining: 400" —
@@ -180,7 +188,7 @@ function SubcontractingPageContent() {
     };
   }, [data.subcontracts, rows]);
 
-  const filtered = query || clientId !== "all" || companyId !== "all" || fromMonth || toMonth;
+  const filtered = query || clientId !== "all" || companyId !== "all" || fromDate || toDate;
 
   return (
     <>
@@ -262,18 +270,20 @@ function SubcontractingPageContent() {
               </SelectContent>
             </Select>
             <Input
-              type="month"
-              value={fromMonth}
-              onChange={(e) => setFromMonth(e.target.value)}
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
               className="h-8 w-40 text-[13px]"
-              aria-label="Month from"
+              aria-label="Date from"
+              title="Date from"
             />
             <Input
-              type="month"
-              value={toMonth}
-              onChange={(e) => setToMonth(e.target.value)}
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
               className="h-8 w-40 text-[13px]"
-              aria-label="Month to"
+              aria-label="Date to"
+              title="Date to"
             />
             {filtered ? (
               <Button
@@ -283,8 +293,8 @@ function SubcontractingPageContent() {
                   setQuery("");
                   setClientId("all");
                   setCompanyId("all");
-                  setFromMonth("");
-                  setToMonth("");
+                  setFromDate("");
+                  setToDate("");
                 }}
               >
                 Clear
