@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { HardHat, Pencil, Plus, Printer, Search, Trash2 } from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
@@ -13,6 +13,7 @@ import {
   formatMonth,
   invoiceHoursSummaries,
   invoiceTracksHours,
+  remainingHours,
   remainingInvoiceHours,
   round2,
   subcontractValue,
@@ -61,6 +62,9 @@ const thisMonth = () => new Date().toISOString().slice(0, 7);
 
 /** Date filter: uses the entry's invoice date when it has one, otherwise the
  * month it covers overlaps the range. (yyyy-mm-31 is only for string compare.) */
+const monthInRange = (month: string, from: string, to: string) =>
+  (from ? `${month}-31` >= from : true) && (to ? `${month}-01` <= to : true);
+
 const inDateRange = (s: { month: string; invoiceDate?: string | undefined }, from: string, to: string) => {
   if (s.invoiceDate) {
     return (from ? s.invoiceDate >= from : true) && (to ? s.invoiceDate <= to : true);
@@ -84,6 +88,7 @@ function SubcontractingPageContent() {
   const [companyId, setCompanyId] = useState("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [openCompany, setOpenCompany] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SubcontractEntry | null>(null);
   const [toDelete, setToDelete] = useState<SubcontractEntry | null>(null);
@@ -176,6 +181,60 @@ function SubcontractingPageContent() {
       );
   }, [data.invoices, data.subcontracts, clientById, clientCompanyId, clientId, companyId]);
 
+  // Company-wise remaining hours: the Hours page's "Remaining Hours" summed
+  // over every client of the company, minus hours already proceeded here.
+  const companyHours = useMemo(() => {
+    type ClientRow = { clientId: string; name: string; remaining: number; proceeded: number };
+    const groups = new Map<string, { id: string; name: string; clients: Map<string, ClientRow> }>();
+    const rowFor = (clientId: string): ClientRow | null => {
+      const client = clientById.get(clientId);
+      if (!client) return null;
+      const gid = client.companyId ?? "none";
+      let g = groups.get(gid);
+      if (!g) {
+        g = {
+          id: gid,
+          name: (client.companyId && data.companies.find((c) => c.id === client.companyId)?.name) || "No company",
+          clients: new Map(),
+        };
+        groups.set(gid, g);
+      }
+      let r = g.clients.get(clientId);
+      if (!r) {
+        r = { clientId, name: client.company, remaining: 0, proceeded: 0 };
+        g.clients.set(clientId, r);
+      }
+      return r;
+    };
+    for (const h of data.hours) {
+      if (!monthInRange(h.month, fromDate, toDate)) continue;
+      const r = rowFor(h.clientId);
+      if (r) r.remaining += remainingHours(h);
+    }
+    for (const sc of data.subcontracts) {
+      if (!monthInRange(sc.month, fromDate, toDate)) continue;
+      const r = rowFor(sc.clientId);
+      if (r) r.proceeded += sc.hoursProceed;
+    }
+    return [...groups.values()]
+      .map((g) => {
+        const clients = [...g.clients.values()]
+          .filter((c) => c.remaining !== 0 || c.proceeded !== 0)
+          .map((c) => ({
+            ...c,
+            remaining: round2(c.remaining),
+            proceeded: round2(c.proceeded),
+            available: round2(c.remaining - c.proceeded),
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        const remaining = round2(clients.reduce((x, c) => x + c.remaining, 0));
+        const proceeded = round2(clients.reduce((x, c) => x + c.proceeded, 0));
+        return { id: g.id, name: g.name, clients, remaining, proceeded, available: round2(remaining - proceeded) };
+      })
+      .filter((g) => g.clients.length > 0)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [data.hours, data.subcontracts, data.companies, clientById, fromDate, toDate]);
+
   const totals = useMemo(() => {
     const current = thisMonth();
     return {
@@ -202,6 +261,86 @@ function SubcontractingPageContent() {
           />
           <SummaryCard label="Total Value" value={formatMoney(totals.value)} tone="success" />
         </div>
+
+        {companyHours.length > 0 ? (
+          <Panel>
+            <PanelHeader
+              title="Remaining Hours by Company"
+              description="Remaining hours from the Hours page, added up per company, less hours already proceeded below."
+            />
+            <TableWrap>
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>Company</TH>
+                    <TH align="right">Clients</TH>
+                    <TH align="right">Remaining Hours</TH>
+                    <TH align="right">Already Proceeded</TH>
+                    <TH align="right">Available to Invoice</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {companyHours.map((g) => (
+                    <Fragment key={g.id}>
+                      <TR
+                        className="cursor-pointer"
+                        onClick={() => setOpenCompany(openCompany === g.id ? null : g.id)}
+                      >
+                        <TD className="font-medium">
+                          {openCompany === g.id ? "▾" : "▸"} {g.name}
+                        </TD>
+                        <TD mono align="right">
+                          {g.clients.length}
+                        </TD>
+                        <TD mono align="right">
+                          {formatHours(g.remaining)}
+                        </TD>
+                        <TD mono align="right">
+                          {formatHours(g.proceeded)}
+                        </TD>
+                        <TD mono align="right" className="font-medium">
+                          {formatHours(g.available)}
+                        </TD>
+                      </TR>
+                      {openCompany === g.id
+                        ? g.clients.map((c) => (
+                            <TR key={c.clientId} className="text-muted-foreground">
+                              <TD className="pl-8">{c.name}</TD>
+                              <TD />
+                              <TD mono align="right">
+                                {formatHours(c.remaining)}
+                              </TD>
+                              <TD mono align="right">
+                                {formatHours(c.proceeded)}
+                              </TD>
+                              <TD mono align="right">
+                                {formatHours(c.available)}
+                              </TD>
+                            </TR>
+                          ))
+                        : null}
+                    </Fragment>
+                  ))}
+                  <TR>
+                    <TD className="font-semibold">Total</TD>
+                    <TD mono align="right" className="font-semibold">
+                      {companyHours.reduce((x, g) => x + g.clients.length, 0)}
+                    </TD>
+                    <TD mono align="right" className="font-semibold">
+                      {formatHours(round2(companyHours.reduce((x, g) => x + g.remaining, 0)))}
+                    </TD>
+                    <TD mono align="right" className="font-semibold">
+                      {formatHours(round2(companyHours.reduce((x, g) => x + g.proceeded, 0)))}
+                    </TD>
+                    <TD mono align="right" className="font-semibold">
+                      {formatHours(round2(companyHours.reduce((x, g) => x + g.available, 0)))}
+                    </TD>
+                  </TR>
+                </TBody>
+              </Table>
+            </TableWrap>
+          </Panel>
+        ) : null}
 
         <Panel>
           <PanelHeader
