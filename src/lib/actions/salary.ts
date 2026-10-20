@@ -19,6 +19,13 @@ import { uid } from "../server/id";
 import { recordActivity, changedFieldsSummary } from "../server/activity";
 import { saveAccountDetails } from "../server/timesheetEdit";
 import { importShiftRows } from "../server/shiftImport";
+import {
+  lastBackups,
+  previewExisting,
+  setBackupAfterCount,
+  snapshotBeforeImport,
+  undoLastImport,
+} from "../server/shiftImportSafety";
 import { recomputeFromShifts } from "../server/salaryShifts";
 import { buildImportChecks } from "../server/importChecks";
 import { buildRows, formatMonthLabel, formatNi, normName, normNi, round2 } from "../payroll/calc";
@@ -1272,7 +1279,11 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
       periodId: z.string(),
       source: z.string().trim().min(1).max(20),
       rows: z.array(shiftRow).min(1).max(1500),
-      reset: z.boolean(),
+      /** "add" never deletes anything. "replace" wipes this company's shifts for the month first. */
+      mode: z.enum(["add", "replace"]),
+      /** Replace only runs when the user typed the word REPLACE in the dialog. */
+      replaceConfirmed: z.boolean().default(false),
+      fileName: z.string().max(200).default(""),
       createMissingStaff: z.boolean(),
       ...uploadPart,
     }),
@@ -1280,41 +1291,126 @@ export const importShiftsChunk = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const actor = await requirePermission("salary", "edit");
     if (data.createMissingStaff) await requirePermission("staff", "create");
+    // Replace deletes a whole month of a company's shifts: admins only.
+    if (data.mode === "replace" && actor.role !== "admin")
+      throw new Error("Only an admin can use Replace. Use Add instead.");
     await assertShiftCompany(data.source);
     return withTransaction(async () => {
       await lockImportPeriod(data.periodId);
       const staged = await stageImport(
         actor.id,
         "shifts",
-        `${data.periodId}:${data.source}:${data.createMissingStaff}`,
+        `${data.periodId}:${data.source}:${data.createMissingStaff}:${data.mode}`,
         data,
         data.rows,
       );
-      if (staged.result)
-        return staged.result as {
-          received: number;
-          matched: number;
-          created: number;
-          unmatched: number;
-          complete: boolean;
-        };
+      type Done = {
+        received: number;
+        matched: number;
+        created: number;
+        unmatched: number;
+        duplicates: number;
+        removed: number;
+        added: number;
+        complete: boolean;
+      };
+      if (staged.result) return staged.result as Done;
       if (!staged.complete)
         return {
           received: data.rows.length,
           matched: 0,
           created: 0,
           unmatched: 0,
+          duplicates: 0,
+          removed: 0,
+          added: 0,
           complete: false,
-        };
+        } satisfies Done;
+
+      const before = await previewExisting(db, data.periodId, data.source);
+      if (data.mode === "replace" && before.shifts > 0 && !data.replaceConfirmed)
+        throw new Error(
+          `Replace needs confirmation: ${before.shifts} existing ${data.source} shifts would be deleted. Type REPLACE in the import box to confirm, or choose Add.`,
+        );
+      // Everything this import is about to change is saved first, so "Undo last import" works.
+      const backupId = await snapshotBeforeImport(db, {
+        periodId: data.periodId,
+        source: data.source,
+        mode: data.mode,
+        actorName: actor.displayName || actor.username,
+        fileName: data.fileName,
+      });
       const result = await importShiftRows(db, {
-        ...data,
-        reset: true,
+        periodId: data.periodId,
+        source: data.source,
+        createMissingStaff: data.createMissingStaff,
+        reset: data.mode === "replace",
         rows: z.array(shiftRow).parse(staged.rows),
       });
       await recomputeFromShifts(db, data.periodId);
-      const done = { ...result, complete: true };
+      const after = await previewExisting(db, data.periodId, data.source);
+      await setBackupAfterCount(db, backupId, after.shifts);
+      const added = Math.max(0, result.received - result.duplicates);
+      const removed = data.mode === "replace" ? before.shifts : 0;
+      const done: Done = { ...result, removed, added, complete: true };
+      const period = await getPeriodOrThrow(data.periodId);
+      await recordActivity({
+        actor,
+        action: "updated",
+        module: "salary",
+        entityId: period.id,
+        label: `Salary period — ${formatMonthLabel(period.month)}`,
+        details:
+          data.mode === "replace"
+            ? `REPLACED ${data.source} shifts: ${removed} deleted, ${added} added from ${data.fileName || "file"} (now ${after.shifts} ${data.source} shifts, ${after.hours}h). ${result.unmatched} unmatched`
+            : `ADDED ${data.source} shifts: ${added} added, ${result.duplicates} skipped as already present, from ${data.fileName || "file"} (now ${after.shifts} ${data.source} shifts, ${after.hours}h). ${result.unmatched} unmatched`,
+      });
       await finishImport(data.uploadId, done);
       return done;
+    });
+  });
+
+/** What is already in the sheet for this month + company (shown before importing). */
+export const previewShiftImport = createServerFn({ method: "POST" })
+  .validator(z.object({ periodId: z.string(), source: z.string().trim().min(1).max(20) }))
+  .handler(async ({ data }) => {
+    const user = await requirePermission("salary", "view");
+    const existing = await previewExisting(db, data.periodId, data.source);
+    return { existing, isAdmin: user.role === "admin" };
+  });
+
+/** The newest import per company that can still be undone. */
+export const listLastImports = createServerFn({ method: "POST" })
+  .validator(z.object({ periodId: z.string() }))
+  .handler(async ({ data }) => {
+    await requirePermission("salary", "view");
+    return lastBackups(db, data.periodId);
+  });
+
+/** Puts the sheet back exactly as it was before the last import of this company. */
+export const undoShiftImport = createServerFn({ method: "POST" })
+  .validator(z.object({ periodId: z.string(), source: z.string().trim().min(1).max(20) }))
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("salary", "edit");
+    return withTransaction(async () => {
+      await lockImportPeriod(data.periodId);
+      const locked = await db.execute(sql`
+        SELECT l.month FROM timesheet_month_locks l
+        JOIN salary_periods p ON p.month = l.month
+        WHERE l.locked AND p.id = ${data.periodId} LIMIT 1`);
+      if (locked.rows[0])
+        throw new Error("This month's timesheet check is locked. Ask an admin to reopen it first.");
+      const r = await undoLastImport(db, data.periodId, data.source);
+      const period = await getPeriodOrThrow(data.periodId);
+      await recordActivity({
+        actor,
+        action: "updated",
+        module: "salary",
+        entityId: period.id,
+        label: `Salary period — ${formatMonthLabel(period.month)}`,
+        details: `UNDO of ${data.source} import from ${r.createdAt}: ${r.restoredShifts} ${data.source} shifts restored`,
+      });
+      return r;
     });
   });
 
@@ -1328,8 +1424,8 @@ export const recomputeSheetFromShifts = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const actor = await requirePermission("salary", "edit");
-    const period = await assertOpen(data.periodId);
+    await requirePermission("salary", "edit");
+    await assertOpen(data.periodId);
     // Staged import already rebuilt totals in its transaction. This action only reports completion.
     const counts = await db.execute(sql`
       SELECT count(*)::int AS total, count(*) FILTER (WHERE staff_id IS NULL)::int AS unmatched
@@ -1338,14 +1434,7 @@ export const recomputeSheetFromShifts = createServerFn({ method: "POST" })
       total: number;
       unmatched: number;
     };
-    await recordActivity({
-      actor,
-      action: "updated",
-      module: "salary",
-      entityId: period.id,
-      label: `Salary period — ${formatMonthLabel(period.month)}`,
-      details: `Imported ${c.total} ${data.source} shifts${data.fileName ? ` from ${data.fileName}` : ""} (${c.unmatched} unmatched)`,
-    });
+    // Activity (with delete/add counts) is already written by importShiftsChunk.
     return { total: Number(c.total), unmatched: Number(c.unmatched) };
   });
 

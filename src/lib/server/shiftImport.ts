@@ -38,7 +38,7 @@ export interface ShiftChunkArgs {
   periodId: string;
   source: string;
   rows: ShiftRowInput[];
-  /** First chunk of a file: clears what this company imported before. */
+  /** REPLACE mode: clears what this company imported before. Add mode never deletes. */
   reset: boolean;
   createMissingStaff: boolean;
 }
@@ -48,7 +48,25 @@ export interface ShiftChunkResult {
   matched: number;
   created: number;
   unmatched: number;
+  /** Add mode: rows skipped because the exact same shift is already in the sheet. */
+  duplicates: number;
 }
+
+const shiftKey = (r: {
+  employeeId: string;
+  employeeName: string;
+  date: string;
+  siteName: string;
+  hours: unknown;
+  amount: unknown;
+}) =>
+  [
+    r.employeeId || normName(r.employeeName),
+    r.date,
+    r.siteName,
+    Number(r.hours).toFixed(2),
+    Number(r.amount).toFixed(2),
+  ].join("|");
 
 export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<ShiftChunkResult> {
   // Once an admin-approved Timesheet Check month is locked, the hours it was checked against
@@ -302,7 +320,39 @@ export async function importShiftRows(db: Db, data: ShiftChunkArgs): Promise<Shi
       UPDATE payroll_staff s SET ni = v.ni
       FROM (VALUES ${list}) AS v(id, ni) WHERE s.id = v.id AND s.ni = ''`);
   }
-  for (const part of chunk(shiftValues, 800)) await db.insert(salaryShifts).values(part);
+  // ADD mode: a shift that is already in the sheet (same person, date, site, hours, amount)
+  // is not added a second time, so importing the same file twice cannot double anyone's pay.
+  // Identical rows inside one file still count (matched one-for-one against what exists).
+  let toInsert = shiftValues;
+  let duplicates = 0;
+  if (!data.reset) {
+    const existing = await db.execute(sql`
+      SELECT employee_id, employee_name, date, site_name, hours, amount
+      FROM salary_shifts WHERE period_id = ${data.periodId} AND source = ${data.source}`);
+    const have = new Map<string, number>();
+    for (const e of existing.rows as Record<string, unknown>[]) {
+      const k = shiftKey({
+        employeeId: String(e["employee_id"] ?? ""),
+        employeeName: String(e["employee_name"] ?? ""),
+        date: String(e["date"] ?? ""),
+        siteName: String(e["site_name"] ?? ""),
+        hours: e["hours"],
+        amount: e["amount"],
+      });
+      have.set(k, (have.get(k) ?? 0) + 1);
+    }
+    toInsert = shiftValues.filter((v) => {
+      const k = shiftKey(v);
+      const left = have.get(k) ?? 0;
+      if (left > 0) {
+        have.set(k, left - 1);
+        duplicates++;
+        return false;
+      }
+      return true;
+    });
+  }
+  for (const part of chunk(toInsert, 800)) await db.insert(salaryShifts).values(part);
 
-  return { received: data.rows.length, matched, created, unmatched };
+  return { received: data.rows.length, matched, created, unmatched, duplicates };
 }

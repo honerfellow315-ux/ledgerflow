@@ -25,7 +25,10 @@ import {
   importPayrollAmounts,
   importShiftsChunk,
   importStaffDetails,
+  listLastImports,
+  previewShiftImport,
   recomputeSheetFromShifts,
+  undoShiftImport,
 } from "@/lib/actions/salary";
 import { parseStaffDetails, type StaffDetailsParse } from "@/lib/payroll/detailsImport";
 import { STAFF_FIELD_LABEL } from "@/lib/payroll/staffFields";
@@ -150,9 +153,17 @@ export function ImportDialog({ open, onOpenChange, periodId, month, companies }:
 
 const FILE_ACCEPT = ".xlsx,.csv";
 
-function Notice({ tone, children }: { tone: "warn" | "ok" | "info"; children: React.ReactNode }) {
+function Notice({
+  tone,
+  children,
+}: {
+  tone: "warn" | "ok" | "info" | "danger";
+  children: React.ReactNode;
+}) {
   const cls =
-    tone === "warn"
+    tone === "danger"
+      ? "border-destructive/40 bg-destructive/10 text-destructive"
+      : tone === "warn"
       ? "border-warning/30 bg-warning-soft text-warning"
       : tone === "ok"
         ? "border-success/30 bg-success-soft text-success"
@@ -171,9 +182,32 @@ function ShiftImport({
   onBusyChange,
 }: { periodId: string; month: string } & TabProps) {
   const refresh = useRefreshSalary();
-  const { can } = usePermissions();
+  const { can, isAdmin } = usePermissions();
   const canCreateStaff = can("staff", "create");
   const [source, setSource] = useState<ShiftSource>("RSS");
+  // ADD is the default. REPLACE deletes this company's shifts for the month first,
+  // so it is admin-only and needs the word REPLACE typed.
+  const [mode, setMode] = useState<"add" | "replace">("add");
+  const [confirmText, setConfirmText] = useState("");
+  const [existing, setExisting] = useState<{
+    shifts: number;
+    people: number;
+    hours: number;
+    amount: number;
+  } | null>(null);
+  const [lastImports, setLastImports] = useState<
+    {
+      id: string;
+      source: string;
+      mode: string;
+      actorName: string;
+      fileName: string;
+      createdAt: string;
+      shiftsBefore: number;
+      shiftsAfter: number;
+    }[]
+  >([]);
+  const [undoing, setUndoing] = useState(false);
   const { data: allCompanies = [] } = useShiftCompanies(true);
   // Only switched-on companies can be imported. RSS / ESS stay available even
   // if the list can't be loaded.
@@ -210,6 +244,26 @@ function ShiftImport({
   }, [busy, onBusyChange]);
   const [progress, setProgress] = useState("");
   const [result, setResult] = useState<string | null>(null);
+
+  async function loadSafetyInfo() {
+    try {
+      const [p, l] = await Promise.all([
+        previewShiftImport({ data: { periodId, source } }),
+        listLastImports({ data: { periodId } }),
+      ]);
+      setExisting(p.existing);
+      setLastImports(l);
+    } catch {
+      setExisting(null);
+    }
+  }
+  // What is already in the sheet for this company, and what can be undone.
+  useEffect(() => {
+    setMode("add");
+    setConfirmText("");
+    void loadSafetyInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodId, source]);
 
   async function onFile(file: File | undefined) {
     setResult(null);
@@ -276,8 +330,42 @@ function ShiftImport({
     [toImport],
   );
 
+  const existingCount = existing?.shifts ?? 0;
+  const ratio = existingCount > 0 ? toImport.length / existingCount : 1;
+  // A file far smaller than what is already there is almost always "a few extra shifts", not a new full list.
+  const looksPartial = existingCount > 0 && ratio < 0.5;
+  const replaceTyped = confirmText.trim() === "REPLACE";
+  const replaceBlocked = mode === "replace" && existingCount > 0 && !replaceTyped;
+  const lastForSource = lastImports.find((l) => l.source === source) ?? null;
+
+  async function undoLast() {
+    if (!lastForSource || undoing || busy) return;
+    const when = new Date(lastForSource.createdAt).toLocaleString();
+    if (
+      !window.confirm(
+        `Undo the ${lastForSource.mode.toUpperCase()} import of ${source} (${when})?\n\n` +
+          `The ${source} shifts and totals go back to how they were BEFORE it. ` +
+          `Any ${source} edits made on lines since then will be lost.`,
+      )
+    )
+      return;
+    setUndoing(true);
+    try {
+      const r = await undoShiftImport({ data: { periodId, source } });
+      await refresh();
+      await loadSafetyInfo();
+      setResult(`Import undone. ${r.restoredShifts} ${source} shifts are back as they were.`);
+      toast.success("Last import undone.");
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not undo."));
+    } finally {
+      setUndoing(false);
+    }
+  }
+
   async function run() {
     if (!parse || toImport.length === 0 || running.current) return;
+    if (replaceBlocked) return;
     running.current = true;
     setBusy(true);
     setResult(null);
@@ -286,22 +374,28 @@ function ShiftImport({
       let matched = 0;
       let created = 0;
       let unmatched = 0;
+      let last: { removed: number; added: number; duplicates: number } | null = null;
       for (let i = 0; i < toImport.length; i += SIZE) {
         setProgress(
           `Uploading shifts ${Math.min(i + SIZE, toImport.length)} / ${toImport.length}…`,
         );
         const r = await importShiftsChunk({
           data: {
-            uploadId: uploadIdFor(JSON.stringify([periodId, source, createMissing, toImport])),
+            uploadId: uploadIdFor(
+              JSON.stringify([periodId, source, createMissing, mode, toImport]),
+            ),
             chunkIndex: i / SIZE,
             totalChunks: Math.ceil(toImport.length / SIZE),
             periodId,
             source,
             rows: toImport.slice(i, i + SIZE),
-            reset: i === 0,
+            mode,
+            replaceConfirmed: mode === "replace" && replaceTyped,
+            fileName,
             createMissingStaff: createMissing && canCreateStaff,
           },
         });
+        last = r;
         matched += r.matched;
         created += r.created;
         unmatched += r.unmatched;
@@ -310,13 +404,24 @@ function ShiftImport({
       setProgress("Building each person's totals…");
       const done = await recomputeSheetFromShifts({ data: { periodId, source, fileName } });
       await refresh();
+      const summary =
+        mode === "replace"
+          ? `Replaced: ${last?.removed ?? 0} old ${source} shifts deleted, ${last?.added ?? toImport.length} added.`
+          : `Added ${last?.added ?? toImport.length} ${source} shifts` +
+            ((last?.duplicates ?? 0) > 0
+              ? ` (${last?.duplicates} skipped: already in the sheet).`
+              : ". Nothing was deleted.");
       setResult(
-        `Imported ${toImport.length} ${source} shifts. ${matched} matched existing staff, ${created} new staff created` +
+        `${summary} ${matched} matched existing staff, ${created} new staff created` +
           (done.unmatched > 0
             ? `, ${done.unmatched} shifts could not be matched to anyone (see the warning on the sheet).`
-            : "."),
+            : ".") +
+          " You can undo this import below.",
       );
       toast.success(`Shifts imported. ${done.unmatched} unmatched.`);
+      setMode("add");
+      setConfirmText("");
+      await loadSafetyInfo();
       if (done.unmatched === 0) onComplete();
     } catch (err) {
       toast.error(errorMessage(err, "Import failed."));
@@ -430,6 +535,119 @@ function ShiftImport({
         </div>
       ) : null}
 
+      {parse && toImport.length > 0 ? (
+        <div className="space-y-2 rounded-md border border-border bg-surface-muted/40 p-3">
+          <div className="text-[12px] font-semibold text-foreground">
+            How should this file be imported?
+          </div>
+          <div className="grid gap-2 text-[12px] sm:grid-cols-2">
+            <div className="rounded-md border border-border bg-surface px-3 py-2">
+              <div className="text-muted-foreground">Already in {formatMonthLabel(month)} ({source})</div>
+              <div className="font-semibold text-foreground">
+                {existing
+                  ? existingCount > 0
+                    ? `${existing.shifts} shifts · ${existing.hours} h · ${formatMoney(existing.amount)} · ${existing.people} people`
+                    : "Nothing yet"
+                  : "Checking…"}
+              </div>
+            </div>
+            <div className="rounded-md border border-border bg-surface px-3 py-2">
+              <div className="text-muted-foreground">This file</div>
+              <div className="font-semibold text-foreground">
+                {toImport.length} shifts · {importHours} h
+              </div>
+            </div>
+          </div>
+
+          {looksPartial ? (
+            <Notice tone="warn">
+              This file has far fewer shifts ({toImport.length}) than the sheet already holds (
+              {existingCount}). It looks like a few extra shifts, not the full month.{" "}
+              <strong>Use Add</strong>. Replace would delete {existingCount - toImport.length} shifts
+              that are not in this file.
+            </Notice>
+          ) : null}
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => {
+                setMode("add");
+                setConfirmText("");
+              }}
+              className={`rounded-md border px-3 py-2 text-left text-[12px] transition-colors ${
+                mode === "add" ? "border-primary bg-primary/10" : "border-border bg-surface"
+              }`}
+            >
+              <div className="font-semibold text-foreground">
+                Add to existing {mode === "add" ? "✓" : ""}
+              </div>
+              <div className="text-muted-foreground">
+                Keeps everything already in the sheet and adds these shifts. Shifts that are already
+                there are skipped, so nothing doubles. <strong>Nothing is deleted.</strong>
+              </div>
+            </button>
+            <button
+              type="button"
+              disabled={!isAdmin}
+              onClick={() => setMode("replace")}
+              className={`rounded-md border px-3 py-2 text-left text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                mode === "replace"
+                  ? "border-destructive bg-destructive/10"
+                  : "border-border bg-surface"
+              }`}
+            >
+              <div className="font-semibold text-foreground">
+                Replace everything {mode === "replace" ? "✓" : ""}
+              </div>
+              <div className="text-muted-foreground">
+                Deletes all {source} shifts of this month first, then imports only this file.
+                {!isAdmin ? " Admin only." : ""}
+              </div>
+            </button>
+          </div>
+
+          {mode === "add" ? (
+            <Notice tone="info">
+              {existingCount > 0
+                ? `The ${existingCount} existing ${source} shifts stay. Up to ${toImport.length} shifts from this file are added (exact duplicates are skipped). `
+                : `First ${source} import for this month. Nothing will be deleted. `}
+              A person who also has a hand-typed {source} amount gets it recalculated from their shifts.
+            </Notice>
+          ) : (
+            <div className="space-y-2">
+              <Notice tone="danger">
+                {existingCount > 0 ? (
+                  <>
+                    <strong>
+                      {existingCount} existing {source} shifts ({existing?.hours} h,{" "}
+                      {formatMoney(existing?.amount ?? 0)}) will be DELETED
+                    </strong>{" "}
+                    and replaced by {toImport.length} shifts from this file.
+                    {toImport.length < existingCount
+                      ? ` The sheet will end up with ${existingCount - toImport.length} FEWER shifts and lower totals.`
+                      : ""}{" "}
+                    You can undo it afterwards, but only until the next import.
+                  </>
+                ) : (
+                  <>Nothing exists yet, so nothing will be deleted.</>
+                )}
+              </Notice>
+              {existingCount > 0 ? (
+                <Field label='Type REPLACE to confirm'>
+                  <Input
+                    value={confirmText}
+                    onChange={(e) => setConfirmText(e.target.value)}
+                    placeholder="REPLACE"
+                    autoComplete="off"
+                  />
+                </Field>
+              ) : null}
+            </div>
+          )}
+        </div>
+      ) : null}
+
       <div className="flex items-center gap-2">
         <Checkbox
           id="create-missing"
@@ -444,15 +662,41 @@ function ShiftImport({
       </div>
       <p className="text-[11px] text-muted-foreground">
         People are matched on their {source} ID, then NI number, then a unique name (a name match is
-        ignored if the two NI numbers differ). Importing {source} again for the same month{" "}
-        <strong>replaces</strong> the earlier {source} shifts.
+        ignored if the two NI numbers differ). Nothing is deleted unless you choose{" "}
+        <strong>Replace</strong>.
       </p>
+
+      {lastForSource ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface-muted/40 px-3 py-2 text-[12px]">
+          <span className="text-muted-foreground">
+            Last {source} import:{" "}
+            <strong className="text-foreground">
+              {lastForSource.mode === "replace" ? "Replace" : "Add"}
+            </strong>{" "}
+            by {lastForSource.actorName || "unknown"}
+            {lastForSource.fileName ? ` (${lastForSource.fileName})` : ""},{" "}
+            {new Date(lastForSource.createdAt).toLocaleString()} · shifts{" "}
+            {lastForSource.shiftsBefore} → {lastForSource.shiftsAfter}
+          </span>
+          <Button variant="outline" size="sm" onClick={undoLast} disabled={undoing || busy}>
+            {undoing ? "Undoing…" : "Undo last import"}
+          </Button>
+        </div>
+      ) : null}
 
       {result ? <Notice tone="ok">{result}</Notice> : null}
       <div className="flex items-center justify-end gap-3">
         {progress ? <span className="text-[12px] text-muted-foreground">{progress}</span> : null}
-        <Button onClick={run} disabled={busy || !parse || toImport.length === 0}>
-          {busy ? "Working…" : "Import shifts"}
+        <Button
+          variant={mode === "replace" ? "destructive" : "default"}
+          onClick={run}
+          disabled={busy || !parse || toImport.length === 0 || replaceBlocked}
+        >
+          {busy
+            ? "Working…"
+            : mode === "replace"
+              ? `Replace ${existingCount} with ${toImport.length} shifts`
+              : `Add ${toImport.length} shifts`}
         </Button>
       </div>
     </div>
