@@ -17,6 +17,7 @@ import { requirePermission } from "../server/auth";
 import { hasPermission } from "../permissions";
 import { uid } from "../server/id";
 import { recordActivity, changedFieldsSummary } from "../server/activity";
+import { saveAccountDetails } from "../server/timesheetEdit";
 import { importShiftRows } from "../server/shiftImport";
 import { recomputeFromShifts } from "../server/salaryShifts";
 import { buildImportChecks } from "../server/importChecks";
@@ -990,6 +991,34 @@ export const updateEntry = createServerFn({ method: "POST" })
       });
     }
     return row ? toEntry(row) : undefined;
+  });
+
+/** Edits the saved bank details of a person (Staff record), so every screen and the Excel export agree. */
+export const saveStaffBankDetails = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      staffId: z.string().min(1).max(100),
+      accountHolderName: z.string().trim().max(120),
+      accountNumber: z.string().trim().max(20),
+      sortCode: z.string().trim().max(12),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("staff", "edit");
+    await requirePermission("salary", "view");
+    await saveAccountDetails(db, data.staffId, {
+      accountHolderName: data.accountHolderName,
+      accountNumber: data.accountNumber,
+      sortCode: data.sortCode,
+    });
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "staff",
+      entityId: data.staffId,
+      label: "Staff bank details updated (from Salary Sheet)",
+    });
+    return { ok: true };
   });
 
 export const deleteEntry = createServerFn({ method: "POST" })

@@ -311,9 +311,20 @@ export function PayPanel({
               </label>
               {method === "Bank Transfer" && bankLines.length > 0 ? (
                 <div className="col-span-2 rounded-lg bg-surface-muted/60 px-3 py-2 text-xs">
-                  <p className="mb-1 font-semibold text-muted-foreground">
-                    Bank details — pay into this account
-                  </p>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <p className="font-semibold text-muted-foreground">
+                      Bank details — pay into this account
+                    </p>
+                    {onSaveAccount ? (
+                      <button
+                        type="button"
+                        className="text-xs underline"
+                        onClick={() => setEditAcc(true)}
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                  </div>
                   <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
                     {bankLines.map(([label, value]) => (
                       <div key={label} className="contents">

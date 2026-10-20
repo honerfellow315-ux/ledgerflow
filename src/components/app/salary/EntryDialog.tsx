@@ -24,12 +24,14 @@ import { PayStatusBadge } from "@/components/app/salary/badges";
 import { EarningsBreakdown } from "@/components/app/salary/EarningsBreakdown";
 import { ExpensesEditor } from "@/components/app/salary/ExpensesEditor";
 import { fromExpenseDrafts, toExpenseDrafts, type ExpenseDraft } from "@/lib/payroll/expenseDrafts";
+import { usePermissions } from "@/lib/ledger/permissions";
 import { useLedger } from "@/lib/ledger/store";
 import { formatDate, formatMoney } from "@/lib/ledger/calc";
 import {
   addSalaryPayment,
   deleteEntry,
   deleteSalaryPayment,
+  saveStaffBankDetails,
   updateEntry,
 } from "@/lib/actions/salary";
 import { computeEntry, type SheetRow } from "@/lib/payroll/calc";
@@ -101,12 +103,17 @@ export function EntryDialog({
     reference: "",
   });
   const [payBusy, setPayBusy] = useState(false);
+  const { can } = usePermissions();
+  const [bankEdit, setBankEdit] = useState(false);
+  const [bank, setBank] = useState({ holder: "", number: "", sort: "" });
+  const [bankBusy, setBankBusy] = useState(false);
 
   // Re-initialise only when a different line is opened — NOT whenever the
   // sheet refetches, or adding a payment would wipe what's being typed.
   useEffect(() => {
     if (!open || !row) return;
     setForm(fromEntry(row.entry));
+    setBankEdit(false);
     setPay({ date: today(), amount: "", method: methods[0] ?? "Bank Transfer", reference: "" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, entryId]);
@@ -197,6 +204,27 @@ export function EntryDialog({
       toast.error(errorMessage(err, "Could not add the payment."));
     } finally {
       setPayBusy(false);
+    }
+  }
+
+  async function saveBank() {
+    setBankBusy(true);
+    try {
+      await saveStaffBankDetails({
+        data: {
+          staffId: row!.staff.id,
+          accountHolderName: bank.holder,
+          accountNumber: bank.number,
+          sortCode: bank.sort,
+        },
+      });
+      await refresh();
+      setBankEdit(false);
+      toast.success("Bank details saved on the staff record.");
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not save the bank details."));
+    } finally {
+      setBankBusy(false);
     }
   }
 
@@ -498,19 +526,79 @@ export function EntryDialog({
               </Button>
             </div>
           ) : null}
-          {!dis && pay.method === "Bank Transfer" && bankLines.length > 0 ? (
+          {!dis && pay.method === "Bank Transfer" && (bankLines.length > 0 || bankEdit) ? (
             <div className="border-t border-border bg-surface-muted/40 px-3 py-2 text-[12px]">
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-                Bank details — pay into this account
-              </p>
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
-                {bankLines.map(([label, value]) => (
-                  <div key={label} className="contents">
-                    <dt className="text-muted-foreground">{label}</dt>
-                    <dd className="num select-all break-all">{value}</dd>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+                  Bank details — pay into this account
+                </p>
+                {can("staff", "edit") && !bankEdit ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setBank({
+                        holder: s.accountHolderName ?? "",
+                        number: s.accountNumber ?? "",
+                        sort: s.sortCode ?? "",
+                      });
+                      setBankEdit(true);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                ) : null}
+              </div>
+              {bankEdit ? (
+                <div className="space-y-2">
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <Field label="Account holder">
+                      <Input
+                        value={bank.holder}
+                        maxLength={120}
+                        onChange={(e) => setBank((b) => ({ ...b, holder: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="Account number">
+                      <Input
+                        inputMode="numeric"
+                        value={bank.number}
+                        maxLength={20}
+                        onChange={(e) => setBank((b) => ({ ...b, number: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="Sort code">
+                      <Input
+                        placeholder="12-34-56"
+                        value={bank.sort}
+                        maxLength={12}
+                        onChange={(e) => setBank((b) => ({ ...b, sort: e.target.value }))}
+                      />
+                    </Field>
                   </div>
-                ))}
-              </dl>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={saveBank} disabled={bankBusy}>
+                      {bankBusy ? "Saving…" : "Save bank details"}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setBankEdit(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Saved on the staff record, so Staff, Timesheet and the Excel export show the
+                    corrected details from now on.
+                  </p>
+                </div>
+              ) : (
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
+                  {bankLines.map(([label, value]) => (
+                    <div key={label} className="contents">
+                      <dt className="text-muted-foreground">{label}</dt>
+                      <dd className="num select-all break-all">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
             </div>
           ) : null}
         </div>
