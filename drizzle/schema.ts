@@ -609,6 +609,11 @@ export const salaryEntries = pgTable(
     taxDeduction: money("tax_deduction").notNull().default(0),
     deduction: money("deduction").notNull().default(0),
     deductionNote: text("deduction_note"),
+    // Expenses of this person for the month: [{ amount, note }], at most 5. [] = 0.
+    expenses: jsonb("expenses")
+      .$type<{ amount: number; note?: string }[]>()
+      .notNull()
+      .default([]),
     checkStatus: text("check_status").notNull().default(""), // "" | Reviewed | Verified
     flag: text("flag").notNull().default(""), // the sheet's "Client" column (e.g. "pay back")
     // { [payrollCompanyId]: amount } — sparse, so adding a company needs no migration.

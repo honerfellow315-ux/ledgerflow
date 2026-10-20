@@ -54,6 +54,7 @@ import {
   getStaffMonthPay,
   PAYMENT_METHODS,
   saveAccountDetails,
+  saveStaffExpenses,
   type AccountDetails,
   type StaffMonthPay,
 } from "../server/timesheetEdit";
@@ -726,6 +727,40 @@ export const saveTimesheetAccount = createServerFn({ method: "POST" })
       module: "staff",
       entityId: sheet.staffId,
       label: "Staff bank details updated (from Timesheet Check)",
+    });
+    return { ok: true };
+  });
+
+export const saveTimesheetExpenses = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      sheetId: z.string().min(1).max(100),
+      expenses: z
+        .array(
+          z.object({
+            amount: z.number().finite().min(-10_000_000).max(10_000_000),
+            note: z.string().trim().max(200).optional(),
+          }),
+        )
+        .max(5),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const actor = await requirePermission("salary", "edit");
+    await requirePermission("timesheets", "view");
+    const sheet = await sheetOwner(data.sheetId);
+    if (!sheet.staffId) throw new Error("Match this sheet to a staff member first.");
+    const res = await saveStaffExpenses(db, {
+      staffId: sheet.staffId,
+      month: sheet.month,
+      expenses: data.expenses,
+    });
+    await recordActivity({
+      actor,
+      action: "updated",
+      module: "salary",
+      entityId: sheet.staffId,
+      label: `Salary expenses £${res.total.toFixed(2)} (${formatMonthLabel(sheet.month)}) — from Timesheet Check`,
     });
     return { ok: true };
   });

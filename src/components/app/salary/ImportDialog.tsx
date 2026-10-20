@@ -795,6 +795,7 @@ function MasterImport({
           carryForward: r.carryForward,
           taxDeduction: r.taxDeduction,
           deduction: r.deduction,
+          expenses: r.expenses ?? [],
           checkStatus: r.checkStatus,
           flag: r.flag,
           payroll: r.payroll,

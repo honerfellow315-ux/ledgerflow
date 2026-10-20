@@ -22,6 +22,8 @@ import { Field } from "@/components/app/Field";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { PayStatusBadge } from "@/components/app/salary/badges";
 import { EarningsBreakdown } from "@/components/app/salary/EarningsBreakdown";
+import { ExpensesEditor } from "@/components/app/salary/ExpensesEditor";
+import { fromExpenseDrafts, toExpenseDrafts, type ExpenseDraft } from "@/lib/payroll/expenseDrafts";
 import { useLedger } from "@/lib/ledger/store";
 import { formatDate, formatMoney } from "@/lib/ledger/calc";
 import {
@@ -45,6 +47,7 @@ interface FormState {
   taxDeduction: string;
   deduction: string;
   deductionNote: string;
+  expenses: ExpenseDraft[];
   checkStatus: CheckStatus;
   flag: string;
   payroll: Record<string, string>;
@@ -59,6 +62,7 @@ const fromEntry = (e: SalaryEntry): FormState => ({
   taxDeduction: amountToInput(e.taxDeduction),
   deduction: amountToInput(e.deduction),
   deductionNote: e.deductionNote ?? "",
+  expenses: toExpenseDrafts(e.expenses),
   checkStatus: e.checkStatus,
   flag: e.flag,
   payroll: Object.fromEntries(Object.entries(e.payroll).map(([k, v]) => [k, amountToInput(v)])),
@@ -118,6 +122,7 @@ export function EntryDialog({
       carryForward: parseAmount(form.carryForward),
       taxDeduction: parseAmount(form.taxDeduction),
       deduction: parseAmount(form.deduction),
+      expenses: fromExpenseDrafts(form.expenses),
       payroll: Object.fromEntries(
         Object.entries(form.payroll).map(([k, v]) => [k, parseAmount(v)]),
       ),
@@ -148,6 +153,7 @@ export function EntryDialog({
             taxDeduction: draft.taxDeduction,
             deduction: draft.deduction,
             deductionNote: form.deductionNote,
+            expenses: draft.expenses ?? [],
             checkStatus: form.checkStatus,
             flag: form.flag,
             payroll: draft.payroll,
@@ -216,6 +222,17 @@ export function EntryDialog({
 
   const s = row.staff;
   const dis = locked;
+  // The saved bank details of this person (the same ones the Excel export shows).
+  // Empty when none are saved, or when the viewer may not see Staff details.
+  const bankLines: [string, string][] = (
+    [
+      ["Account holder", (s.accountHolderName ?? "").trim()],
+      ["Account number", (s.accountNumber ?? "").trim()],
+      ["Sort code", (s.sortCode ?? "").trim()],
+    ] as [string, string][]
+  ).filter(([, v]) => v);
+  if (bankLines.length === 0 && (s.accountDetail ?? "").trim())
+    bankLines.push(["Account detail", s.accountDetail.trim()]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -317,6 +334,12 @@ export function EntryDialog({
             </div>
           </div>
         ) : null}
+
+        <ExpensesEditor
+          rows={form.expenses}
+          onChange={(rows) => setF("expenses", rows)}
+          disabled={dis}
+        />
 
         <EarningsBreakdown entryId={draft.id} />
 
@@ -473,6 +496,21 @@ export function EntryDialog({
               <Button variant="outline" onClick={addPayment} disabled={payBusy}>
                 Add payment
               </Button>
+            </div>
+          ) : null}
+          {!dis && pay.method === "Bank Transfer" && bankLines.length > 0 ? (
+            <div className="border-t border-border bg-surface-muted/40 px-3 py-2 text-[12px]">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+                Bank details — pay into this account
+              </p>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
+                {bankLines.map(([label, value]) => (
+                  <div key={label} className="contents">
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="num select-all break-all">{value}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           ) : null}
         </div>

@@ -561,6 +561,9 @@ export function parseMasterSheet(matrix: Matrix): MasterParse {
     name: exact("name"),
     carry: header.findIndex((x) => x.includes("overpaid")),
     deduction: exact("deduction"),
+    // Optional: older files have no Expenses column at all (then nothing is changed on import).
+    expenses: exact("expenses"),
+    expensesNote: exact("expenses note"),
     outstanding: exact("outstanding"),
     account: exact("account detail"),
     flag: exact("client"),
@@ -599,6 +602,19 @@ export function parseMasterSheet(matrix: Matrix): MasterParse {
       taxDeduction: toNumber(get(r, iTax)),
       payments: payCols.map((i) => toNumber(r[i] ?? null)),
       deduction: toNumber(get(r, idx.deduction)),
+      expenses:
+        idx.expenses < 0
+          ? null
+          : toNumber(get(r, idx.expenses)) === 0
+            ? []
+            : [
+                {
+                  amount: toNumber(get(r, idx.expenses)),
+                  ...(toText(get(r, idx.expensesNote))
+                    ? { note: toText(get(r, idx.expensesNote)).slice(0, 200) }
+                    : {}),
+                },
+              ],
       accountDetail: toText(get(r, idx.account)),
       flag: toText(get(r, idx.flag)),
       area: toText(get(r, idx.area)),

@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Pencil, Trash2 } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/ledger/calc";
 import type { TimesheetPayInfo } from "@/lib/actions/timesheets";
+import { ExpensesEditor } from "@/components/app/salary/ExpensesEditor";
+import { fromExpenseDrafts, toExpenseDrafts, type ExpenseDraft } from "@/lib/payroll/expenseDrafts";
 
 export interface PaymentInput {
   date: string;
@@ -31,6 +33,7 @@ export function PayPanel({
   monthLabel,
   onSaveAccount,
   onAddPayment,
+  onSaveExpenses,
   onDeletePayment,
 }: {
   info: TimesheetPayInfo;
@@ -38,6 +41,7 @@ export function PayPanel({
   monthLabel: string;
   onSaveAccount?: (a: AccountInput) => void;
   onAddPayment?: (p: PaymentInput) => void;
+  onSaveExpenses?: (expenses: { amount: number; note?: string }[]) => void;
   onDeletePayment?: (paymentId: string) => void;
 }) {
   const acc = info.account;
@@ -55,7 +59,28 @@ export function PayPanel({
   const amountNum = amount.trim() === "" ? NaN : Number(amount);
   const canAdd = Number.isFinite(amountNum) && amountNum > 0 && /^\d{4}-\d{2}-\d{2}$/.test(date);
 
+  // Expenses of this person and month (the same ones the Salary Sheet form shows).
+  const savedExpenses = pay?.expenses ?? [];
+  const savedKey = JSON.stringify(savedExpenses);
+  const [expRows, setExpRows] = useState<ExpenseDraft[]>(() => toExpenseDrafts(savedExpenses));
+  useEffect(() => {
+    setExpRows(toExpenseDrafts(savedExpenses));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedKey, info.staffId]);
+
   if (!info.staffId || !pay) return null;
+  const expChanged = JSON.stringify(fromExpenseDrafts(expRows)) !== savedKey;
+  const canEditExpenses = Boolean(onSaveExpenses) && pay.hasSalaryMonth && !pay.salaryClosed;
+  // Saved bank details, shown under "Bank Transfer" so the person paying knows which account.
+  const bankLines: [string, string][] = acc
+    ? (
+        [
+          ["Account holder", (acc.accountHolderName ?? "").trim()],
+          ["Account number", (acc.accountNumber ?? "").trim()],
+          ["Sort code", (acc.sortCode ?? "").trim()],
+        ] as [string, string][]
+      ).filter(([, v]) => v)
+    : [];
   const maskedNumber = number
     ? `${"•".repeat(Math.max(0, number.length - 4))}${number.slice(-4)}`
     : "";
@@ -154,6 +179,11 @@ export function PayPanel({
           <div className="rounded-lg bg-surface-muted/60 px-3 py-2">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">To pay</p>
             <p className="num font-semibold">{formatMoney(pay.payable)}</p>
+            {pay.expensesTotal !== 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                incl. expenses {formatMoney(pay.expensesTotal)}
+              </p>
+            ) : null}
           </div>
           <div className="rounded-lg bg-surface-muted/60 px-3 py-2">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Paid</p>
@@ -175,6 +205,22 @@ export function PayPanel({
             </p>
           </div>
         </div>
+
+        {canEditExpenses || savedExpenses.length > 0 ? (
+          <div className="mt-3">
+            <ExpensesEditor rows={expRows} onChange={setExpRows} disabled={!canEditExpenses} />
+            {canEditExpenses ? (
+              <Button
+                size="sm"
+                className="mt-2"
+                disabled={busy || !expChanged}
+                onClick={() => onSaveExpenses?.(fromExpenseDrafts(expRows))}
+              >
+                <Check className="size-4" /> Save expenses
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
 
         {pay.payments.length > 0 ? (
           <ul className="mt-3 divide-y divide-border/60 text-sm">
@@ -263,6 +309,21 @@ export function PayPanel({
                   className={field}
                 />
               </label>
+              {method === "Bank Transfer" && bankLines.length > 0 ? (
+                <div className="col-span-2 rounded-lg bg-surface-muted/60 px-3 py-2 text-xs">
+                  <p className="mb-1 font-semibold text-muted-foreground">
+                    Bank details — pay into this account
+                  </p>
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
+                    {bankLines.map(([label, value]) => (
+                      <div key={label} className="contents">
+                        <dt className="text-muted-foreground">{label}</dt>
+                        <dd className="num select-all break-all">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ) : null}
             </div>
             <label className="block text-xs">
               Notes (optional)

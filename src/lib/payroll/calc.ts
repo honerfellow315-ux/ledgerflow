@@ -3,6 +3,7 @@
  *
  *   Total Hours    = RSS hours + ESS hours + every other shift company's hours
  *   Total Amount   = RSS + ESS + every other shift company + carry-forward (-OverPaid/+Remaining)
+ *                    + expenses (see EXPENSES_EFFECT)
  *   Total Payroll  = sum(payroll company amounts) - tax deduction
  *   Total Cash     = sum(P1..Pn)
  *   Outstanding    = Total Amount - Total Payroll - Total Cash - Deduction
@@ -11,7 +12,14 @@
  * Everything is rounded to 2 decimals BEFORE the status compare — Excel
  * compared AD=0 exactly, so 0.0000001 of float noise showed the wrong status.
  */
-import type { PayStatus, PayrollCompany, SalaryEntry, SalaryPayment, Staff } from "./types";
+import type {
+  PayStatus,
+  PayrollCompany,
+  SalaryEntry,
+  SalaryExpense,
+  SalaryPayment,
+  Staff,
+} from "./types";
 
 /**
  * Whether a shift's payable expenses are added to, and its penalty taken off,
@@ -21,9 +29,32 @@ import type { PayStatus, PayrollCompany, SalaryEntry, SalaryPayment, Staff } fro
  */
 export const INCLUDE_EXPENSES_AND_PENALTY = false;
 
+/**
+ * What a person's EXPENSES (travel etc., typed on the salary line) do to the money:
+ *   "add"      = the company owes them back, so they are ADDED to Total Amount (default)
+ *   "subtract" = taken off what is owed, like a deduction
+ *   "none"     = recorded only, no effect on any total
+ * One setting for the whole app (salary sheet, timesheet pay, Excel export). Existing
+ * lines have 0 expenses, so changing this never moves an old balance.
+ */
+export const EXPENSES_EFFECT: "add" | "subtract" | "none" = "add";
+
 export const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 const num = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) ? n : 0);
+
+/** Sum of a person's expenses (0 when none). */
+export function expensesTotal(entry: { expenses?: readonly SalaryExpense[] | null }): number {
+  let t = 0;
+  for (const x of entry.expenses ?? []) t += num(x?.amount);
+  return round2(t);
+}
+
+/** The expenses as they move the money: + / − / 0 according to EXPENSES_EFFECT. */
+export function expensesEffect(entry: { expenses?: readonly SalaryExpense[] | null }): number {
+  const t = expensesTotal(entry);
+  return EXPENSES_EFFECT === "add" ? t : EXPENSES_EFFECT === "subtract" ? -t : 0;
+}
 
 /** Sum of what every shift company other than RSS / ESS contributed to a line. */
 export function extraTotals(entry: Pick<SalaryEntry, "extra">): { amount: number; hours: number } {
@@ -59,7 +90,11 @@ export function computeEntry(
   const extra = extraTotals(entry);
   const totalHours = round2(num(entry.rssHours) + num(entry.essHours) + extra.hours);
   const totalAmount = round2(
-    num(entry.rssAmount) + num(entry.essAmount) + extra.amount + num(entry.carryForward),
+    num(entry.rssAmount) +
+      num(entry.essAmount) +
+      extra.amount +
+      num(entry.carryForward) +
+      expensesEffect(entry),
   );
   // Every company amount counts, including one archived later, so archiving a
   // column can never silently change somebody's balance.
@@ -126,6 +161,8 @@ export interface SheetTotals {
   taxDeduction: number;
   cashPaid: number;
   deduction: number;
+  /** Sum of every line's expenses (0 when none). */
+  expenses: number;
   outstanding: number;
   byCompany: Record<string, number>;
   /** Totals of every shift company other than RSS / ESS, keyed by its code. */
@@ -146,6 +183,7 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     taxDeduction: 0,
     cashPaid: 0,
     deduction: 0,
+    expenses: 0,
     outstanding: 0,
     byCompany: {},
     byShift: {},
@@ -159,6 +197,7 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     t.carryForward += num(e.carryForward);
     t.taxDeduction += num(e.taxDeduction);
     t.deduction += num(e.deduction);
+    t.expenses += expensesTotal(e);
     t.totalHours += r.computed.totalHours;
     t.totalAmount += r.computed.totalAmount;
     t.payrollTotal += r.computed.payrollTotal;

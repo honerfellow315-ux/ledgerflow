@@ -3,7 +3,14 @@
  * "Salary Sheet" workbook, with live formulas (and cached values so it also
  * reads correctly in viewers that don't recalculate).
  */
-import { formatMonthLabel, round2, sumRows, type SheetRow } from "./calc";
+import {
+  EXPENSES_EFFECT,
+  expensesTotal,
+  formatMonthLabel,
+  round2,
+  sumRows,
+  type SheetRow,
+} from "./calc";
 import type { PayrollCompany } from "./types";
 
 const col = (n: number): string => {
@@ -64,9 +71,11 @@ export async function exportSalarySheet(
     essAmt: base + 5,
     essHrs: base + 6,
     carry: base + 7 + nx * 2,
-    totHrs: base + 8 + nx * 2,
-    totAmt: base + 9 + nx * 2,
-    check: base + 10 + nx * 2,
+    // Expenses sit right after the carry-forward column and feed Total Amount.
+    exp: base + 8 + nx * 2,
+    totHrs: base + 9 + nx * 2,
+    totAmt: base + 10 + nx * 2,
+    check: base + 11 + nx * 2,
   };
   const xAmt = (k: number) => base + 7 + k * 2;
   const xHrs = (k: number) => base + 8 + k * 2;
@@ -86,6 +95,8 @@ export async function exportSalarySheet(
   const holder = area + 1;
   const accNo = area + 2;
   const sortCodeCol = area + 3;
+  // Free-text descriptions of the expenses ("Taxi: 12.5 | Parking: 4"), so the file can be re-imported.
+  const expNote = area + 4;
 
   const groups: [number, string][] = [
     [C.rssId, "Profile of Staff"],
@@ -97,6 +108,7 @@ export async function exportSalarySheet(
     [firstPay, "Payroll data"],
     [p1, "Payment Data"],
     [holder, "Bank details"],
+    [expNote, "Expenses"],
   ];
   groups.forEach(([c, t]) => (ws.getCell(2, c).value = t));
 
@@ -116,6 +128,7 @@ export async function exportSalarySheet(
       [xHrs(k), "Hours"],
     ]),
     [C.carry, "-OverPaid/+Remaining"],
+    [C.exp, "Expenses"],
     [C.totHrs, "Total Hours"],
     [C.totAmt, "Total Amount"],
     [C.check, "Check status"],
@@ -133,6 +146,7 @@ export async function exportSalarySheet(
     [holder, "Account Holder Name"],
     [accNo, "Account Number"],
     [sortCodeCol, "Sort Code"],
+    [expNote, "Expenses Note"],
   ];
   headers.forEach(([c, t]) => (ws.getCell(3, c).value = t));
   for (const r of [2, 3]) {
@@ -173,12 +187,19 @@ export async function exportSalarySheet(
       set(xHrs(k), e.extra?.[code]?.hours || null);
     });
     set(C.carry, e.carryForward);
+    set(C.exp, expensesTotal(e) || null);
     set(C.totHrs, {
       formula: [C.essHrs, C.rssHrs, ...extraCodes.map((_, k) => xHrs(k))].map(L).join("+"),
       result: r.computed.totalHours,
     });
     set(C.totAmt, {
-      formula: `${[C.essAmt, C.rssAmt, ...extraCodes.map((_, k) => xAmt(k))].map(L).join("+")}+${L(C.carry)}`,
+      formula: `${[C.essAmt, C.rssAmt, ...extraCodes.map((_, k) => xAmt(k))].map(L).join("+")}+${L(C.carry)}${
+        EXPENSES_EFFECT === "add"
+          ? `+${L(C.exp)}`
+          : EXPENSES_EFFECT === "subtract"
+            ? `-${L(C.exp)}`
+            : ""
+      }`,
       result: r.computed.totalAmount,
     });
     set(C.check, e.checkStatus || null);
@@ -216,6 +237,13 @@ export async function exportSalarySheet(
     set(holder, r.staff.accountHolderName || null);
     set(accNo, r.staff.accountNumber || null);
     set(sortCodeCol, r.staff.sortCode || null);
+    set(
+      expNote,
+      (e.expenses ?? [])
+        .filter((x) => x.amount || x.note)
+        .map((x) => (x.note ? `${x.note}: ${x.amount}` : String(x.amount)))
+        .join(" | ") || null,
+    );
     ws.getCell(n, accNo).numFmt = "@";
     ws.getCell(n, sortCodeCol).numFmt = "@";
   });
@@ -239,6 +267,7 @@ export async function exportSalarySheet(
     sumCell(xHrs(k), totals.byShift[code]?.hours ?? 0);
   });
   sumCell(C.carry, totals.carryForward);
+  sumCell(C.exp, totals.expenses);
   sumCell(C.totHrs, totals.totalHours);
   sumCell(C.totAmt, totals.totalAmount);
   payrollCols.forEach((p, k) => {
@@ -266,6 +295,7 @@ export async function exportSalarySheet(
     C.essAmt,
     ...extraCodes.map((_, k) => xAmt(k)),
     C.carry,
+    C.exp,
     C.totAmt,
     ...payrollCols.map((_, i) => firstPay + i),
     tax,
@@ -288,11 +318,12 @@ export async function exportSalarySheet(
   ws.getColumn(holder).width = 26;
   ws.getColumn(accNo).width = 16;
   ws.getColumn(sortCodeCol).width = 12;
+  ws.getColumn(expNote).width = 34;
   ws.getColumn(status).width = 14;
   ws.getColumn(C.check).width = 12;
   for (const c of moneyCols) ws.getColumn(c).width = Math.max(ws.getColumn(c).width ?? 0, 13);
   ws.getRow(3).height = 32;
-  ws.autoFilter = { from: { row: 3, column: 2 }, to: { row: 3, column: sortCodeCol } };
+  ws.autoFilter = { from: { row: 3, column: 2 }, to: { row: 3, column: expNote } };
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {

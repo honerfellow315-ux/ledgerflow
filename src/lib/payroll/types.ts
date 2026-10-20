@@ -89,6 +89,14 @@ export interface SalaryPeriod {
   notes?: string;
 }
 
+/** One expense of a person for the month (e.g. travel). The note is optional. */
+export interface SalaryExpense {
+  amount: number;
+  note?: string;
+}
+/** At most this many expenses per salary line, so the form stays manageable. */
+export const MAX_EXPENSES = 5;
+
 export interface SalaryEntry {
   id: string;
   periodId: string;
@@ -104,6 +112,8 @@ export interface SalaryEntry {
   taxDeduction: number;
   deduction: number;
   deductionNote?: string;
+  /** Expenses of the month (default none = 0). Optional so older code paths keep compiling. */
+  expenses?: SalaryExpense[];
   checkStatus: CheckStatus;
   /** The sheet's free-text "Client" column (e.g. "pay back"). */
   flag: string;
@@ -158,6 +168,8 @@ export interface MasterRowInput {
   /** P1..Pn */
   payments: number[];
   deduction: number;
+  /** Expenses column of the file. null = the file has no such column (existing expenses stay as they are). */
+  expenses?: SalaryExpense[] | null;
   accountDetail: string;
   flag: string;
   area: string;

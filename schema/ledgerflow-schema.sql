@@ -570,3 +570,6 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS payroll_lines_sheet_staff_uq ON payroll_lines (sheet_id, staff_id);
 CREATE INDEX IF NOT EXISTS payroll_lines_staff_idx ON payroll_lines (staff_id);
+
+-- Salary expenses (see schema/salary-expenses-migration.sql)
+ALTER TABLE salary_entries ADD COLUMN IF NOT EXISTS expenses jsonb NOT NULL DEFAULT '[]'::jsonb;

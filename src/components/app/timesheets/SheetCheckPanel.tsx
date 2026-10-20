@@ -89,6 +89,7 @@ export function SheetCheckPanel({
   payInfo,
   onSaveAccount,
   onAddPayment,
+  onSaveExpenses,
   onDeletePayment,
   payBusy,
   busy = false,
@@ -114,6 +115,7 @@ export function SheetCheckPanel({
   payInfo?: TimesheetPayInfo | null;
   onSaveAccount?: (a: AccountInput) => void;
   onAddPayment?: (p: PaymentInput) => void;
+  onSaveExpenses?: (expenses: { amount: number; note?: string }[]) => void;
   onDeletePayment?: (paymentId: string) => void;
   /** Payments stay possible in a locked month; only a running request blocks them. */
   payBusy?: boolean;
@@ -555,10 +557,7 @@ export function SheetCheckPanel({
                       </TD>
                       <TD className="w-[300px] max-w-[300px] whitespace-normal break-words text-xs">
                         {row.accepted ? (
-                          <p
-                            className="lf-clamp2 text-foreground"
-                            title={row.accepted.note}
-                          >
+                          <p className="lf-clamp2 text-foreground" title={row.accepted.note}>
                             <span className="font-medium">
                               {row.accepted.actualHours !== null &&
                               row.accepted.actualHours !== undefined
@@ -661,6 +660,7 @@ export function SheetCheckPanel({
           monthLabel={sheet.monthLabel}
           {...(onSaveAccount ? { onSaveAccount } : {})}
           {...(onAddPayment ? { onAddPayment } : {})}
+          {...(onSaveExpenses ? { onSaveExpenses } : {})}
           {...(onDeletePayment ? { onDeletePayment } : {})}
         />
       ) : null}

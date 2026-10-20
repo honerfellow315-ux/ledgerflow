@@ -21,7 +21,8 @@ import {
   timesheetRows,
   timesheetSheets,
 } from "../../../drizzle/schema";
-import { formatMonthLabel, round2 } from "../payroll/calc";
+import { expensesEffect, expensesTotal, formatMonthLabel, round2 } from "../payroll/calc";
+import { MAX_EXPENSES, type SalaryExpense } from "../payroll/types";
 import { uid } from "./id";
 import { recomputeFromShifts } from "./salaryShifts";
 import type { Db } from "./shiftImport";
@@ -209,10 +210,26 @@ export interface StaffMonthPay {
   /** false = no Salary Sheet for this month yet, so a payment cannot be added. */
   hasSalaryMonth: boolean;
   salaryClosed: boolean;
+  /** What is to be paid: the hours' pay plus the expenses (as EXPENSES_EFFECT says). */
   payable: number;
+  /** Of which: the expenses typed for this person and month (0 = none). */
+  expensesTotal: number;
+  expenses: SalaryExpense[];
   paid: number;
   balance: number;
   payments: PaymentLine[];
+}
+
+/** Expenses as stored in the database -> a clean list. */
+export function cleanExpenseList(list: unknown): SalaryExpense[] {
+  return (Array.isArray(list) ? list : [])
+    .map((x) => {
+      const amount = Number((x as { amount?: unknown } | null)?.amount);
+      const note = String((x as { note?: unknown } | null)?.note ?? "").trim();
+      return Number.isFinite(amount) ? { amount, ...(note ? { note } : {}) } : null;
+    })
+    .filter((x): x is SalaryExpense => x !== null)
+    .slice(0, MAX_EXPENSES);
 }
 
 export async function getStaffMonthPay(
@@ -223,16 +240,18 @@ export async function getStaffMonthPay(
   const sums = await db.execute(sql`
     SELECT coalesce(sum(pay_amount), 0)::float8 AS payable
     FROM timesheet_sheets WHERE staff_id = ${staffId} AND month = ${month}`);
-  const payable = round2(Number((sums.rows[0] as { payable?: number } | undefined)?.payable ?? 0));
+  const hoursPay = round2(Number((sums.rows[0] as { payable?: number } | undefined)?.payable ?? 0));
   const period = await periodByMonth(db, month);
   let payments: PaymentLine[] = [];
+  let expenses: SalaryExpense[] = [];
   if (period) {
     const [entry] = await db
-      .select({ id: salaryEntries.id })
+      .select({ id: salaryEntries.id, expenses: salaryEntries.expenses })
       .from(salaryEntries)
       .where(and(eq(salaryEntries.periodId, period.id), eq(salaryEntries.staffId, staffId)))
       .limit(1);
     if (entry) {
+      expenses = cleanExpenseList(entry.expenses);
       const rows = await db
         .select()
         .from(salaryPayments)
@@ -249,11 +268,14 @@ export async function getStaffMonthPay(
     }
   }
   const paid = round2(payments.reduce((t, p) => t + p.amount, 0));
+  const payable = round2(hoursPay + expensesEffect({ expenses }));
   return {
     month,
     hasSalaryMonth: Boolean(period),
     salaryClosed: period?.status === "closed",
     payable,
+    expensesTotal: expensesTotal({ expenses }),
+    expenses,
     paid,
     balance: round2(payable - paid),
     payments,
@@ -308,6 +330,36 @@ export async function addStaffPayment(
     notes: a.notes.trim().slice(0, 300) || null,
   });
   return { id };
+}
+
+/**
+ * Saves the expenses of a person for a month on their Salary Sheet line (the same place the
+ * Salary Sheet form reads), so both screens always show the same expenses.
+ */
+export async function saveStaffExpenses(
+  db: Db,
+  a: {
+    staffId: string;
+    month: string;
+    expenses: readonly { amount: number; note?: string | undefined }[];
+  },
+): Promise<{ total: number }> {
+  const period = await periodByMonth(db, a.month);
+  if (!period)
+    throw new Error(
+      `There is no Salary Sheet for ${formatMonthLabel(a.month)} yet. Create it in Salary Sheet first.`,
+    );
+  assertPeriodOpen(period);
+  const list = cleanExpenseList(a.expenses).filter((x) => x.amount !== 0);
+  await db
+    .insert(salaryEntries)
+    .values({ id: uid("se"), periodId: period.id, staffId: a.staffId })
+    .onConflictDoNothing();
+  await db
+    .update(salaryEntries)
+    .set({ expenses: list })
+    .where(and(eq(salaryEntries.periodId, period.id), eq(salaryEntries.staffId, a.staffId)));
+  return { total: expensesTotal({ expenses: list }) };
 }
 
 export async function deleteStaffPayment(db: Db, staffId: string, paymentId: string) {

@@ -21,9 +21,15 @@ import { importShiftRows } from "../server/shiftImport";
 import { recomputeFromShifts } from "../server/salaryShifts";
 import { buildImportChecks } from "../server/importChecks";
 import { buildRows, formatMonthLabel, formatNi, normName, normNi, round2 } from "../payroll/calc";
-import { CONTRACT_STATUSES, STAFF_DETAIL_FIELDS, isBuiltInShift } from "../payroll/types";
+import {
+  CONTRACT_STATUSES,
+  MAX_EXPENSES,
+  STAFF_DETAIL_FIELDS,
+  isBuiltInShift,
+} from "../payroll/types";
 import type {
   CheckStatus,
+  SalaryExpense,
   ImportCheckReport,
   ShiftCompany,
   PayrollCompany,
@@ -102,6 +108,21 @@ const toPeriod = (r: typeof salaryPeriods.$inferSelect): SalaryPeriod => ({
   ...(r.notes ? { notes: r.notes } : {}),
 });
 
+/** An expense list from the database/form: valid amounts only, at most MAX_EXPENSES. */
+const cleanExpenses = (list: unknown): SalaryExpense[] =>
+  (Array.isArray(list) ? list : [])
+    .map((x) => {
+      const amount = Number((x as { amount?: unknown } | null)?.amount);
+      const note = String((x as { note?: unknown } | null)?.note ?? "").trim();
+      return Number.isFinite(amount) ? { amount, ...(note ? { note } : {}) } : null;
+    })
+    .filter((x): x is SalaryExpense => x !== null)
+    .slice(0, MAX_EXPENSES);
+
+const zExpenses = z
+  .array(z.object({ amount: zMoney, note: z.string().max(200).optional() }))
+  .max(MAX_EXPENSES);
+
 const toEntry = (r: typeof salaryEntries.$inferSelect): SalaryEntry => ({
   id: r.id,
   periodId: r.periodId,
@@ -115,6 +136,7 @@ const toEntry = (r: typeof salaryEntries.$inferSelect): SalaryEntry => ({
   taxDeduction: r.taxDeduction,
   deduction: r.deduction,
   ...(r.deductionNote ? { deductionNote: r.deductionNote } : {}),
+  expenses: cleanExpenses(r.expenses),
   checkStatus: (r.checkStatus === "Reviewed" || r.checkStatus === "Verified"
     ? r.checkStatus
     : "") as CheckStatus,
@@ -902,6 +924,7 @@ const entryPatch = z
     taxDeduction: zMoney,
     deduction: zMoney,
     deductionNote: z.string(),
+    expenses: zExpenses,
     checkStatus: z.enum(["", "Reviewed", "Verified"]),
     flag: z.string(),
     payroll: z.record(z.string(), zMoney),
@@ -942,9 +965,13 @@ export const updateEntry = createServerFn({ method: "POST" })
     const actor = await requirePermission("salary", "edit");
     const periodId = await periodIdForEntry(data.id);
     const period = await assertOpen(periodId);
+    const { expenses: patchExpenses, ...patchRest } = data.patch;
     const [row] = await db
       .update(salaryEntries)
-      .set(data.patch)
+      .set({
+        ...patchRest,
+        ...(patchExpenses ? { expenses: cleanExpenses(patchExpenses) } : {}),
+      })
       .where(eq(salaryEntries.id, data.id))
       .returning();
     if (row) {
@@ -1348,6 +1375,8 @@ const masterRow = z.object({
   taxDeduction: zMoney,
   payments: z.array(zMoney),
   deduction: zMoney,
+  // null / missing = the file has no Expenses column: what is saved stays as it is.
+  expenses: zExpenses.nullish(),
   accountDetail: z.string(),
   flag: z.string(),
   area: z.string(),
@@ -1537,6 +1566,7 @@ export const importMasterSheet = createServerFn({ method: "POST" })
           carryForward: r.carryForward,
           taxDeduction: r.taxDeduction,
           deduction: r.deduction,
+          expenses: cleanExpenses(r.expenses),
           checkStatus: r.checkStatus,
           flag: r.flag,
           payroll: Object.fromEntries(
@@ -1558,6 +1588,8 @@ export const importMasterSheet = createServerFn({ method: "POST" })
               carryForward: sql`excluded.carry_forward`,
               taxDeduction: sql`excluded.tax_deduction`,
               deduction: sql`excluded.deduction`,
+              // A file without expenses (empty list) never wipes expenses typed in the app.
+              expenses: sql`CASE WHEN excluded.expenses = '[]'::jsonb THEN salary_entries.expenses ELSE excluded.expenses END`,
               checkStatus: sql`excluded.check_status`,
               flag: sql`excluded.flag`,
               payroll: sql`salary_entries.payroll || excluded.payroll`,

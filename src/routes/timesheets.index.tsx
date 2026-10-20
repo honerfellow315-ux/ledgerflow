@@ -65,6 +65,7 @@ import {
   getTimesheetPayInfo,
   saveTimesheetAccount,
   addTimesheetPayment,
+  saveTimesheetExpenses,
   deleteTimesheetPayment,
   setTimesheetStatedAccepted,
   correctTimesheetIdentity,
@@ -515,6 +516,16 @@ function TimesheetsPageContent() {
                     await refresh();
                     toast.success("Payment added (also in the Salary Sheet).");
                   }, "Could not add the payment."),
+              }
+            : {})}
+          {...(can("salary", "edit")
+            ? {
+                onSaveExpenses: (expenses: { amount: number; note?: string }[]) =>
+                  void guarded(async () => {
+                    await unwrap(saveTimesheetExpenses({ data: { sheetId: open.id, expenses } }));
+                    await refresh();
+                    toast.success("Expenses saved (also in the Salary Sheet).");
+                  }, "Could not save the expenses."),
               }
             : {})}
           {...(can("salary", "delete")
