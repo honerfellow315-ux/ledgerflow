@@ -499,7 +499,7 @@ export function EntryDialog({
             </ul>
           )}
           {!dis ? (
-            <div className="grid items-end gap-2 border-t border-border p-3 sm:grid-cols-[130px_120px_150px_1fr_auto]">
+            <div className="grid items-end gap-2 border-t border-border p-3 sm:grid-cols-[130px_120px_150px_minmax(0,1fr)]">
               <Field label="Date">
                 <Input
                   type="date"
@@ -537,7 +537,7 @@ export function EntryDialog({
                   onChange={(e) => setPay((p) => ({ ...p, reference: e.target.value }))}
                 />
               </Field>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-end gap-2 sm:col-span-4">
                 <Button variant="outline" onClick={() => addPayment(false)} disabled={payBusy}>
                   Add payment
                 </Button>
