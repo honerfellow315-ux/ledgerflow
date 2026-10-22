@@ -177,8 +177,14 @@ export function EntryDialog({
     }
   }
 
-  async function addPayment() {
-    const amount = parseAmount(pay.amount);
+  /**
+   * `back` = the staff member GAVE MONEY BACK (e.g. returned an overpayment). It is saved as a
+   * negative payment, so Cash paid goes down and Outstanding moves from -219 toward 0
+   * (-219 - (-200) = -19), instead of getting more negative like a Deduction does.
+   */
+  async function addPayment(back = false) {
+    const typed = parseAmount(pay.amount);
+    const amount = back ? -Math.abs(typed) : typed;
     if (!amount) {
       toast.error("Enter a payment amount.");
       return;
@@ -195,7 +201,9 @@ export function EntryDialog({
           date: pay.date,
           amount,
           method: pay.method,
-          reference: pay.reference,
+          reference: back
+            ? `Received back from staff${pay.reference ? ` — ${pay.reference}` : ""}`
+            : pay.reference,
         },
       });
       setPay((p) => ({ ...p, amount: "", reference: "" }));
@@ -418,7 +426,10 @@ export function EntryDialog({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-4">
-          <Field label="Deduction">
+          <Field
+            label="Deduction"
+            hint="Cut from salary (fine/advance). Staff returned money? Use “Received back” in Cash payments."
+          >
             <Input
               inputMode="decimal"
               value={form.deduction}
@@ -463,7 +474,12 @@ export function EntryDialog({
                 <li key={p.id} className="flex items-center gap-3 px-3 py-2 text-[12px]">
                   <span className="w-7 font-semibold text-muted-foreground">P{i + 1}</span>
                   <span className="w-24">{formatDate(p.date)}</span>
-                  <span className="num w-24 text-right font-medium">{formatMoney(p.amount)}</span>
+                  <span
+                    className={`num w-24 text-right font-medium ${p.amount < 0 ? "text-amber-500" : ""}`}
+                    title={p.amount < 0 ? "Received back from staff" : undefined}
+                  >
+                    {formatMoney(p.amount)}
+                  </span>
                   <span className="text-muted-foreground">{p.method}</span>
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
                     {p.reference}
@@ -521,9 +537,19 @@ export function EntryDialog({
                   onChange={(e) => setPay((p) => ({ ...p, reference: e.target.value }))}
                 />
               </Field>
-              <Button variant="outline" onClick={addPayment} disabled={payBusy}>
-                Add payment
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => addPayment(false)} disabled={payBusy}>
+                  Add payment
+                </Button>
+                <Button
+                  variant="outline"
+                  title="The staff member gave money back (e.g. returned an overpayment). Reduces what they owe."
+                  onClick={() => addPayment(true)}
+                  disabled={payBusy}
+                >
+                  Received back
+                </Button>
+              </div>
             </div>
           ) : null}
           {!dis && pay.method === "Bank Transfer" && (bankLines.length > 0 || bankEdit) ? (
