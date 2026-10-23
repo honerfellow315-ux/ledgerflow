@@ -416,7 +416,7 @@ function SalaryPageContent() {
             <SummaryCard
               label="Net outstanding"
               value={money(allTotals.outstanding)}
-              sublabel="owed to staff (− = overpaid)"
+              sublabel={`owed ${money(allTotals.owed)} · overpaid ${money(allTotals.overpaid)}`}
               tone={
                 allTotals.outstanding > 0
                   ? "warning"

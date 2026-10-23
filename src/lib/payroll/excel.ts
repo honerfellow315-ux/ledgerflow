@@ -580,6 +580,8 @@ export function parseMasterSheet(matrix: Matrix): MasterParse {
     if (isEmptyRow(r)) continue;
     const name = toText(get(r, idx.name));
     if (!name) continue;
+    // The totals rows at the bottom of an exported sheet are not staff.
+    if (/^(total\b|owed to staff \(sumif|overpaid \(sumif)/i.test(name)) continue;
     const payroll: Record<string, number> = {};
     for (const c of companyCols) {
       const v = toNumber(r[c.i] ?? null);

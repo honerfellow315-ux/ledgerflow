@@ -164,6 +164,13 @@ export interface SheetTotals {
   /** Sum of every line's expenses (0 when none). */
   expenses: number;
   outstanding: number;
+  /** SUMIF(outstanding > 0): what is still owed to staff, overpaid lines NOT netted off. */
+  owed: number;
+  /** SUMIF(outstanding < 0): total overpaid (a negative number). */
+  overpaid: number;
+  /** Same split for the Total Amount column (lines with a positive / negative total). */
+  totalAmountPlus: number;
+  totalAmountMinus: number;
   byCompany: Record<string, number>;
   /** Totals of every shift company other than RSS / ESS, keyed by its code. */
   byShift: Record<string, { amount: number; hours: number }>;
@@ -185,6 +192,10 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     deduction: 0,
     expenses: 0,
     outstanding: 0,
+    owed: 0,
+    overpaid: 0,
+    totalAmountPlus: 0,
+    totalAmountMinus: 0,
     byCompany: {},
     byShift: {},
   };
@@ -203,6 +214,10 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     t.payrollTotal += r.computed.payrollTotal;
     t.cashPaid += r.computed.cashPaid;
     t.outstanding += r.computed.outstanding;
+    if (r.computed.outstanding > 0) t.owed += r.computed.outstanding;
+    else if (r.computed.outstanding < 0) t.overpaid += r.computed.outstanding;
+    if (r.computed.totalAmount > 0) t.totalAmountPlus += r.computed.totalAmount;
+    else if (r.computed.totalAmount < 0) t.totalAmountMinus += r.computed.totalAmount;
     for (const [id, v] of Object.entries(e.payroll ?? {})) {
       t.byCompany[id] = (t.byCompany[id] ?? 0) + num(v);
     }

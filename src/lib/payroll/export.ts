@@ -289,6 +289,30 @@ export async function exportSalarySheet(
     cell.border = { top: { style: "thin", color: { argb: "FF6B7280" } } };
   });
 
+  // SUMIF rows: the plain TOTAL above nets overpaid (minus) lines against the plus ones.
+  // These two rows split it: only the lines that are above 0, and only the ones below 0.
+  // Add any new money column here too when one is added to the sheet.
+  const sumIfRows: { label: string; op: ">0" | "<0"; plus: boolean }[] = [
+    { label: "OWED TO STAFF (SUMIF > 0)", op: ">0", plus: true },
+    { label: "OVERPAID (SUMIF < 0)", op: "<0", plus: false },
+  ];
+  const sumIfCols: { c: number; plus: number; minus: number }[] = [
+    { c: C.totAmt, plus: totals.totalAmountPlus, minus: totals.totalAmountMinus },
+    { c: outstanding, plus: totals.owed, minus: totals.overpaid },
+  ];
+  sumIfRows.forEach((sr, i) => {
+    const row = tr + 1 + i;
+    ws.getCell(row, C.name).value = sr.label;
+    for (const sc of sumIfCols) {
+      const rng = `${col(sc.c)}${first}:${col(sc.c)}${last}`;
+      ws.getCell(row, sc.c).value = rows.length
+        ? { formula: `SUMIF(${rng},"${sr.op}")`, result: round2(sr.plus ? sc.plus : sc.minus) }
+        : 0;
+      ws.getCell(row, sc.c).numFmt = money;
+    }
+    ws.getRow(row).font = { bold: true };
+  });
+
   // formats + widths
   const moneyCols = [
     C.rssAmt,
