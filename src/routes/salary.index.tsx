@@ -404,15 +404,20 @@ function SalaryPageContent() {
             <SummaryCard
               label="Total amount"
               value={money(allTotals.totalAmount)}
-              sublabel="incl. carry-forward"
+              sublabel={`plus ${money(allTotals.totalAmountPlus)} · minus ${money(allTotals.totalAmountMinus)}`}
             />
             <SummaryCard
               label="Paid via payroll"
               value={money(allTotals.payrollTotal)}
-              sublabel={`after ${money(allTotals.taxDeduction)} tax`}
+              sublabel={`plus ${money(allTotals.payrollPlus)} · minus ${money(allTotals.payrollMinus)}`}
               tone="success"
             />
-            <SummaryCard label="Cash paid" value={money(allTotals.cashPaid)} tone="success" />
+            <SummaryCard
+              label="Cash paid"
+              value={money(allTotals.cashPaid)}
+              sublabel={`plus ${money(allTotals.cashPlus)} · minus ${money(allTotals.cashMinus)}`}
+              tone="success"
+            />
             <SummaryCard
               label="Net outstanding"
               value={money(allTotals.outstanding)}

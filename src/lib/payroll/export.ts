@@ -289,30 +289,6 @@ export async function exportSalarySheet(
     cell.border = { top: { style: "thin", color: { argb: "FF6B7280" } } };
   });
 
-  // SUMIF rows: the plain TOTAL above nets overpaid (minus) lines against the plus ones.
-  // These two rows split it: only the lines that are above 0, and only the ones below 0.
-  // Add any new money column here too when one is added to the sheet.
-  const sumIfRows: { label: string; op: ">0" | "<0"; plus: boolean }[] = [
-    { label: "OWED TO STAFF (SUMIF > 0)", op: ">0", plus: true },
-    { label: "OVERPAID (SUMIF < 0)", op: "<0", plus: false },
-  ];
-  const sumIfCols: { c: number; plus: number; minus: number }[] = [
-    { c: C.totAmt, plus: totals.totalAmountPlus, minus: totals.totalAmountMinus },
-    { c: outstanding, plus: totals.owed, minus: totals.overpaid },
-  ];
-  sumIfRows.forEach((sr, i) => {
-    const row = tr + 1 + i;
-    ws.getCell(row, C.name).value = sr.label;
-    for (const sc of sumIfCols) {
-      const rng = `${col(sc.c)}${first}:${col(sc.c)}${last}`;
-      ws.getCell(row, sc.c).value = rows.length
-        ? { formula: `SUMIF(${rng},"${sr.op}")`, result: round2(sr.plus ? sc.plus : sc.minus) }
-        : 0;
-      ws.getCell(row, sc.c).numFmt = money;
-    }
-    ws.getRow(row).font = { bold: true };
-  });
-
   // formats + widths
   const moneyCols = [
     C.rssAmt,
@@ -330,6 +306,38 @@ export async function exportSalarySheet(
     outstanding,
   ];
   for (const c of moneyCols) ws.getColumn(c).numFmt = money;
+
+  // SUMIF rows under TOTAL, for EVERY money column (a new money column only needs adding to
+  // moneyCols above). The plain TOTAL nets overpaid (minus) lines against the plus ones; these
+  // two rows split it: only the lines above 0, and only the lines below 0.
+  const cellNum = (r: number, c: number): number => {
+    const v = ws.getCell(r, c).value as unknown;
+    if (typeof v === "number") return v;
+    if (v && typeof v === "object" && "result" in v)
+      return Number((v as { result?: unknown }).result) || 0;
+    return 0;
+  };
+  const sumIfRows = [
+    { label: "OWED TO STAFF (SUMIF > 0)", op: ">0" },
+    { label: "OVERPAID (SUMIF < 0)", op: "<0" },
+  ] as const;
+  sumIfRows.forEach((sr, i) => {
+    const row = tr + 1 + i;
+    ws.getCell(row, C.name).value = sr.label;
+    for (const c of moneyCols) {
+      let res = 0;
+      for (let r = first; r <= last; r++) {
+        const v = cellNum(r, c);
+        if (sr.op === ">0" ? v > 0 : v < 0) res += v;
+      }
+      const rng = `${col(c)}${first}:${col(c)}${last}`;
+      ws.getCell(row, c).value = rows.length
+        ? { formula: `SUMIF(${rng},"${sr.op}")`, result: round2(res) }
+        : 0;
+      ws.getCell(row, c).numFmt = money;
+    }
+    ws.getRow(row).font = { bold: true };
+  });
   for (const c of [C.rssHrs, C.essHrs, C.totHrs, ...extraCodes.map((_, k) => xHrs(k))])
     ws.getColumn(c).numFmt = "#,##0.00";
   ws.getColumn(1).width = 2;

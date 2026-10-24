@@ -171,6 +171,11 @@ export interface SheetTotals {
   /** Same split for the Total Amount column (lines with a positive / negative total). */
   totalAmountPlus: number;
   totalAmountMinus: number;
+  /** Same split for Paid via payroll and Cash paid (cash is negative on "Received back" lines). */
+  payrollPlus: number;
+  payrollMinus: number;
+  cashPlus: number;
+  cashMinus: number;
   byCompany: Record<string, number>;
   /** Totals of every shift company other than RSS / ESS, keyed by its code. */
   byShift: Record<string, { amount: number; hours: number }>;
@@ -196,6 +201,10 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     overpaid: 0,
     totalAmountPlus: 0,
     totalAmountMinus: 0,
+    payrollPlus: 0,
+    payrollMinus: 0,
+    cashPlus: 0,
+    cashMinus: 0,
     byCompany: {},
     byShift: {},
   };
@@ -218,6 +227,10 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     else if (r.computed.outstanding < 0) t.overpaid += r.computed.outstanding;
     if (r.computed.totalAmount > 0) t.totalAmountPlus += r.computed.totalAmount;
     else if (r.computed.totalAmount < 0) t.totalAmountMinus += r.computed.totalAmount;
+    if (r.computed.payrollTotal > 0) t.payrollPlus += r.computed.payrollTotal;
+    else if (r.computed.payrollTotal < 0) t.payrollMinus += r.computed.payrollTotal;
+    if (r.computed.cashPaid > 0) t.cashPlus += r.computed.cashPaid;
+    else if (r.computed.cashPaid < 0) t.cashMinus += r.computed.cashPaid;
     for (const [id, v] of Object.entries(e.payroll ?? {})) {
       t.byCompany[id] = (t.byCompany[id] ?? 0) + num(v);
     }
