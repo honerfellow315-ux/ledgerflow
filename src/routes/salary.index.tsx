@@ -401,36 +401,25 @@ function SalaryPageContent() {
               sublabel={`${hrs(allTotals.totalHours)} hours`}
               icon={Banknote}
             />
-            <SummaryCard
-              label="Total amount"
-              value={money(allTotals.totalAmount)}
-              sublabel={`plus ${money(allTotals.totalAmountPlus)} · minus ${money(allTotals.totalAmountMinus)}`}
-            />
+            <SummaryCard label="Total amount" value={money(allTotals.totalAmount)} />
             <SummaryCard
               label="Paid via payroll"
               value={money(allTotals.payrollTotal)}
-              sublabel={`plus ${money(allTotals.payrollPlus)} · minus ${money(allTotals.payrollMinus)}`}
               tone="success"
             />
+            <SummaryCard label="Cash paid" value={money(allTotals.cashPaid)} tone="success" />
             <SummaryCard
-              label="Cash paid"
-              value={money(allTotals.cashPaid)}
-              sublabel={`plus ${money(allTotals.cashPlus)} · minus ${money(allTotals.cashMinus)}`}
-              tone="success"
-            />
-            <SummaryCard
-              label="Net outstanding"
+              label="Outstanding"
               value={money(allTotals.outstanding)}
-              sublabel={`owed ${money(allTotals.owed)} · overpaid ${money(allTotals.overpaid)}`}
-              tone={
-                allTotals.outstanding > 0
-                  ? "warning"
-                  : allTotals.outstanding < 0
-                    ? "danger"
-                    : "success"
-              }
+              tone={allTotals.outstanding > 0 ? "warning" : "success"}
             />
           </div>
+          <p className="-mt-1 px-1 text-[11px] leading-relaxed text-muted-foreground">
+            Totals = <span className="font-mono">SUMIF(column, &quot;&gt;0&quot;)</span>: the sum of
+            positive line amounts only. Overpaid (negative) lines are not netted off and stay
+            visible on their own line. Line outstanding = Total amount − Payroll − Cash paid −
+            Deduction.
+          </p>
 
           <Panel>
             <PanelHeader

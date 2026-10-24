@@ -164,23 +164,22 @@ export interface SheetTotals {
   /** Sum of every line's expenses (0 when none). */
   expenses: number;
   outstanding: number;
-  /** SUMIF(outstanding > 0): what is still owed to staff, overpaid lines NOT netted off. */
-  owed: number;
-  /** SUMIF(outstanding < 0): total overpaid (a negative number). */
-  overpaid: number;
-  /** Same split for the Total Amount column (lines with a positive / negative total). */
-  totalAmountPlus: number;
-  totalAmountMinus: number;
-  /** Same split for Paid via payroll and Cash paid (cash is negative on "Received back" lines). */
-  payrollPlus: number;
-  payrollMinus: number;
-  cashPlus: number;
-  cashMinus: number;
   byCompany: Record<string, number>;
   /** Totals of every shift company other than RSS / ESS, keyed by its code. */
   byShift: Record<string, { amount: number; hours: number }>;
 }
 
+/** Only amounts above zero count towards a total (the SUMIF(range, ">0") rule). */
+const pos = (v: unknown): number => {
+  const n = num(v);
+  return n > 0 ? n : 0;
+};
+
+/**
+ * Column totals of the sheet. ONE rule for every column, on screen and in the Excel export:
+ *   Total = SUMIF(column, ">0")  — the sum of the positive line amounts only.
+ * Overpaid (negative) lines are not netted against the others; they stay visible on their own line.
+ */
 export function sumRows(rows: readonly SheetRow[]): SheetTotals {
   const t: SheetTotals = {
     lines: rows.length,
@@ -197,46 +196,30 @@ export function sumRows(rows: readonly SheetRow[]): SheetTotals {
     deduction: 0,
     expenses: 0,
     outstanding: 0,
-    owed: 0,
-    overpaid: 0,
-    totalAmountPlus: 0,
-    totalAmountMinus: 0,
-    payrollPlus: 0,
-    payrollMinus: 0,
-    cashPlus: 0,
-    cashMinus: 0,
     byCompany: {},
     byShift: {},
   };
   for (const r of rows) {
     const e = r.entry;
-    t.rssAmount += num(e.rssAmount);
-    t.rssHours += num(e.rssHours);
-    t.essAmount += num(e.essAmount);
-    t.essHours += num(e.essHours);
-    t.carryForward += num(e.carryForward);
-    t.taxDeduction += num(e.taxDeduction);
-    t.deduction += num(e.deduction);
-    t.expenses += expensesTotal(e);
-    t.totalHours += r.computed.totalHours;
-    t.totalAmount += r.computed.totalAmount;
-    t.payrollTotal += r.computed.payrollTotal;
-    t.cashPaid += r.computed.cashPaid;
-    t.outstanding += r.computed.outstanding;
-    if (r.computed.outstanding > 0) t.owed += r.computed.outstanding;
-    else if (r.computed.outstanding < 0) t.overpaid += r.computed.outstanding;
-    if (r.computed.totalAmount > 0) t.totalAmountPlus += r.computed.totalAmount;
-    else if (r.computed.totalAmount < 0) t.totalAmountMinus += r.computed.totalAmount;
-    if (r.computed.payrollTotal > 0) t.payrollPlus += r.computed.payrollTotal;
-    else if (r.computed.payrollTotal < 0) t.payrollMinus += r.computed.payrollTotal;
-    if (r.computed.cashPaid > 0) t.cashPlus += r.computed.cashPaid;
-    else if (r.computed.cashPaid < 0) t.cashMinus += r.computed.cashPaid;
+    t.rssAmount += pos(e.rssAmount);
+    t.rssHours += pos(e.rssHours);
+    t.essAmount += pos(e.essAmount);
+    t.essHours += pos(e.essHours);
+    t.carryForward += pos(e.carryForward);
+    t.taxDeduction += pos(e.taxDeduction);
+    t.deduction += pos(e.deduction);
+    t.expenses += pos(expensesTotal(e));
+    t.totalHours += pos(r.computed.totalHours);
+    t.totalAmount += pos(r.computed.totalAmount);
+    t.payrollTotal += pos(r.computed.payrollTotal);
+    t.cashPaid += pos(r.computed.cashPaid);
+    t.outstanding += pos(r.computed.outstanding);
     for (const [id, v] of Object.entries(e.payroll ?? {})) {
-      t.byCompany[id] = (t.byCompany[id] ?? 0) + num(v);
+      t.byCompany[id] = (t.byCompany[id] ?? 0) + pos(v);
     }
     for (const [code, v] of Object.entries(e.extra ?? {})) {
       const cur = t.byShift[code] ?? { amount: 0, hours: 0 };
-      t.byShift[code] = { amount: cur.amount + num(v?.amount), hours: cur.hours + num(v?.hours) };
+      t.byShift[code] = { amount: cur.amount + pos(v?.amount), hours: cur.hours + pos(v?.hours) };
     }
   }
   for (const k of Object.keys(t) as (keyof SheetTotals)[]) {
