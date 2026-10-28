@@ -2203,3 +2203,76 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 .lf-kbd {
   z-index: 2;
 }
+
+
+/* ==========================================================================
+   Scroll performance (UI only) — smooth, fast vertical + horizontal scrolling.
+   No colours, layouts or behaviour change; this only removes what forces the
+   browser to repaint or re-blur on every scroll frame:
+   1. the page gradient was `background-attachment: fixed` (repainted each frame)
+   2. every panel, every input/select and the sticky header used backdrop-filter
+      (hundreds of them on the payroll sheet), re-blurred while scrolling
+   3. row hover transitions ran while rows moved under the mouse
+   Unlayered and last on purpose, so it wins over the earlier rules.
+   ========================================================================== */
+@media screen {
+  /* 1. Same gradient, but on a fixed compositor layer that never repaints on scroll. */
+  body {
+    background-image: none;
+    background-attachment: scroll;
+    background-color: transparent;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      radial-gradient(60% 45% at 6% 0%, oklch(0.32 0.075 178 / 0.55) 0%, transparent 70%),
+      radial-gradient(50% 40% at 100% 100%, oklch(0.28 0.06 205 / 0.45) 0%, transparent 70%),
+      radial-gradient(40% 30% at 95% 0%, oklch(0.26 0.05 190 / 0.35) 0%, transparent 70%);
+    transform: translateZ(0);
+  }
+
+  /* 2a. Panels / cards: the blur sat over a smooth gradient, so it was nearly invisible. */
+  .panel,
+  .panel-interactive,
+  .lf-shell .panel,
+  .lf-shell .panel-interactive {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  /* 2b. Fields (one per table cell on the payroll sheet) — same selector as the glass rule. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]),
+  textarea,
+  select,
+  button[role="combobox"],
+  .lf-search input {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  /* 2c. Sticky header: a soft solid fade instead of a live blur of the scrolling content. */
+  .lf-header::before,
+  .lf-glass-bar::before {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: color-mix(in oklab, var(--color-background) 80%, transparent);
+  }
+
+  /* 3. Hover colour changes instantly instead of animating while rows scroll past the cursor. */
+  .lf-main table tbody tr,
+  .lf-log tbody tr {
+    transition: none;
+  }
+
+  /* 4. Horizontal scrollers: momentum on touch, and no accidental browser back-swipe at the edge. */
+  .overflow-x-auto,
+  .overflow-auto {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+}
