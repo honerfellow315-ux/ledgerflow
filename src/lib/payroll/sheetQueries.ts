@@ -4,6 +4,7 @@ import { unwrap } from "@/lib/unwrap";
 import {
   getPayrollSheet,
   listAssignableStaff,
+  listReferrerOptions,
   listPayrollSheets,
   listSheetCompanies,
 } from "@/lib/actions/payroll";
@@ -15,6 +16,7 @@ export const payrollKeys = {
   sheets: (companyId: string) => ["payroll", "sheets", companyId] as const,
   sheet: (sheetId: string) => ["payroll", "sheet", sheetId] as const,
   assignable: (sheetId: string) => ["payroll", "assignable", sheetId] as const,
+  referrers: (sheetId: string) => ["payroll", "referrers", sheetId] as const,
 };
 
 export const useSheetCompanies = (enabled = true) =>
@@ -42,6 +44,16 @@ export const useAssignableStaff = (sheetId: string, enabled: boolean) =>
   useQuery({
     queryKey: payrollKeys.assignable(sheetId),
     queryFn: () => unwrap(listAssignableStaff({ data: { sheetId } })),
+    enabled: enabled && !!sheetId,
+    staleTime: 0,
+    gcTime: 0,
+  });
+
+/** All staff (incl. those already on the sheet) for the "Referred by" picker. */
+export const useReferrerOptions = (sheetId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: payrollKeys.referrers(sheetId),
+    queryFn: () => unwrap(listReferrerOptions({ data: { sheetId } })),
     enabled: enabled && !!sheetId,
     staleTime: 0,
     gcTime: 0,

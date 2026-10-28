@@ -58,6 +58,10 @@ export interface PayrollLine {
   fixedAmount: number | null;
   /** Rate the Holiday Entitlement hours are paid at. null = information only (old behaviour). */
   holidayRate: number | null;
+  /** Staff member who referred this person (information only). */
+  referredByStaffId?: string;
+  /** Display name of the referrer, filled in by the server. */
+  referredByName?: string;
 }
 
 /**

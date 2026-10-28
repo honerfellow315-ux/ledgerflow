@@ -53,7 +53,7 @@ const toSheetInfo = (r: typeof payrollSheets.$inferSelect): PayrollSheetInfo => 
   ...(r.notes ? { notes: r.notes } : {}),
 });
 
-const toLine = (r: typeof payrollLines.$inferSelect): PayrollLine => ({
+const toLine = (r: typeof payrollLines.$inferSelect, referredByName?: string): PayrollLine => ({
   id: r.id,
   sheetId: r.sheetId,
   staffId: r.staffId,
@@ -65,6 +65,8 @@ const toLine = (r: typeof payrollLines.$inferSelect): PayrollLine => ({
   uniformCost: r.uniformCost,
   fixedAmount: r.fixedAmount ?? null,
   holidayRate: r.holidayRate ?? null,
+  ...(r.referredByStaffId ? { referredByStaffId: r.referredByStaffId } : {}),
+  ...(r.referredByStaffId && referredByName ? { referredByName } : {}),
 });
 
 const toLink = (r: typeof payrollCompanyStaff.$inferSelect): CompanyStaffLink => ({
@@ -469,10 +471,24 @@ export const getPayrollSheet = createServerFn({ method: "POST" })
       );
     }
     staffRows.sort((a, b) => a.name.localeCompare(b.name));
+    // Names of the people who referred someone on this sheet (they may not be on the sheet themselves).
+    const refIds = [
+      ...new Set(lines.map((l) => l.referredByStaffId).filter((x): x is string => !!x)),
+    ];
+    const refNames = new Map<string, string>();
+    for (const part of chunk(refIds, 500)) {
+      const rows = await db
+        .select({ id: payrollStaff.id, name: payrollStaff.name })
+        .from(payrollStaff)
+        .where(inArray(payrollStaff.id, part));
+      for (const r of rows) refNames.set(r.id, r.name);
+    }
     return {
       sheet: toSheetInfo(sheet),
       company: toCompany(company, counts.get(company.id) ?? 0),
-      lines: lines.map(toLine),
+      lines: lines.map((l) =>
+        toLine(l, l.referredByStaffId ? refNames.get(l.referredByStaffId) : undefined),
+      ),
       staff: staffRows.map((r) =>
         withCompanyStatus(
           toPayrollStaff(r, full),
@@ -700,13 +716,25 @@ export interface AssignableStaff {
   contractStatus?: string;
   /** Other payroll companies this person is already in. */
   alsoIn: string[];
+  /** NI number — only sent to users with the "staff" view permission (used for searching). */
+  ni?: string;
+}
+
+/** A staff member who can be picked as the "Referred by" person. */
+export interface ReferrerOption {
+  id: string;
+  name: string;
+  active: boolean;
+  /** NI number — only sent to users with the "staff" view permission (used for searching). */
+  ni?: string;
 }
 
 /** Staff who are not yet on this sheet (for the "Add existing staff" picker). Name + status only. */
 export const listAssignableStaff = createServerFn({ method: "POST" })
   .validator(z.object({ sheetId: z.string() }))
   .handler(async ({ data }): Promise<AssignableStaff[]> => {
-    await requirePermission("payroll", "edit");
+    const actor = await requirePermission("payroll", "edit");
+    const canSeeNi = hasPermission(actor.role, actor.permissions, "staff", "view");
     const sheet = await getSheetOrThrow(data.sheetId);
     const [all, onSheet, links, companies] = await Promise.all([
       db.select().from(payrollStaff).orderBy(asc(payrollStaff.name)),
@@ -733,7 +761,27 @@ export const listAssignableStaff = createServerFn({ method: "POST" })
         active: s.active,
         ...(s.contractStatus ? { contractStatus: s.contractStatus } : {}),
         alsoIn: also.get(s.id) ?? [],
+        ...(canSeeNi && s.ni ? { ni: s.ni } : {}),
       }));
+  });
+
+/**
+ * Every staff member (also those already on the sheet) for the "Referred by" picker.
+ * Name + status only; the NI number is included just for users with the "staff" view permission.
+ */
+export const listReferrerOptions = createServerFn({ method: "POST" })
+  .validator(z.object({ sheetId: z.string() }))
+  .handler(async ({ data }): Promise<ReferrerOption[]> => {
+    const actor = await requirePermission("payroll", "edit");
+    const canSeeNi = hasPermission(actor.role, actor.permissions, "staff", "view");
+    await getSheetOrThrow(data.sheetId);
+    const all = await db.select().from(payrollStaff).orderBy(asc(payrollStaff.name));
+    return all.map((s) => ({
+      id: s.id,
+      name: s.name,
+      active: s.active,
+      ...(canSeeNi && s.ni ? { ni: s.ni } : {}),
+    }));
   });
 
 /** Adds a person to the company (if not already) and puts a line for them on the sheet. */
@@ -744,6 +792,8 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
       staffId: z.string(),
       comment: z.string().trim().max(200).optional(),
       rate: z.number().min(0).max(10000).optional(),
+      /** Optional: the staff member who referred this person. */
+      referredByStaffId: z.string().optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -756,6 +806,19 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
       .where(eq(payrollStaff.id, data.staffId))
       .limit(1);
     if (!staff) throw new Error("That staff member no longer exists.");
+    if (data.referredByStaffId && data.referredByStaffId === staff.id) {
+      throw new Error("A person cannot refer themselves.");
+    }
+    let referrerName: string | undefined;
+    if (data.referredByStaffId) {
+      const [ref] = await db
+        .select({ name: payrollStaff.name })
+        .from(payrollStaff)
+        .where(eq(payrollStaff.id, data.referredByStaffId))
+        .limit(1);
+      if (!ref) throw new Error("The staff member who referred this person no longer exists.");
+      referrerName = ref.name;
+    }
 
     const [link] = await db
       .insert(payrollCompanyStaff)
@@ -786,6 +849,7 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
         staffId: staff.id,
         rate: link?.rate ?? company.defaultRate,
         comment: data.comment ?? "",
+        referredByStaffId: data.referredByStaffId ?? null,
       })
       .onConflictDoNothing()
       .returning();
@@ -796,9 +860,10 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
         module: "payroll",
         entityId: row.id,
         label: `${await sheetLabel(sheet)} — ${staff.name}`,
+        details: referrerName ? `Referred by ${referrerName}` : undefined,
       });
     }
-    return row ? toLine(row) : undefined;
+    return row ? toLine(row, referrerName) : undefined;
   });
 
 /**

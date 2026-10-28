@@ -993,6 +993,11 @@ function PayrollPageContent() {
                                   </span>
                                 ) : null}
                               </div>
+                              {r.line.referredByName ? (
+                                <p className="text-[10px] text-muted-foreground">
+                                  Referred by {r.line.referredByName}
+                                </p>
+                              ) : null}
                             </TD>
                             <TD align="right">
                               <NumCell

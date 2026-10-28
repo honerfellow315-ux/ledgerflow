@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -9,16 +9,23 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, UserPlus } from "@/lib/icons";
+import { Search, UserPlus, X } from "@/lib/icons";
 import { addStaffToSheet } from "@/lib/actions/payroll";
 import { errorMessage } from "@/lib/payroll/queries";
-import { useAssignableStaff, useRefreshPayroll } from "@/lib/payroll/sheetQueries";
+import { formatNi, normNi } from "@/lib/payroll/calc";
+import {
+  useAssignableStaff,
+  useReferrerOptions,
+  useRefreshPayroll,
+} from "@/lib/payroll/sheetQueries";
 import { StaffDialog } from "@/components/app/salary/StaffDialog";
 
 /**
  * Adds a person to this company's sheet: pick an existing staff member (also works for
  * someone who is already in another payroll company — same record, same ID), or create
  * a brand-new one, who is attached straight away with the "New Staff" comment.
+ * The list can be searched by name or NI number (NI only for users allowed to see staff
+ * details), and an optional "Referred by" staff member can be recorded on the new line.
  */
 export function AddStaffDialog({
   open,
@@ -37,20 +44,47 @@ export function AddStaffDialog({
 }) {
   const refresh = useRefreshPayroll();
   const q = useAssignableStaff(sheetId, open);
+  const refQ = useReferrerOptions(sheetId, open);
   const [search, setSearch] = useState("");
+  // "Referred by" picker: free-text search + the chosen staff member (if any)
+  const [refSearch, setRefSearch] = useState("");
+  const [referrer, setReferrer] = useState<{ id: string; name: string } | null>(null);
   const [rate, setRate] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
 
+  // Start clean every time the dialog is closed, so a referrer never carries over to the next person.
+  useEffect(() => {
+    if (!open) {
+      setReferrer(null);
+      setRefSearch("");
+    }
+  }, [open]);
+
   const rateNum = rate.trim() === "" ? undefined : Number(rate);
   const rateBad = rateNum !== undefined && (!Number.isFinite(rateNum) || rateNum < 0);
 
-  const list = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return (q.data ?? [])
-      .filter((s) => !needle || s.name.toLowerCase().includes(needle))
-      .slice(0, 200);
-  }, [q.data, search]);
+  // NI numbers are only sent by the server to users who may see staff details.
+  const niSearchable = (q.data ?? []).some((s) => !!s.ni);
+
+  /** True when the typed text matches the name, or (when present) the NI number ignoring spaces/case. */
+  function matches(s: { name: string; ni?: string | undefined }, text: string): boolean {
+    const needle = text.trim().toLowerCase();
+    if (!needle) return true;
+    if (s.name.toLowerCase().includes(needle)) return true;
+    const niNeedle = normNi(text);
+    return !!s.ni && niNeedle.length > 0 && normNi(s.ni).includes(niNeedle);
+  }
+
+  const list = useMemo(
+    () => (q.data ?? []).filter((s) => matches(s, search)).slice(0, 200),
+    [q.data, search],
+  );
+
+  const refMatches = useMemo(() => {
+    if (!refSearch.trim()) return [];
+    return (refQ.data ?? []).filter((s) => matches(s, refSearch)).slice(0, 6);
+  }, [refQ.data, refSearch]);
 
   async function add(staffId: string, comment?: string) {
     if (rateBad) {
@@ -65,6 +99,7 @@ export function AddStaffDialog({
           staffId,
           ...(comment ? { comment } : {}),
           ...(rateNum !== undefined ? { rate: rateNum } : {}),
+          ...(referrer ? { referredByStaffId: referrer.id } : {}),
         },
       });
       await refresh();
@@ -95,7 +130,9 @@ export function AddStaffDialog({
                 <Input
                   autoFocus
                   className="pl-8"
-                  placeholder="Search staff by name"
+                  placeholder={
+                    niSearchable ? "Search by name or NI number" : "Search staff by name"
+                  }
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -107,6 +144,67 @@ export function AddStaffDialog({
                 onChange={(e) => setRate(e.target.value)}
                 aria-label="Hourly rate for this person (optional)"
               />
+            </div>
+
+            {/* Optional: who referred this person */}
+            <div className="space-y-1.5">
+              {referrer ? (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-[13px]">
+                  <span className="min-w-0 truncate">
+                    <span className="text-muted-foreground">Referred by: </span>
+                    <span className="font-medium">{referrer.name}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label="Remove referrer"
+                    onClick={() => setReferrer(null)}
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <Input
+                    placeholder={
+                      niSearchable
+                        ? "Referred by (optional) — search by name or NI number"
+                        : "Referred by (optional) — search by name"
+                    }
+                    value={refSearch}
+                    onChange={(e) => setRefSearch(e.target.value)}
+                    aria-label="Staff member who referred this person (optional)"
+                  />
+                  {refSearch.trim() ? (
+                    <div className="divide-y divide-border rounded-md border border-border">
+                      {refMatches.length === 0 ? (
+                        <p className="px-3 py-2 text-center text-xs text-muted-foreground">
+                          No one matches.
+                        </p>
+                      ) : (
+                        refMatches.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="block w-full px-3 py-1.5 text-left text-[13px] hover:bg-muted"
+                            onClick={() => {
+                              setReferrer({ id: s.id, name: s.name });
+                              setRefSearch("");
+                            }}
+                          >
+                            {s.name}
+                            {s.ni ? (
+                              <span className="ml-2 text-[11px] text-muted-foreground">
+                                {formatNi(s.ni)}
+                              </span>
+                            ) : null}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
 
             <div className="max-h-72 divide-y divide-border overflow-y-auto rounded-md border border-border">
@@ -123,6 +221,7 @@ export function AddStaffDialog({
                       <p className="truncate text-[13px] font-medium">{s.name}</p>
                       <p className="truncate text-[11px] text-muted-foreground">
                         {[
+                          s.ni ? formatNi(s.ni) : "",
                           !s.active ? "Inactive" : "",
                           s.contractStatus === "P45" ? "P45" : "",
                           s.alsoIn.length ? `Also in ${s.alsoIn.join(", ")}` : "",
@@ -169,6 +268,7 @@ export function AddStaffDialog({
               staffId: saved.id,
               comment: "New Staff",
               ...(rateNum !== undefined && !rateBad ? { rate: rateNum } : {}),
+              ...(referrer ? { referredByStaffId: referrer.id } : {}),
             },
           });
           await refresh();

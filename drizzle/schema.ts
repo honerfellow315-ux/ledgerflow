@@ -561,6 +561,10 @@ export const payrollLines = pgTable(
     fixedAmount: numeric("fixed_amount", { precision: 10, scale: 2, mode: "number" }),
     // NULL = holiday entitlement is information only. Set = those hours are paid at this rate.
     holidayRate: numeric("holiday_rate", { precision: 10, scale: 2, mode: "number" }),
+    // The staff member who referred this person (optional, information only).
+    referredByStaffId: text("referred_by_staff_id").references(() => payrollStaff.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => [
     uniqueIndex("payroll_lines_sheet_staff_uq").on(t.sheetId, t.staffId),

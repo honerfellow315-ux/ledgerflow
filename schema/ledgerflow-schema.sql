@@ -573,3 +573,7 @@ CREATE INDEX IF NOT EXISTS payroll_lines_staff_idx ON payroll_lines (staff_id);
 
 -- Salary expenses (see schema/salary-expenses-migration.sql)
 ALTER TABLE salary_entries ADD COLUMN IF NOT EXISTS expenses jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+-- Payroll sheet "Referred by" (see schema/payroll-referral-migration.sql)
+ALTER TABLE payroll_lines
+  ADD COLUMN IF NOT EXISTS referred_by_staff_id text REFERENCES payroll_staff(id) ON DELETE SET NULL;
