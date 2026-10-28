@@ -2213,6 +2213,7 @@ input[type="time"]::-webkit-calendar-picker-indicator {
    2. every panel, every input/select and the sticky header used backdrop-filter
       (hundreds of them on the payroll sheet), re-blurred while scrolling
    3. row hover transitions ran while rows moved under the mouse
+   (Horizontal sync of the two table scrollbars is fixed in Panel.tsx.)
    Unlayered and last on purpose, so it wins over the earlier rules.
    ========================================================================== */
 @media screen {
@@ -2267,12 +2268,5 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   .lf-main table tbody tr,
   .lf-log tbody tr {
     transition: none;
-  }
-
-  /* 4. Horizontal scrollers: momentum on touch, and no accidental browser back-swipe at the edge. */
-  .overflow-x-auto,
-  .overflow-auto {
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-x: contain;
   }
 }

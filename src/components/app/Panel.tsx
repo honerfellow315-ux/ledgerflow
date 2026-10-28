@@ -71,7 +71,16 @@ export function TableWrap({ children }: { children: ReactNode }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [scrollWidth, setScrollWidth] = useState(0);
   const [needsScroll, setNeedsScroll] = useState(false);
-  const syncing = useRef(false);
+  // Which bar the user is currently driving. Only that bar copies its position to the other one;
+  // the other bar's scroll events are ignored. Copying in both directions made the two bars
+  // fight each other during momentum scrolling (stutter, or the table refusing to move).
+  const driver = useRef<"top" | "bottom">("top");
+  const driveTop = () => {
+    driver.current = "top";
+  };
+  const driveBottom = () => {
+    driver.current = "bottom";
+  };
 
   useEffect(() => {
     const el = topRef.current;
@@ -94,18 +103,16 @@ export function TableWrap({ children }: { children: ReactNode }) {
   }, [children]);
 
   const onTopScroll = () => {
-    if (syncing.current) return;
-    syncing.current = true;
-    if (bottomRef.current && topRef.current)
-      bottomRef.current.scrollLeft = topRef.current.scrollLeft;
-    syncing.current = false;
+    const top = topRef.current;
+    const bottom = bottomRef.current;
+    if (driver.current !== "top" || !top || !bottom) return;
+    if (bottom.scrollLeft !== top.scrollLeft) bottom.scrollLeft = top.scrollLeft;
   };
   const onBottomScroll = () => {
-    if (syncing.current) return;
-    syncing.current = true;
-    if (topRef.current && bottomRef.current)
-      topRef.current.scrollLeft = bottomRef.current.scrollLeft;
-    syncing.current = false;
+    const top = topRef.current;
+    const bottom = bottomRef.current;
+    if (driver.current !== "bottom" || !top || !bottom) return;
+    if (top.scrollLeft !== bottom.scrollLeft) top.scrollLeft = bottom.scrollLeft;
   };
 
   return (
@@ -113,6 +120,10 @@ export function TableWrap({ children }: { children: ReactNode }) {
       <div
         ref={topRef}
         onScroll={onTopScroll}
+        onPointerEnter={driveTop}
+        onPointerDown={driveTop}
+        onWheel={driveTop}
+        onTouchStart={driveTop}
         className={cn(
           "w-full overflow-x-auto overscroll-x-contain",
           !needsScroll && "rounded-b-xl",
@@ -124,8 +135,12 @@ export function TableWrap({ children }: { children: ReactNode }) {
         <div
           ref={bottomRef}
           onScroll={onBottomScroll}
+          onPointerEnter={driveBottom}
+          onPointerDown={driveBottom}
+          onWheel={driveBottom}
+          onTouchStart={driveBottom}
           aria-hidden="true"
-          className="sticky bottom-0 z-20 w-full overflow-x-auto overscroll-x-contain rounded-b-xl border-t border-border bg-white/[0.04] backdrop-blur [&::-webkit-scrollbar]:h-2.5"
+          className="sticky bottom-0 z-20 w-full overflow-x-auto overscroll-x-contain rounded-b-xl border-t border-border bg-background/90 [&::-webkit-scrollbar]:h-2.5"
         >
           <div style={{ width: scrollWidth, height: 1 }} />
         </div>
