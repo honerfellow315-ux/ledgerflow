@@ -242,6 +242,9 @@ export const invoiceLineItems = pgTable("invoice_line_items", {
   amountExVat: money("amount_ex_vat").notNull().default(0),
   // Preserves row order in the UI/PDF; not relied on for calculations.
   orderIndex: integer("order_index").notNull().default(0),
+  // When true, this line's quantity is a number of HOURS. Ticked lines add up to the invoice's
+  // total hours (shown in the Invoices list); the money maths is unchanged (quantity x price).
+  isHours: boolean("is_hours").notNull().default(false),
 });
 
 export const payments = pgTable("payments", {

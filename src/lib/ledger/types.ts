@@ -77,6 +77,8 @@ export interface InvoiceLineItem {
   unitPrice: number;
   amountExVat: number;
   orderIndex: number;
+  /** True when `quantity` is a number of hours (counts towards the invoice's total hours). */
+  isHours?: boolean | undefined;
 }
 
 export interface Invoice {

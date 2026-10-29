@@ -577,3 +577,7 @@ ALTER TABLE salary_entries ADD COLUMN IF NOT EXISTS expenses jsonb NOT NULL DEFA
 -- Payroll sheet "Referred by" (see schema/payroll-referral-migration.sql)
 ALTER TABLE payroll_lines
   ADD COLUMN IF NOT EXISTS referred_by_staff_id text REFERENCES payroll_staff(id) ON DELETE SET NULL;
+
+-- Invoice line items: "Hours" flag (see schema/invoice-line-hours-migration.sql)
+ALTER TABLE invoice_line_items
+  ADD COLUMN IF NOT EXISTS is_hours boolean NOT NULL DEFAULT false;

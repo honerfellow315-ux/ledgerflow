@@ -20,6 +20,8 @@ const invoiceLineItemInput = z.object({
   quantity: money.default(1),
   unitPrice: money.default(0),
   orderIndex: z.number().int().min(0).max(100000).default(0),
+  // True when the quantity is a number of hours (adds to the invoice's total hours).
+  isHours: z.boolean().optional(),
 });
 
 const invoiceInput = z.object({
@@ -85,6 +87,7 @@ async function replaceLineItems(invoiceId: string, items: z.infer<typeof invoice
         unitPrice: li.unitPrice,
         amountExVat: Math.round(li.quantity * li.unitPrice * 100) / 100,
         orderIndex: li.orderIndex ?? i,
+        isHours: li.isHours ?? false,
       })),
     );
   }

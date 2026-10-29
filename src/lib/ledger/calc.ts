@@ -386,8 +386,24 @@ export function entryPayrollValue(entry: Pick<HoursEntry, "payrollHours" | "payr
  * Fixed Amount or Line Items invoice has no hours to allocate to
  * subcontractors, so the remaining-hours feature simply doesn't apply.
  */
-export function invoiceTracksHours(invoice: Pick<Invoice, "hours">): boolean {
-  return invoice.hours != null;
+export function invoiceTracksHours(invoice: Pick<Invoice, "hours" | "lineItems">): boolean {
+  return invoiceTotalHours(invoice) != null;
+}
+
+/** Sum of the quantities of line items ticked as "Hours". */
+export function lineItemHours(lineItems: Invoice["lineItems"]): number {
+  return round2((lineItems ?? []).reduce((sum, li) => sum + (li.isHours ? li.quantity : 0), 0));
+}
+
+/**
+ * Total hours of an invoice, or `null` when it has none. Hours × Rate invoices use their own
+ * `hours`; a Line Items invoice adds up the lines ticked as "Hours". Fixed Amount invoices, and
+ * Line Items invoices with no hours line, have no hours (null) exactly as before.
+ */
+export function invoiceTotalHours(invoice: Pick<Invoice, "hours" | "lineItems">): number | null {
+  if (invoice.hours != null) return invoice.hours;
+  const fromLines = lineItemHours(invoice.lineItems);
+  return fromLines > 0 ? fromLines : null;
 }
 
 /** Total hours already processed against this invoice via (non-deleted)
@@ -414,12 +430,12 @@ export function processedHoursForInvoice(
  * negative remaining balance.
  */
 export function remainingInvoiceHours(
-  invoice: Pick<Invoice, "id" | "hours">,
+  invoice: Pick<Invoice, "id" | "hours" | "lineItems">,
   subcontracts: SubcontractEntry[],
   excludeEntryId?: string,
 ): number | null {
   if (!invoiceTracksHours(invoice)) return null;
-  const total = invoice.hours ?? 0;
+  const total = invoiceTotalHours(invoice) ?? 0;
   const processed = processedHoursForInvoice(invoice.id, subcontracts, excludeEntryId);
   return Math.max(0, round2(total - processed));
 }
@@ -431,12 +447,13 @@ export function remainingInvoiceHours(
  * hours. Returns 0 for invoices that don't track hours.
  */
 export function paidHoursForInvoice(
-  invoice: Pick<Invoice, "hours"> & Partial<Pick<Invoice, "payrollHours" | "payrollRate">>,
+  invoice: Pick<Invoice, "hours" | "lineItems"> &
+    Partial<Pick<Invoice, "payrollHours" | "payrollRate">>,
   paid: number,
   total: number,
 ): number {
   if (!invoiceTracksHours(invoice) || total <= 0.004 || paid <= 0) return 0;
-  const hours = invoice.hours ?? 0;
+  const hours = invoiceTotalHours(invoice) ?? 0;
   if (hasPayrollSplit(invoice)) {
     // Two rates on one invoice: the payroll payment clears the payroll hours at
     // the payroll rate first; everything paid after that clears the remaining
@@ -459,7 +476,8 @@ export function paidHoursForInvoice(
  * (remainingInvoiceHours) is intentionally unchanged.
  */
 export function invoiceHoursDisplay(
-  invoice: Pick<Invoice, "id" | "hours"> & Partial<Pick<Invoice, "payrollHours" | "payrollRate">>,
+  invoice: Pick<Invoice, "id" | "hours" | "lineItems"> &
+    Partial<Pick<Invoice, "payrollHours" | "payrollRate">>,
   subcontracts: SubcontractEntry[],
   paid: number,
   total: number,
@@ -470,7 +488,7 @@ export function invoiceHoursDisplay(
   processed: number;
   remaining: number;
 } {
-  const totalHours = invoice.hours ?? 0;
+  const totalHours = invoiceTotalHours(invoice) ?? 0;
   const subcontractHours = processedHoursForInvoice(invoice.id, subcontracts);
   const paidHours = paidHoursForInvoice(invoice, paid, total);
   const processed = round2(subcontractHours + paidHours);
@@ -504,9 +522,9 @@ export function invoiceHoursSummaries(
       invoiceId: inv.id,
       invoiceNumber: inv.number,
       clientId: inv.clientId,
-      totalHours: inv.hours ?? 0,
+      totalHours: invoiceTotalHours(inv) ?? 0,
       processedHours,
-      remainingHours: Math.max(0, round2((inv.hours ?? 0) - processedHours)),
+      remainingHours: Math.max(0, round2((invoiceTotalHours(inv) ?? 0) - processedHours)),
     };
   });
 }

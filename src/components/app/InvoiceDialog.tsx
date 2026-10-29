@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -59,6 +60,8 @@ interface LineItemForm {
   description: string;
   quantity: string;
   unitPrice: string;
+  /** Quantity is a number of hours (counts towards the invoice's total hours). */
+  isHours: boolean;
 }
 
 const blankLineItem = (): LineItemForm => ({
@@ -66,6 +69,7 @@ const blankLineItem = (): LineItemForm => ({
   description: "",
   quantity: "1",
   unitPrice: "",
+  isHours: false,
 });
 
 const blank = {
@@ -180,6 +184,7 @@ export function InvoiceDialog({
                 description: li.description,
                 quantity: String(li.quantity),
                 unitPrice: String(li.unitPrice),
+                isHours: li.isHours ?? false,
               }))
             : [],
         approved: invoice.approved,
@@ -230,6 +235,7 @@ export function InvoiceDialog({
                 description: li.description,
                 quantity: String(li.quantity),
                 unitPrice: String(li.unitPrice),
+                isHours: li.isHours ?? false,
               }))
             : [],
       });
@@ -389,6 +395,7 @@ export function InvoiceDialog({
           quantity: number;
           unitPrice: number;
           orderIndex: number;
+          isHours: boolean;
         }[]
       | undefined;
 
@@ -415,6 +422,7 @@ export function InvoiceDialog({
           quantity,
           unitPrice,
           orderIndex: i,
+          isHours: li.isHours,
         };
       });
       if (lineItemsPayload.some((li) => !li.description))
@@ -855,6 +863,17 @@ export function InvoiceDialog({
                           value={li.unitPrice}
                           onChange={(e) => setLineItem(li.key, { unitPrice: e.target.value })}
                         />
+                        <label
+                          className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 text-[12px] text-muted-foreground"
+                          title="Tick if this line's Qty is a number of hours. Ticked lines add up to the invoice's Total Hrs."
+                        >
+                          <Checkbox
+                            checked={li.isHours}
+                            onCheckedChange={(v) => setLineItem(li.key, { isHours: v === true })}
+                            aria-label="Quantity is hours"
+                          />
+                          Hrs
+                        </label>
                         <div className="flex h-9 w-24 items-center justify-end text-[13px] num">
                           {formatMoney((Number(li.quantity) || 0) * (Number(li.unitPrice) || 0))}
                         </div>

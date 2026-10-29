@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../server/db";
-import { invoices, subcontractEntries } from "../../../drizzle/schema";
+import { invoices, invoiceLineItems, subcontractEntries } from "../../../drizzle/schema";
 import { requirePermission } from "../server/auth";
 import { uid } from "../server/id";
 import { stripNulls, stripNullsAll } from "../server/normalize";
@@ -16,8 +16,9 @@ import { recordActivity, changedFieldsSummary } from "../server/activity";
  * calc.ts:remainingInvoiceHours, but computed here against the database
  * directly rather than a client-supplied list.
  *
- * Invoices that don't track hours at all (`hours` is null — Fixed Amount or
- * Line Items billing) have nothing to cap, so this is a no-op for them.
+ * Invoices that don't track hours at all (`hours` is null and no line item is ticked
+ * as "Hours" — Fixed Amount billing, or Line Items without an hours line) have nothing
+ * to cap, so this is a no-op for them.
  * `excludeEntryId` is passed on update so the entry being edited isn't
  * counted against its own old value.
  */
@@ -32,7 +33,19 @@ async function assertWithinRemainingHours(
     .where(and(eq(invoices.id, invoiceId), isNull(invoices.deletedAt)));
 
   if (!invoice) throw new Error("The selected invoice could not be found.");
-  if (invoice.hours == null) return; // This invoice doesn't track hours.
+  // Total hours: the invoice's own hours, or (Line Items billing) the lines ticked as "Hours".
+  let totalHours = invoice.hours;
+  if (totalHours == null) {
+    const [lineRow] = await db
+      .select({
+        hours: sql<number>`coalesce(sum(${invoiceLineItems.quantity}), 0)`.mapWith(Number),
+      })
+      .from(invoiceLineItems)
+      .where(and(eq(invoiceLineItems.invoiceId, invoiceId), eq(invoiceLineItems.isHours, true)));
+    const fromLines = lineRow?.hours ?? 0;
+    if (fromLines <= 0) return; // This invoice doesn't track hours.
+    totalHours = fromLines;
+  }
 
   const [processedRow] = await db
     .select({
@@ -48,7 +61,7 @@ async function assertWithinRemainingHours(
     );
   const processed = processedRow?.processed ?? 0;
 
-  const remaining = Math.max(0, Math.round((invoice.hours - processed) * 100) / 100);
+  const remaining = Math.max(0, Math.round((totalHours - processed) * 100) / 100);
   if (hoursProceed > remaining + 0.004) {
     throw new Error(
       `Only ${remaining} remaining hour(s) on invoice ${invoice.number} — cannot process ${hoursProceed}.`,

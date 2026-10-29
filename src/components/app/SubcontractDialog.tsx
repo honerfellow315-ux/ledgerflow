@@ -24,6 +24,7 @@ import { useLedger } from "@/lib/ledger/store";
 import {
   formatHours,
   formatMoney,
+  invoiceTotalHours,
   invoiceTracksHours,
   remainingInvoiceHours,
   subcontractValue,
@@ -134,7 +135,7 @@ export function SubcontractDialog({
     if (!invoiceTracksHours(selectedInvoice)) return null;
     const remaining = remainingInvoiceHours(selectedInvoice, data.subcontracts, entry?.id);
     return {
-      total: selectedInvoice.hours ?? 0,
+      total: invoiceTotalHours(selectedInvoice) ?? 0,
       remaining: remaining ?? 0,
     };
   }, [selectedInvoice, data.subcontracts, entry?.id]);
