@@ -14,6 +14,9 @@ import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Pane
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { StatusBadge } from "@/components/app/StatusBadge";
 import { SummaryCard } from "@/components/app/SummaryCard";
+import { Button } from "@/components/ui/button";
+import { Download } from "@/lib/icons";
+import { downloadXlsx } from "@/lib/ledger/excel";
 import {
   Select,
   SelectContent,
@@ -242,6 +245,118 @@ function ReportsPageContent() {
     filteredIds,
   ]);
 
+  const stamp = new Date().toISOString().slice(0, 10);
+
+  const exportInvoices = () =>
+    downloadXlsx(
+      `report-invoices-${stamp}`,
+      "Invoices",
+      [
+        { header: "Invoice", width: 16 },
+        { header: "Client", width: 30 },
+        { header: "Date", width: 14 },
+        { header: "Due", width: 14 },
+        { header: "Total", width: 14, money: true },
+        { header: "Credited", width: 14, money: true },
+        { header: "Outstanding", width: 14, money: true },
+        { header: "Status", width: 14 },
+      ],
+      invoiceViewsWithCredit.map((i) => [
+        i.number,
+        `${i.clientCompany} · ${i.clientName}`,
+        i.invoiceDate,
+        i.dueDate,
+        i.total,
+        i.credited,
+        i.effectiveOutstanding,
+        i.effectiveStatus,
+      ]),
+    );
+
+  const exportOutstanding = () =>
+    downloadXlsx(
+      `report-outstanding-receivables-${stamp}`,
+      "Outstanding Receivables",
+      [
+        { header: "Invoice No.", width: 16 },
+        { header: "Client", width: 30 },
+        { header: "Due Date", width: 14 },
+        { header: "Inc VAT", width: 14, money: true },
+        { header: "Paid", width: 14, money: true },
+        { header: "Outstanding", width: 14, money: true },
+        { header: "Status", width: 14 },
+      ],
+      outstanding.map((i) => [
+        i.number,
+        i.clientCompany,
+        i.dueDate,
+        i.total,
+        i.paid,
+        i.effectiveOutstanding,
+        i.effectiveStatus,
+      ]),
+    );
+
+  const exportStatement = () => {
+    const client = data.clients.find((c) => c.id === statementClient);
+    const name = (client?.company || "client").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    downloadXlsx(
+      `report-statement-${name}-${stamp}`,
+      "Client Statement",
+      [
+        { header: "Date", width: 14 },
+        { header: "Detail", width: 40 },
+        { header: "Debit", width: 14, money: true },
+        { header: "Credit", width: 14, money: true },
+        { header: "Balance", width: 14, money: true },
+      ],
+      statement.map((r) => [r.date, r.detail, r.debit || null, r.credit || null, r.balance]),
+    );
+  };
+
+  const exportPayments = () =>
+    downloadXlsx(
+      `report-payment-history-${stamp}`,
+      "Payment History",
+      [
+        { header: "Date", width: 14 },
+        { header: "Client", width: 30 },
+        { header: "Invoice", width: 16 },
+        { header: "Method", width: 18 },
+        { header: "Reference", width: 22 },
+        { header: "Amount", width: 14, money: true },
+      ],
+      paymentHistory.map((p) => [
+        p.date,
+        p.company,
+        p.invoiceNumber,
+        p.method,
+        p.reference || "",
+        p.amount,
+      ]),
+    );
+
+  const exportSummary = () =>
+    downloadXlsx(
+      `report-invoice-summary-${stamp}`,
+      "Invoice Summary",
+      [
+        { header: "Item", width: 30 },
+        { header: "Value", width: 16, money: true },
+      ],
+      [
+        ["Invoices raised", invoiceViews.length],
+        ["Net total (ex VAT)", summary.ex],
+        ["VAT total", summary.vat],
+        ["Gross total (inc VAT)", summary.total],
+        ["Total received", summary.paid],
+        ["Total outstanding", summary.outstanding],
+        ["Paid invoices", summary.counts.paid],
+        ["Partially paid invoices", summary.counts.partial],
+        ["Unpaid invoices", summary.counts.unpaid],
+      ],
+    );
+
   return (
     <div className="space-y-4">
       <Panel>
@@ -376,6 +491,16 @@ function ReportsPageContent() {
         <PanelHeader
           title="Invoices"
           description={`${invoiceViewsWithCredit.length} invoices matching these filters`}
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportInvoices}
+              disabled={invoiceViewsWithCredit.length === 0}
+            >
+              <Download className="size-4" /> Export to Excel
+            </Button>
+          }
         />
         {!invoiceViewsWithCredit.length ? (
           <EmptyState title="No matching invoices" />
@@ -427,6 +552,16 @@ function ReportsPageContent() {
         <PanelHeader
           title="Outstanding Receivables"
           description={`${outstanding.length} invoices with a balance due, oldest due date first`}
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportOutstanding}
+              disabled={outstanding.length === 0}
+            >
+              <Download className="size-4" /> Export to Excel
+            </Button>
+          }
         />
         {outstanding.length === 0 ? (
           <EmptyState title="Nothing outstanding" description="All invoices are settled." />
@@ -477,20 +612,30 @@ function ReportsPageContent() {
           title="Client Statement"
           description="Running balance for the selected client, including the opening balance before From"
           actions={
-            <Select value={statementClient} onValueChange={setStatementClient}>
-              <SelectTrigger className="h-8 w-56 text-[13px]">
-                <SelectValue placeholder="Select client" />
-              </SelectTrigger>
-              <SelectContent>
-                {clients
-                  .filter((c) => !clientId || c.id === clientId)
-                  .map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.company}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportStatement}
+                disabled={statement.length === 0}
+              >
+                <Download className="size-4" /> Export to Excel
+              </Button>
+              <Select value={statementClient} onValueChange={setStatementClient}>
+                <SelectTrigger className="h-8 w-56 text-[13px]">
+                  <SelectValue placeholder="Select client" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clients
+                    .filter((c) => !clientId || c.id === clientId)
+                    .map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.company}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </>
           }
         />
         {statement.length === 0 ? (
@@ -533,6 +678,16 @@ function ReportsPageContent() {
         <PanelHeader
           title="Payment History"
           description={`${paymentHistory.length} payments matching these filters`}
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportPayments}
+              disabled={paymentHistory.length === 0}
+            >
+              <Download className="size-4" /> Export to Excel
+            </Button>
+          }
         />
         {paymentHistory.length === 0 ? (
           <EmptyState title="No payments recorded" />
@@ -572,6 +727,16 @@ function ReportsPageContent() {
         <PanelHeader
           title="Invoice Summary"
           description="Totals for invoices matching these filters"
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportSummary}
+              disabled={invoiceViews.length === 0}
+            >
+              <Download className="size-4" /> Export to Excel
+            </Button>
+          }
         />
         <TableWrap>
           <Table className="min-w-0">
