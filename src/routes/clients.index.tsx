@@ -3,7 +3,15 @@ import { useMemo, useState } from "react";
 import { Eye, Pencil, Plus, Search, Trash2 } from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
-import { formatMoney, totalsForClient } from "@/lib/ledger/calc";
+import {
+  formatHours,
+  formatMoney,
+  hoursPaidForEntry,
+  hoursRemainingToPay,
+  remainingHours,
+  round2,
+  totalsForClient,
+} from "@/lib/ledger/calc";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { StatusBadge } from "@/components/app/StatusBadge";
@@ -60,8 +68,18 @@ function ClientsPageContent() {
     return data.clients
       .filter((c) => (status === "all" ? true : c.status === status))
       .filter((c) => (q ? `${c.name} ${c.company} ${c.email}`.toLowerCase().includes(q) : true))
-      .map((c) => ({ client: c, totals: totalsForClient(c.id, invoiceViews) }));
-  }, [data.clients, invoiceViews, query, status]);
+      .map((c) => {
+        // Hours across every month on record for this client: billable hours,
+        // hours already paid (payments recorded "by hours") and hours still left to pay.
+        const entries = data.hours.filter((h) => h.clientId === c.id);
+        const hours = {
+          billable: round2(entries.reduce((sum, h) => sum + remainingHours(h), 0)),
+          paid: round2(entries.reduce((sum, h) => sum + hoursPaidForEntry(h.id, data.payments), 0)),
+          left: round2(entries.reduce((sum, h) => sum + hoursRemainingToPay(h, data.payments), 0)),
+        };
+        return { client: c, totals: totalsForClient(c.id, invoiceViews), hours };
+      });
+  }, [data.clients, data.hours, data.payments, invoiceViews, query, status]);
 
   return (
     <div className="space-y-4">
@@ -122,12 +140,15 @@ function ClientsPageContent() {
                   <TH align="right">Total Invoiced</TH>
                   <TH align="right">Total Paid</TH>
                   <TH align="right">Outstanding</TH>
+                  <TH align="right">Billable Hours</TH>
+                  <TH align="right">Hours Paid</TH>
+                  <TH align="right">Hours Left</TH>
                   <TH>Status</TH>
                   <TH align="right">Actions</TH>
                 </TR>
               </THead>
               <TBody>
-                {rows.map(({ client, totals }) => (
+                {rows.map(({ client, totals, hours }) => (
                   <TR key={client.id}>
                     <TD>
                       <Link
@@ -147,6 +168,15 @@ function ClientsPageContent() {
                     </TD>
                     <TD mono align="right">
                       {formatMoney(totals.outstanding)}
+                    </TD>
+                    <TD mono align="right">
+                      {formatHours(hours.billable)}
+                    </TD>
+                    <TD mono align="right">
+                      {formatHours(hours.paid)}
+                    </TD>
+                    <TD mono align="right" className={hours.left > 0 ? "font-medium" : undefined}>
+                      {formatHours(hours.left)}
                     </TD>
                     <TD>
                       <StatusBadge status={client.status} kind="client" />
