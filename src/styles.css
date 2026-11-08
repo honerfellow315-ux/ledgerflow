@@ -2398,3 +2398,30 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   border: 1px solid color-mix(in oklab, var(--color-primary) 28%, transparent);
   box-shadow: 0 0 24px -6px color-mix(in oklab, var(--color-primary) 45%, transparent);
 }
+
+/* ==========================================================================
+   Filter bars on every list page (look only): same tint as the Activity Log,
+   and the search box takes the spare width so controls sit on one line
+   whenever the screen allows. Still wraps on small screens.
+   ========================================================================== */
+@media screen {
+  .lf-main .panel > div.flex.flex-wrap.items-center.gap-2.border-b {
+    background: oklch(1 0 0 / 0.025);
+    row-gap: 0.5rem;
+  }
+
+  .lf-main .panel > div.flex.flex-wrap.items-center.gap-2.border-b > .relative:has(> input) {
+    flex: 1 1 10rem;
+    min-width: 9rem;
+    max-width: 24rem;
+  }
+
+  .lf-main .panel > div.flex.flex-wrap.items-center.gap-2.border-b > .relative:has(> input) > input {
+    width: 100%;
+  }
+
+  /* Settings and other form-style panels: roomier, calmer section bodies. */
+  .lf-main .panel > header + div {
+    scroll-margin-top: 4rem;
+  }
+}
