@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Eye, Pencil, Plus, Search, Trash2 } from "@/lib/icons";
+import { AlertTriangle, CheckCircle2, Eye, Pencil, Plus, Search, Trash2, Users } from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
 import {
@@ -15,6 +15,7 @@ import {
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { StatusBadge } from "@/components/app/StatusBadge";
+import { SummaryCard } from "@/components/app/SummaryCard";
 import { ClientDialog } from "@/components/app/ClientDialog";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { RequireView } from "@/components/app/RequireView";
@@ -81,8 +82,38 @@ function ClientsPageContent() {
       });
   }, [data.clients, data.hours, data.payments, invoiceViews, query, status]);
 
+  const activeClients = data.clients.filter((c) => c.status === "active").length;
+  const inactiveClients = data.clients.filter((c) => c.status !== "active").length;
+
   return (
     <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <SummaryCard
+          premium
+          tone="default"
+          icon={Users}
+          label="Total clients"
+          value={data.clients.length.toLocaleString("en-GB")}
+          sublabel="All accounts"
+        />
+        <SummaryCard
+          premium
+          tone="success"
+          icon={CheckCircle2}
+          label="Active"
+          value={activeClients.toLocaleString("en-GB")}
+          sublabel="Currently trading"
+        />
+        <SummaryCard
+          premium
+          tone="warning"
+          icon={AlertTriangle}
+          label="On hold / closed"
+          value={inactiveClients.toLocaleString("en-GB")}
+          sublabel="Not active"
+        />
+      </div>
+
       <Panel>
         <PanelHeader
           title="Clients"

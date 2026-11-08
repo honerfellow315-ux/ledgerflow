@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Building2, Pencil, Plus, Search, Trash2 } from "@/lib/icons";
+import { AlertTriangle, Building2, Pencil, Plus, Search, Trash2, Users } from "@/lib/icons";
 import { toast } from "sonner";
 import { useLedger } from "@/lib/ledger/store";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
+import { SummaryCard } from "@/components/app/SummaryCard";
 import { CompanyDialog } from "@/components/app/CompanyDialog";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { RequireView } from "@/components/app/RequireView";
@@ -56,8 +57,40 @@ function CompaniesPageContent() {
       }));
   }, [data.companies, data.clients, query]);
 
+  const linkedClients = data.clients.filter((c) => !!c.companyId).length;
+  const emptyCompanies = data.companies.filter(
+    (co) => !data.clients.some((c) => c.companyId === co.id),
+  ).length;
+
   return (
     <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <SummaryCard
+          premium
+          tone="default"
+          icon={Building2}
+          label="Billing companies"
+          value={data.companies.length.toLocaleString("en-GB")}
+          sublabel="All companies"
+        />
+        <SummaryCard
+          premium
+          tone="success"
+          icon={Users}
+          label="Linked clients"
+          value={linkedClients.toLocaleString("en-GB")}
+          sublabel="Clients with a company"
+        />
+        <SummaryCard
+          premium
+          tone="warning"
+          icon={AlertTriangle}
+          label="Companies with no clients"
+          value={emptyCompanies.toLocaleString("en-GB")}
+          sublabel="Nothing linked yet"
+        />
+      </div>
+
       <Panel>
         <PanelHeader
           title="Companies"

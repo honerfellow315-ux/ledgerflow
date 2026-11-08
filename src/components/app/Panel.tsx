@@ -45,8 +45,8 @@ export function EmptyState({
 }) {
   return (
     <div className="flex min-h-44 flex-col items-center justify-center border-t border-dashed border-border px-6 py-12 text-center">
-      <span className="mb-3 flex size-8 items-center justify-center rounded-full bg-muted">
-        <span className="size-1.5 rounded-full bg-border-strong" />
+      <span className="lf-empty-orb mb-3 flex size-11 items-center justify-center rounded-full">
+        <span className="size-2 rounded-full bg-primary/70" />
       </span>
       <p className="text-[13px] font-semibold text-foreground">{title}</p>
       {description ? (
