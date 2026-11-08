@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { RotateCcw, Trash2 } from "@/lib/icons";
+import { Clock, ListChecks, RotateCcw, Trash2 } from "@/lib/icons";
 import {
   listTrash,
   restoreFromTrash,
@@ -15,6 +15,7 @@ import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
+import { SummaryCard } from "@/components/app/SummaryCard";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/ledger/calc";
@@ -116,9 +117,42 @@ function RecycleBinPageContent() {
   }
 
   const rows = trashQ.data ?? [];
+  const typeCount = new Set(rows.map((r) => r.type)).size;
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  const recentCount = rows.filter((r) => {
+    const t = new Date(r.deletedAt).getTime();
+    return !Number.isNaN(t) && t >= weekAgo;
+  }).length;
 
   return (
     <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <SummaryCard
+          premium
+          tone="default"
+          icon={Trash2}
+          label="Deleted records"
+          value={rows.length.toLocaleString("en-GB")}
+          sublabel="Waiting in the bin"
+        />
+        <SummaryCard
+          premium
+          tone="warning"
+          icon={ListChecks}
+          label="Record types"
+          value={typeCount.toLocaleString("en-GB")}
+          sublabel="Different kinds of records"
+        />
+        <SummaryCard
+          premium
+          tone="success"
+          icon={Clock}
+          label="Deleted in last 7 days"
+          value={recentCount.toLocaleString("en-GB")}
+          sublabel="Easy to restore"
+        />
+      </div>
+
       <Panel>
         <PanelHeader
           title="Recycle Bin"
@@ -148,7 +182,7 @@ function RecycleBinPageContent() {
           />
         ) : (
           <TableWrap>
-            <Table>
+            <Table className="lf-log">
               <THead>
                 <TR>
                   <TH>Type</TH>
@@ -160,7 +194,9 @@ function RecycleBinPageContent() {
               <TBody>
                 {rows.map((item) => (
                   <TR key={`${item.type}-${item.id}`}>
-                    <TD className="text-muted-foreground">{TYPE_LABELS[item.type]}</TD>
+                    <TD>
+                      <span className="lf-log-module">{TYPE_LABELS[item.type]}</span>
+                    </TD>
                     <TD>
                       <div className="font-medium">{item.label}</div>
                       {item.detail ? (

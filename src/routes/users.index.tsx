@@ -41,6 +41,7 @@ import {
 import { usePermissions } from "@/lib/ledger/permissions";
 import { RequireView } from "@/components/app/RequireView";
 import { Panel, PanelHeader, EmptyState, TableWrap } from "@/components/app/Panel";
+import { SummaryCard } from "@/components/app/SummaryCard";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/app/DataTable";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { Button } from "@/components/ui/button";
@@ -139,9 +140,37 @@ function UsersPageContent() {
   }
 
   const rows = usersQ.data ?? [];
+  const adminCount = rows.filter((u) => u.role === "admin").length;
 
   return (
     <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <SummaryCard
+          premium
+          tone="default"
+          icon={UsersIcon}
+          label="Total users"
+          value={rows.length.toLocaleString("en-GB")}
+          sublabel="Accounts that can sign in"
+        />
+        <SummaryCard
+          premium
+          tone="success"
+          icon={ShieldCheck}
+          label="Admins"
+          value={adminCount.toLocaleString("en-GB")}
+          sublabel="Full access"
+        />
+        <SummaryCard
+          premium
+          tone="warning"
+          icon={LockKeyhole}
+          label="Standard users"
+          value={(rows.length - adminCount).toLocaleString("en-GB")}
+          sublabel="Access set by permissions"
+        />
+      </div>
+
       <Panel>
         <PanelHeader
           title="Users"
@@ -163,7 +192,7 @@ function UsersPageContent() {
           <EmptyState title="No users yet" description="Add the first user account." />
         ) : (
           <TableWrap>
-            <Table>
+            <Table className="lf-log">
               <THead>
                 <TR>
                   <TH>Username</TH>
@@ -175,14 +204,26 @@ function UsersPageContent() {
               <TBody>
                 {rows.map((u) => (
                   <TR key={u.id}>
-                    <TD mono className="font-medium">
-                      {u.username}
+                    <TD>
+                      <div className="flex items-center gap-2.5">
+                        <span className="lf-log-avatar" aria-hidden="true">
+                          {(u.displayName || u.username).slice(0, 2).toUpperCase()}
+                        </span>
+                        <span className="num font-medium">{u.username}</span>
+                      </div>
                     </TD>
                     <TD>{u.displayName || "—"}</TD>
                     <TD>
-                      <span className="inline-flex items-center gap-1.5 text-[13px]">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold",
+                          u.role === "admin"
+                            ? "border-success/25 bg-success-soft text-success"
+                            : "border-border-strong bg-muted text-muted-foreground",
+                        )}
+                      >
                         {u.role === "admin" ? (
-                          <ShieldCheck className="size-3.5 text-primary" />
+                          <ShieldCheck className="size-3" aria-hidden="true" />
                         ) : null}
                         {u.role === "admin" ? "Admin" : "User"}
                       </span>
