@@ -306,19 +306,19 @@ function ActivityLogPageContent() {
           }
         />
 
-        <div className="lf-filterbar flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
-          <div className="relative">
+        <div className="lf-filterbar flex flex-wrap items-center gap-2 lg:flex-nowrap border-b border-border px-4 py-3">
+          <div className="relative min-w-[9rem] flex-1 basis-40">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search label, user..."
-              className="h-8 w-52 pl-8 text-[13px]"
+              className="h-8 w-full pl-8 text-[13px]"
             />
           </div>
 
           <Select value={userId} onValueChange={setUserId}>
-            <SelectTrigger className="h-8 w-40 text-[13px]">
+            <SelectTrigger className="h-8 w-[8.5rem] text-[13px]">
               <SelectValue placeholder="All users" />
             </SelectTrigger>
             <SelectContent>
@@ -332,7 +332,7 @@ function ActivityLogPageContent() {
           </Select>
 
           <Select value={action} onValueChange={setAction}>
-            <SelectTrigger className="h-8 w-36 text-[13px]">
+            <SelectTrigger className="h-8 w-[8.5rem] text-[13px]">
               <SelectValue placeholder="All actions" />
             </SelectTrigger>
             <SelectContent>
@@ -346,7 +346,7 @@ function ActivityLogPageContent() {
           </Select>
 
           <Select value={module} onValueChange={setModule}>
-            <SelectTrigger className="h-8 w-40 text-[13px]">
+            <SelectTrigger className="h-8 w-[8.5rem] text-[13px]">
               <SelectValue placeholder="All modules" />
             </SelectTrigger>
             <SelectContent>
@@ -363,15 +363,15 @@ function ActivityLogPageContent() {
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            className="h-8 w-[9.5rem] text-[13px]"
+            className="h-8 w-[8.75rem] shrink-0 px-2 text-[12px]"
             aria-label="From date"
           />
-          <span className="text-xs text-muted-foreground">to</span>
+          <span className="shrink-0 text-xs text-muted-foreground">to</span>
           <Input
             type="date"
             value={to}
             onChange={(e) => setTo(e.target.value)}
-            className="h-8 w-[9.5rem] text-[13px]"
+            className="h-8 w-[8.75rem] shrink-0 px-2 text-[12px]"
             aria-label="To date"
           />
 
