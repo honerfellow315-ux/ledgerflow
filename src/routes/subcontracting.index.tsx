@@ -185,8 +185,12 @@ function SubcontractingPageContent() {
   // over every client of the company, minus hours already proceeded here.
   const companyHours = useMemo(() => {
     type ClientRow = { clientId: string; name: string; remaining: number; proceeded: number };
-    const groups = new Map<string, { id: string; name: string; clients: Map<string, ClientRow> }>();
-    const rowFor = (clientId: string): ClientRow | null => {
+    type MonthRow = { remaining: number; proceeded: number };
+    const groups = new Map<
+      string,
+      { id: string; name: string; clients: Map<string, ClientRow>; months: Map<string, MonthRow> }
+    >();
+    const rowFor = (clientId: string): { r: ClientRow; months: Map<string, MonthRow> } | null => {
       const client = clientById.get(clientId);
       if (!client) return null;
       const gid = client.companyId ?? "none";
@@ -196,6 +200,7 @@ function SubcontractingPageContent() {
           id: gid,
           name: (client.companyId && data.companies.find((c) => c.id === client.companyId)?.name) || "No company",
           clients: new Map(),
+          months: new Map(),
         };
         groups.set(gid, g);
       }
@@ -204,17 +209,32 @@ function SubcontractingPageContent() {
         r = { clientId, name: client.company, remaining: 0, proceeded: 0 };
         g.clients.set(clientId, r);
       }
-      return r;
+      return { r, months: g.months };
+    };
+    const monthRow = (months: Map<string, MonthRow>, month: string): MonthRow => {
+      let m = months.get(month);
+      if (!m) {
+        m = { remaining: 0, proceeded: 0 };
+        months.set(month, m);
+      }
+      return m;
     };
     for (const h of data.hours) {
       if (!monthInRange(h.month, fromDate, toDate)) continue;
-      const r = rowFor(h.clientId);
-      if (r) r.remaining += remainingHours(h);
+      const hit = rowFor(h.clientId);
+      if (hit) {
+        const hrs = remainingHours(h);
+        hit.r.remaining += hrs;
+        monthRow(hit.months, h.month).remaining += hrs;
+      }
     }
     for (const sc of data.subcontracts) {
       if (!monthInRange(sc.month, fromDate, toDate)) continue;
-      const r = rowFor(sc.clientId);
-      if (r) r.proceeded += sc.hoursProceed;
+      const hit = rowFor(sc.clientId);
+      if (hit) {
+        hit.r.proceeded += sc.hoursProceed;
+        monthRow(hit.months, sc.month).proceeded += sc.hoursProceed;
+      }
     }
     return [...groups.values()]
       .map((g) => {
@@ -229,7 +249,25 @@ function SubcontractingPageContent() {
           .sort((a, b) => a.name.localeCompare(b.name));
         const remaining = round2(clients.reduce((x, c) => x + c.remaining, 0));
         const proceeded = round2(clients.reduce((x, c) => x + c.proceeded, 0));
-        return { id: g.id, name: g.name, clients, remaining, proceeded, available: round2(remaining - proceeded) };
+        // Month-wise split of the same numbers, newest month first.
+        const months = [...g.months.entries()]
+          .map(([month, m]) => ({
+            month,
+            remaining: round2(m.remaining),
+            proceeded: round2(m.proceeded),
+            available: round2(m.remaining - m.proceeded),
+          }))
+          .filter((m) => m.remaining !== 0 || m.proceeded !== 0)
+          .sort((a, b) => b.month.localeCompare(a.month));
+        return {
+          id: g.id,
+          name: g.name,
+          clients,
+          months,
+          remaining,
+          proceeded,
+          available: round2(remaining - proceeded),
+        };
       })
       .filter((g) => g.clients.length > 0)
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -266,7 +304,7 @@ function SubcontractingPageContent() {
           <Panel>
             <PanelHeader
               title="Remaining Hours by Company"
-              description="Remaining hours from the Hours page, added up per company, less hours already proceeded below."
+              description="Remaining hours from the Hours page, added up per company, less hours already proceeded below. Click a company to see it month by month and per client."
             />
             <TableWrap>
               <Table>
@@ -302,6 +340,23 @@ function SubcontractingPageContent() {
                           {formatHours(g.available)}
                         </TD>
                       </TR>
+                      {openCompany === g.id
+                        ? g.months.map((m) => (
+                            <TR key={`${g.id}-${m.month}`} className="bg-muted/30">
+                              <TD className="pl-8 font-medium">{formatMonth(m.month)}</TD>
+                              <TD />
+                              <TD mono align="right">
+                                {formatHours(m.remaining)}
+                              </TD>
+                              <TD mono align="right">
+                                {formatHours(m.proceeded)}
+                              </TD>
+                              <TD mono align="right" className="font-medium">
+                                {formatHours(m.available)}
+                              </TD>
+                            </TR>
+                          ))
+                        : null}
                       {openCompany === g.id
                         ? g.clients.map((c) => (
                             <TR key={c.clientId} className="text-muted-foreground">
