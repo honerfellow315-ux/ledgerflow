@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Field } from "@/components/app/Field";
 import { addStaff, checkStaffNi, updateStaff } from "@/lib/actions/salary";
+import { updateCompanyStaff } from "@/lib/actions/payroll";
 import { isValidNi } from "@/lib/payroll/calc";
 import {
   GENDER_OPTIONS,
@@ -185,6 +186,7 @@ export function StaffDialog({
   canEdit,
   onSaved,
   companyScoped = false,
+  companyId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -199,6 +201,8 @@ export function StaffDialog({
    * to the shared staff record.
    */
   companyScoped?: boolean;
+  /** The payroll company whose start / end date this form edits when `companyScoped`. */
+  companyId?: string;
 }) {
   const refresh = useRefreshSalary();
   const [form, setForm] = useState<FormState>(blank);
@@ -277,13 +281,37 @@ export function StaffDialog({
       let saved: Staff | undefined;
       if (staff) {
         // From a company sheet these two hold that company's value, not the shared record's.
-        const { contractStatus: _cs, employmentEndDate: _ed, ...shared } = values;
+        // Start / end date are per company too, so they are saved on the company link below.
+        const {
+          contractStatus: _cs,
+          employmentEndDate: _ed,
+          employmentStartDate: _sd,
+          ...shared
+        } = values;
         saved = await updateStaff({
           data: {
             id: staff.id,
             patch: { ...(companyScoped ? shared : values), notes: form.notes.trim() },
           },
         });
+        if (companyScoped && companyId) {
+          const newStart = values.employmentStartDate || null;
+          const newEnd = values.employmentEndDate || null;
+          const startChanged = newStart !== (staff.employmentStartDate || null);
+          const endChanged = newEnd !== (staff.employmentEndDate || null);
+          if (startChanged || endChanged) {
+            await updateCompanyStaff({
+              data: {
+                companyId,
+                staffId: staff.id,
+                patch: {
+                  ...(startChanged ? { startDate: newStart } : {}),
+                  ...(endChanged ? { endDate: newEnd } : {}),
+                },
+              },
+            });
+          }
+        }
       } else saved = await addStaff({ data: values });
       await onSaved?.(saved, !staff);
       await refresh();
@@ -487,7 +515,7 @@ export function StaffDialog({
                 type="date"
                 value={form.employmentEndDate}
                 onChange={text("employmentEndDate")}
-                disabled={!canEdit || (companyScoped && !!staff)}
+                disabled={!canEdit}
               />
             </Field>
             <Field

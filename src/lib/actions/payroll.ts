@@ -93,7 +93,13 @@ function withCompanyStatus(
   if (!link) return s;
   const out: Staff = { ...s };
   if (link.contractStatus) out.contractStatus = link.contractStatus as ContractStatus;
-  if (full && link.endDate) out.employmentEndDate = link.endDate;
+  if (full) {
+    // Start / end date are per company. The shared staff record's end date must never leak into
+    // a company that has its own link, and a company start date wins over the shared one.
+    if (link.startDate) out.employmentStartDate = link.startDate;
+    if (link.endDate) out.employmentEndDate = link.endDate;
+    else delete out.employmentEndDate;
+  }
   return out;
 }
 
@@ -794,6 +800,11 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
       rate: z.number().min(0).max(10000).optional(),
       /** Optional: the staff member who referred this person. */
       referredByStaffId: z.string().optional(),
+      /** Optional: start date in THIS company only (yyyy-mm-dd). */
+      startDate: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -828,7 +839,7 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
         staffId: staff.id,
         rate: data.rate ?? null,
         contractStatus: "Active",
-        startDate: staff.employmentStartDate ?? null,
+        startDate: data.startDate ?? staff.employmentStartDate ?? null,
       })
       .onConflictDoUpdate({
         target: [payrollCompanyStaff.companyId, payrollCompanyStaff.staffId],
@@ -836,6 +847,7 @@ export const addStaffToSheet = createServerFn({ method: "POST" })
           active: true,
           endDate: null,
           contractStatus: "Active",
+          ...(data.startDate ? { startDate: data.startDate } : {}),
           ...(data.rate !== undefined ? { rate: data.rate } : {}),
         },
       })
@@ -898,7 +910,12 @@ export const updateCompanyStaff = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const actor = await requirePermission("payroll", "edit");
     // contract status sits with the sensitive staff data, so it needs the same access as before
-    if (data.patch.contractStatus !== undefined) await requirePermission("staff", "edit");
+    if (
+      data.patch.contractStatus !== undefined ||
+      data.patch.startDate !== undefined ||
+      data.patch.endDate !== undefined
+    )
+      await requirePermission("staff", "edit");
     const company = await getCompanyOrThrow(data.companyId);
     const [staff] = await db
       .select()

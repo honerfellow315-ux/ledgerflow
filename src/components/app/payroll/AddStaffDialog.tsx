@@ -50,6 +50,8 @@ export function AddStaffDialog({
   const [refSearch, setRefSearch] = useState("");
   const [referrer, setReferrer] = useState<{ id: string; name: string } | null>(null);
   const [rate, setRate] = useState("");
+  // Start date in THIS company only; defaults to today and can be changed before adding.
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
 
@@ -58,6 +60,8 @@ export function AddStaffDialog({
     if (!open) {
       setReferrer(null);
       setRefSearch("");
+    } else {
+      setStartDate(new Date().toISOString().slice(0, 10));
     }
   }, [open]);
 
@@ -100,6 +104,7 @@ export function AddStaffDialog({
           ...(comment ? { comment } : {}),
           ...(rateNum !== undefined ? { rate: rateNum } : {}),
           ...(referrer ? { referredByStaffId: referrer.id } : {}),
+          ...(startDate ? { startDate } : {}),
         },
       });
       await refresh();
@@ -143,6 +148,22 @@ export function AddStaffDialog({
                 value={rate}
                 onChange={(e) => setRate(e.target.value)}
                 aria-label="Hourly rate for this person (optional)"
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label
+                htmlFor="add-staff-start-date"
+                className="text-[13px] text-muted-foreground"
+              >
+                Start date in {companyName}
+              </label>
+              <Input
+                id="add-staff-start-date"
+                type="date"
+                className="w-44"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
               />
             </div>
 
@@ -269,6 +290,7 @@ export function AddStaffDialog({
               comment: "New Staff",
               ...(rateNum !== undefined && !rateBad ? { rate: rateNum } : {}),
               ...(referrer ? { referredByStaffId: referrer.id } : {}),
+              ...(startDate ? { startDate } : {}),
             },
           });
           await refresh();

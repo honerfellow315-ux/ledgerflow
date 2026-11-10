@@ -1220,6 +1220,7 @@ function PayrollPageContent() {
             staff={editStaff}
             canEdit={can("staff", "edit")}
             companyScoped
+            companyId={data.company.id}
             onSaved={() => refresh()}
           />
           <ConfirmDialog
