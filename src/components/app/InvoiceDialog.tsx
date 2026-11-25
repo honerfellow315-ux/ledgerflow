@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { errorMessage } from "@/lib/payroll/queries";
 import {
   Dialog,
   DialogContent,
@@ -502,7 +503,7 @@ export function InvoiceDialog({
   // Step 2: the user confirms from the review screen — only now do we
   // actually create/update the invoice. `submitting` is set immediately so
   // repeated clicks on Confirm can't create duplicate invoices.
-  const confirmCreate = (): void => {
+  const confirmCreate = async (): Promise<void> => {
     if (submitting) return;
     const payload = buildPayload();
     if (!payload) {
@@ -512,14 +513,21 @@ export function InvoiceDialog({
       return;
     }
     setSubmitting(true);
-    if (invoice) {
-      updateInvoice(invoice.id, payload);
-      toast.success("Invoice updated.");
-    } else {
-      addInvoice(payload, form.hoursEntryId || undefined);
-      toast.success(additionalFor ? "Additional invoice created." : "Invoice added.");
+    try {
+      // Wait for the server: only say "saved" when it really was saved.
+      if (invoice) {
+        await updateInvoice(invoice.id, payload);
+        toast.success("Invoice updated.");
+      } else {
+        await addInvoice(payload, form.hoursEntryId || undefined);
+        toast.success(additionalFor ? "Additional invoice created." : "Invoice added.");
+      }
+      onOpenChange(false);
+    } catch (err) {
+      // Keep the dialog open so nothing typed is lost, and show the real reason.
+      toast.error(errorMessage(err, "The invoice could not be saved. Please try again."));
+      setSubmitting(false);
     }
-    onOpenChange(false);
   };
 
   const selectedClient = data.clients.find((c) => c.id === form.clientId);

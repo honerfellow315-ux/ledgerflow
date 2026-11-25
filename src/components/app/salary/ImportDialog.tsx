@@ -371,6 +371,9 @@ function ShiftImport({
     setResult(null);
     try {
       const SIZE = 1000;
+      // The upload key is built once (it serialises the whole file), not on every chunk.
+      const uploadKey = JSON.stringify([periodId, source, createMissing, mode, toImport]);
+      const startedAt = performance.now();
       let matched = 0;
       let created = 0;
       let unmatched = 0;
@@ -381,9 +384,7 @@ function ShiftImport({
         );
         const r = await importShiftsChunk({
           data: {
-            uploadId: uploadIdFor(
-              JSON.stringify([periodId, source, createMissing, mode, toImport]),
-            ),
+            uploadId: uploadIdFor(uploadKey),
             chunkIndex: i / SIZE,
             totalChunks: Math.ceil(toImport.length / SIZE),
             periodId,
@@ -401,9 +402,16 @@ function ShiftImport({
         unmatched += r.unmatched;
         if (r.complete) break;
       }
+      const uploadedAt = performance.now();
       setProgress("Building each person's totals…");
       const done = await recomputeSheetFromShifts({ data: { periodId, source, fileName } });
+      const recomputedAt = performance.now();
       await refresh();
+      console.info(
+        `[salary-import] ${toImport.length} rows: upload ${Math.round(uploadedAt - startedAt)} ms, ` +
+          `totals ${Math.round(recomputedAt - uploadedAt)} ms, ` +
+          `refresh ${Math.round(performance.now() - recomputedAt)} ms`,
+      );
       const summary =
         mode === "replace"
           ? `Replaced: ${last?.removed ?? 0} old ${source} shifts deleted, ${last?.added ?? toImport.length} added.`

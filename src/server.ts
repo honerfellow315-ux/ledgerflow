@@ -56,7 +56,7 @@ function withSecurityHeaders(request: Request, response: Response): Response {
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set(
     "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
   );
   if (IS_PROD) {
     headers.set("Strict-Transport-Security", "max-age=31536000");

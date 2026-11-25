@@ -115,8 +115,9 @@ interface LedgerContextValue {
   /** `hoursEntryId`, when given, links the created invoice back onto that
    * Hours entry (sets its `invoiceId`) in the same action — see
    * InvoiceDialog's "Link to Hours Entry" picker. */
-  addInvoice: (invoice: Omit<Invoice, "id">, hoursEntryId?: string) => void;
-  updateInvoice: (id: string, patch: Partial<Invoice>) => void;
+  addInvoice: (invoice: Omit<Invoice, "id">, hoursEntryId?: string) => Promise<void>;
+  /** Resolves once the server has saved the change; rejects with the server's error. */
+  updateInvoice: (id: string, patch: Partial<Invoice>) => Promise<void>;
   deleteInvoice: (id: string) => void;
   addPayment: (payment: Omit<Payment, "id">) => void;
   updatePayment: (id: string, patch: Partial<Payment>) => void;
@@ -212,27 +213,25 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   // InvoiceDialog's "Link to Hours Entry" field), link that entry back to
   // the new invoice in the same action — nothing left for the person to do
   // afterwards in the Hours screen.
-  const addInvoice = (i: Omit<Invoice, "id">, hoursEntryId?: string) => {
-    addInvoiceFn({ data: i })
-      .then(async (row) => {
-        if (row && hoursEntryId) {
-          await updateHoursFn({
-            data: { id: hoursEntryId, patch: { invoiceId: row.id } },
-          }).catch((err) => console.error("addInvoice: link hours entry failed", err));
-        }
-        await Promise.all(
-          [KEYS.invoices, KEYS.settings, KEYS.hours].map((k) =>
-            qc.invalidateQueries({ queryKey: k }),
-          ),
-        );
-      })
-      .catch((err) => console.error(err));
+  // Both invoice saves return a promise that REJECTS with the server's error
+  // (for example "That invoice number already exists in this billing company,
+  // including the recycle bin."), so the dialog can show it instead of
+  // pretending the save worked.
+  const addInvoice = async (i: Omit<Invoice, "id">, hoursEntryId?: string): Promise<void> => {
+    const row = await unwrap(addInvoiceFn({ data: i }));
+    if (row && hoursEntryId) {
+      await updateHoursFn({
+        data: { id: hoursEntryId, patch: { invoiceId: row.id } },
+      }).catch((err) => console.error("addInvoice: link hours entry failed", err));
+    }
+    await Promise.all(
+      [KEYS.invoices, KEYS.settings, KEYS.hours].map((k) => qc.invalidateQueries({ queryKey: k })),
+    );
   };
-  const updateInvoice = (id: string, patch: Partial<Invoice>) =>
-    action(
-      (p: Partial<Invoice>) => updateInvoiceFn({ data: { id, patch: p } }),
-      [KEYS.invoices],
-    )(patch);
+  const updateInvoice = async (id: string, patch: Partial<Invoice>): Promise<void> => {
+    await unwrap(updateInvoiceFn({ data: { id, patch } }));
+    await qc.invalidateQueries({ queryKey: KEYS.invoices });
+  };
   const deleteInvoice = action(
     (id: string) => deleteInvoiceFn({ data: { id } }),
     [KEYS.invoices, KEYS.payments],
