@@ -65,6 +65,8 @@ function PaymentsPageContent() {
   const [companyId, setCompanyId] = useState("all");
   const [endClient, setEndClient] = useState("all");
   const [method, setMethod] = useState("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Payment | null>(null);
   const [toDelete, setToDelete] = useState<Payment | null>(null);
@@ -95,6 +97,8 @@ function PaymentsPageContent() {
             : endClient === UNASSIGNED_END_CLIENT,
       )
       .filter((r) => (method === "all" ? true : r.payment.method === method))
+      .filter((r) => (from ? r.payment.date >= from : true))
+      .filter((r) => (to ? r.payment.date <= to : true))
       .filter((r) =>
         q
           ? `${r.payment.reference} ${r.invoice?.number ?? ""} ${r.client?.company ?? ""} ${r.client?.name ?? ""}`
@@ -103,7 +107,18 @@ function PaymentsPageContent() {
           : true,
       )
       .sort((a, b) => b.payment.date.localeCompare(a.payment.date));
-  }, [data.payments, data.clients, invoiceViews, query, clientId, companyId, endClient, method]);
+  }, [
+    data.payments,
+    data.clients,
+    invoiceViews,
+    query,
+    clientId,
+    companyId,
+    endClient,
+    method,
+    from,
+    to,
+  ]);
 
   const exportExcel = () => {
     const company = (id: string | null | undefined) =>
@@ -279,6 +294,32 @@ function PaymentsPageContent() {
               ))}
             </SelectContent>
           </Select>
+          <Input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="h-8 w-40 text-[13px]"
+            aria-label="Payment date from"
+          />
+          <Input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="h-8 w-40 text-[13px]"
+            aria-label="Payment date to"
+          />
+          {from || to ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setFrom("");
+                setTo("");
+              }}
+            >
+              Clear dates
+            </Button>
+          ) : null}
         </div>
 
         {rows.length === 0 ? (

@@ -309,6 +309,105 @@ function NumCell({
   );
 }
 
+/** Every comment written on this sheet's lines, in one place, so nobody has to scroll the wide table. */
+function NotesDialog({
+  open,
+  onOpenChange,
+  rows,
+  canEdit,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  rows: Array<{ lineId: string; name: string; comment: string }>;
+  canEdit: boolean;
+  onSave: (lineId: string, comment: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [onlyWithNotes, setOnlyWithNotes] = useState(true);
+  const needle = search.trim().toLowerCase();
+  const shown = rows
+    .filter((r) => (onlyWithNotes ? r.comment.trim() !== "" : true))
+    .filter(
+      (r) =>
+        !needle ||
+        r.name.toLowerCase().includes(needle) ||
+        r.comment.toLowerCase().includes(needle),
+    );
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Notes</DialogTitle>
+          <DialogDescription>
+            The comments written on this sheet&apos;s lines. Edit one and press Enter or click away
+            to save.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name or note"
+            className="h-8 w-60 text-[12px]"
+          />
+          <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
+            <Checkbox
+              checked={onlyWithNotes}
+              onCheckedChange={(v) => setOnlyWithNotes(v === true)}
+            />
+            Only staff with a note
+          </label>
+          <span className="text-[12px] text-muted-foreground">{shown.length} shown</span>
+        </div>
+        <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border">
+          {shown.length === 0 ? (
+            <p className="p-4 text-[13px] text-muted-foreground">No notes to show.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {shown.map((r) => (
+                <li key={r.lineId} className="flex items-center gap-3 px-3 py-2">
+                  <span className="w-48 shrink-0 truncate text-[13px] font-medium">{r.name}</span>
+                  <NoteEditor
+                    value={r.comment}
+                    disabled={!canEdit}
+                    onCommit={(v) => onSave(r.lineId, v)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NoteEditor({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: string;
+  disabled: boolean;
+  onCommit: (v: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  return (
+    <Input
+      aria-label="Note"
+      disabled={disabled}
+      value={text}
+      placeholder="—"
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => text.trim() !== value && onCommit(text.trim())}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      className="h-8 flex-1 px-2 text-[12px]"
+    />
+  );
+}
+
 function CommentCell({
   value,
   disabled,
@@ -498,6 +597,7 @@ function PayrollPageContent() {
 
   const [showCompanies, setShowCompanies] = useState(false);
   const [showNewMonth, setShowNewMonth] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [statusFor, setStatusFor] = useState<string | null>(null);
@@ -646,6 +746,18 @@ function PayrollPageContent() {
           <option key={c} value={c} />
         ))}
       </datalist>
+
+      <NotesDialog
+        open={showNotes}
+        onOpenChange={setShowNotes}
+        rows={rows.map((r) => ({
+          lineId: r.line.id,
+          name: r.staff.name,
+          comment: r.line.comment ?? "",
+        }))}
+        canEdit={canEdit}
+        onSave={(lineId, comment) => void saveLine(lineId, { comment })}
+      />
 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -907,6 +1019,16 @@ function PayrollPageContent() {
                     {g.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setShowNotes(true)}
+                  className="rounded-full border border-border px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent"
+                >
+                  Notes
+                  {rows.some((r) => r.line.comment)
+                    ? ` (${rows.filter((r) => r.line.comment).length})`
+                    : ""}
+                </button>
               </div>
 
               {rows.length === 0 ? (

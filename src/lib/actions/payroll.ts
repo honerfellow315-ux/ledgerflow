@@ -701,12 +701,25 @@ export const deletePayrollLine = createServerFn({ method: "POST" })
       .where(eq(payrollStaff.id, cur.staffId))
       .limit(1);
     await db.delete(payrollLines).where(eq(payrollLines.id, data.id));
+    // Starting a new month copies the company's ACTIVE members. Removing someone from a sheet must
+    // therefore also stop them being copied into the next month; their staff record, their older
+    // sheets and their place in the company list stay (they can be switched back to active there).
+    await db
+      .update(payrollCompanyStaff)
+      .set({ active: false })
+      .where(
+        and(
+          eq(payrollCompanyStaff.companyId, sheet.companyId),
+          eq(payrollCompanyStaff.staffId, cur.staffId),
+        ),
+      );
     await recordActivity({
       actor,
       action: "deleted",
       module: "payroll",
       entityId: cur.id,
       label: `${await sheetLabel(sheet)} — ${staff?.name ?? cur.staffId}`,
+      details: "Removed from the sheet and no longer copied into new months",
     });
     return { ok: true };
   });

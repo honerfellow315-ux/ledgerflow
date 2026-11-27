@@ -27,6 +27,8 @@ import {
   round2,
   type InvoiceViewWithCredit,
 } from "@/lib/ledger/calc";
+import { printInvoiceStatus } from "@/lib/ledger/invoiceStatusPrint";
+import { toast } from "sonner";
 import { downloadCsv } from "@/lib/ledger/csv";
 import { downloadStatementXlsx } from "@/lib/ledger/statementExcel";
 import { shouldUseSafariPrintLayout } from "@/lib/print-browser";
@@ -600,6 +602,27 @@ function StatementsPageContent() {
                 disabled={visibleRows.length === 0}
               >
                 <Download className="size-4" /> Export CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!client || scopedViewsWithCredit.length === 0}
+                onClick={() => {
+                  if (!client) return;
+                  const ok = printInvoiceStatus({
+                    settings,
+                    clientName: client.company || client.name,
+                    endClientLabel: endClientLabel || undefined,
+                    invoices: scopedViewsWithCredit,
+                    statementDate,
+                  });
+                  if (!ok)
+                    toast.error(
+                      "Your browser blocked the print window. Allow pop-ups and try again.",
+                    );
+                }}
+              >
+                <FileText className="size-4" /> Invoice statement
               </Button>
               <Button size="sm" onClick={() => window.print()}>
                 <Printer className="size-4" /> Print / PDF

@@ -128,6 +128,8 @@ export function InvoiceDialog({
   const { data, addInvoice, updateInvoice } = useLedger();
   const [form, setForm] = useState(blank);
   const [submitting, setSubmitting] = useState(false);
+  // Client picker: nothing is listed until the person types in the search box.
+  const [clientSearch, setClientSearch] = useState("");
   // Create → Review → Proceed workflow: the form is filled in "form" mode,
   // then a read-only summary is shown in "review" mode before the invoice is
   // actually created — this is also what prevents accidental duplicate
@@ -137,6 +139,7 @@ export function InvoiceDialog({
   useEffect(() => {
     if (open) {
       setSubmitting(false);
+      setClientSearch("");
       setStep("form");
     }
   }, [open]);
@@ -261,7 +264,7 @@ export function InvoiceDialog({
       });
       return;
     }
-    const startClientId = defaultClientId ?? data.clients[0]?.id ?? "";
+    const startClientId = defaultClientId ?? "";
     const startClient = data.clients.find((c) => c.id === startClientId);
     const suggestedNumber = nextNumberFor(startClientId);
     setForm({
@@ -531,6 +534,33 @@ export function InvoiceDialog({
   };
 
   const selectedClient = data.clients.find((c) => c.id === form.clientId);
+  const pickClient = (v: string) => {
+    setForm((f) => {
+      const clientRate = data.clients.find((c) => c.id === v)?.rate;
+      const shouldPrefillRate = f.billingType === "hours" && !f.rate && clientRate != null;
+      // A brand-new invoice still carrying the auto-suggested number
+      // follows the newly picked client's company; a number the
+      // person typed (or any edit/additional invoice) is left alone.
+      const numberWasAuto =
+        !invoice && !additionalFor && f.number === nextInvoiceNumberFor(data, f.clientId);
+      return {
+        ...f,
+        clientId: v,
+        number: numberWasAuto ? nextInvoiceNumberFor(data, v) : f.number,
+        rate: shouldPrefillRate ? String(clientRate) : f.rate,
+        // The picked Hours entry belonged to the old client — clear it.
+        hoursEntryId: "",
+      };
+    });
+    setClientSearch("");
+  };
+  const clientMatches = useMemo(() => {
+    const needle = clientSearch.trim().toLowerCase();
+    if (!needle) return [];
+    return data.clients
+      .filter((c) => `${c.company ?? ""} ${c.name ?? ""}`.toLowerCase().includes(needle))
+      .slice(0, 8);
+  }, [data.clients, clientSearch]);
   /** Billing company (Companies page) this client is saved under, if any. */
   const billingCompanyOf = (clientId: string): string => {
     const co = data.clients.find((c) => c.id === clientId)?.companyId;
@@ -717,43 +747,56 @@ export function InvoiceDialog({
                     : undefined
                 }
               >
-                <Select
-                  value={form.clientId}
-                  onValueChange={(v) => {
-                    setForm((f) => {
-                      const clientRate = data.clients.find((c) => c.id === v)?.rate;
-                      const shouldPrefillRate =
-                        f.billingType === "hours" && !f.rate && clientRate != null;
-                      // A brand-new invoice still carrying the auto-suggested number
-                      // follows the newly picked client's company; a number the
-                      // person typed (or any edit/additional invoice) is left alone.
-                      const numberWasAuto =
-                        !invoice &&
-                        !additionalFor &&
-                        f.number === nextInvoiceNumberFor(data, f.clientId);
-                      return {
-                        ...f,
-                        clientId: v,
-                        number: numberWasAuto ? nextInvoiceNumberFor(data, v) : f.number,
-                        rate: shouldPrefillRate ? String(clientRate) : f.rate,
-                        // The picked Hours entry belonged to the old client — clear it.
-                        hoursEntryId: "",
-                      };
-                    });
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select client" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {data.clients.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.company}
-                        {c.name ? ` — ${c.name}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {selectedClient ? (
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-[13px]">
+                    <span className="truncate">
+                      {selectedClient.company}
+                      {selectedClient.name ? ` — ${selectedClient.name}` : ""}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setForm((f) => ({ ...f, clientId: "", hoursEntryId: "" }));
+                        setClientSearch("");
+                      }}
+                    >
+                      Change
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <Input
+                      value={clientSearch}
+                      onChange={(e) => setClientSearch(e.target.value)}
+                      placeholder="Search client…"
+                      aria-label="Search client"
+                      autoComplete="off"
+                    />
+                    {clientSearch.trim() ? (
+                      <div className="max-h-48 overflow-y-auto rounded-md border border-border">
+                        {clientMatches.length === 0 ? (
+                          <p className="px-3 py-2 text-[12px] text-muted-foreground">
+                            No client found.
+                          </p>
+                        ) : (
+                          clientMatches.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => pickClient(c.id)}
+                              className="block w-full px-3 py-2 text-left text-[13px] hover:bg-accent"
+                            >
+                              {c.company}
+                              {c.name ? ` — ${c.name}` : ""}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </Field>
               <Field label="Invoice Date" htmlFor="inv-date">
                 <Input
