@@ -27,8 +27,8 @@ import {
   round2,
   type InvoiceViewWithCredit,
 } from "@/lib/ledger/calc";
-import { printInvoiceStatus } from "@/lib/ledger/invoiceStatusPrint";
-import { toast } from "sonner";
+import { InvoiceStatusDocument } from "@/components/app/InvoiceStatusDocument";
+import { flushSync } from "react-dom";
 import { downloadCsv } from "@/lib/ledger/csv";
 import { downloadStatementXlsx } from "@/lib/ledger/statementExcel";
 import { shouldUseSafariPrintLayout } from "@/lib/print-browser";
@@ -163,6 +163,14 @@ function StatementsPageContent() {
   // src/lib/print-browser.ts for why iOS needs this regardless of which
   // browser app is being used there.
   const [safariPrint, setSafariPrint] = useState(false);
+  // Which print document is on the page: the account statement (default) or the invoice-only one.
+  // Only one is rendered at a time; it goes back to the account statement once printing ends.
+  const [printMode, setPrintMode] = useState<"account" | "invoices">("account");
+  useEffect(() => {
+    const reset = () => setPrintMode("account");
+    window.addEventListener("afterprint", reset);
+    return () => window.removeEventListener("afterprint", reset);
+  }, []);
   useEffect(() => {
     setSafariPrint(shouldUseSafariPrintLayout());
   }, []);
@@ -608,23 +616,21 @@ function StatementsPageContent() {
                 size="sm"
                 disabled={!client || scopedViewsWithCredit.length === 0}
                 onClick={() => {
-                  if (!client) return;
-                  const ok = printInvoiceStatus({
-                    settings,
-                    clientName: client.company || client.name,
-                    endClientLabel: endClientLabel || undefined,
-                    invoices: scopedViewsWithCredit,
-                    statementDate,
-                  });
-                  if (!ok)
-                    toast.error(
-                      "Your browser blocked the print window. Allow pop-ups and try again.",
-                    );
+                  // Swap the printed document first (flushSync), then print it in place.
+                  flushSync(() => setPrintMode("invoices"));
+                  window.print();
                 }}
               >
                 <FileText className="size-4" /> Invoice statement
               </Button>
-              <Button size="sm" onClick={() => window.print()}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  // Always the account statement, even if the invoice statement was printed before.
+                  flushSync(() => setPrintMode("account"));
+                  window.print();
+                }}
+              >
                 <Printer className="size-4" /> Print / PDF
               </Button>
             </div>
@@ -910,7 +916,16 @@ function StatementsPageContent() {
         </Panel>
       </div>
 
-      {safariPrint ? (
+      {printMode === "invoices" && client ? (
+        <InvoiceStatusDocument
+          settings={settings}
+          client={client}
+          endClientLabel={endClientLabel || undefined}
+          invoices={scopedViewsWithCredit}
+          statementDate={statementDate}
+          safari={safariPrint}
+        />
+      ) : safariPrint ? (
         <StatementDocumentSafari
           settings={settings}
           client={client}
